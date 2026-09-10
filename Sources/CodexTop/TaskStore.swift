@@ -217,7 +217,9 @@ import CodexTopCore
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { [weak self] _, error in
+        // LaunchServices calls this on its own queue. Explicit Sendable prevents
+        // inheriting TaskStore's MainActor isolation before the hop below.
+        NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { @Sendable [weak self] _, error in
             Task { @MainActor in
                 guard let self else { return }
                 if error != nil { self.taskNavigationFailed(id: task.id) }
