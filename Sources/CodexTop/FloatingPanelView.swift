@@ -12,23 +12,24 @@ struct FloatingPanelView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var presentation: PanelPresentation
     @ObservedObject var orbState: OrbMorphState
+    @ObservedObject var monitorState: MonitorPanelState
     var pickTasks: () -> Void
     var settings: () -> Void
     var openTasks: () -> Void
     var closeTasks: () -> Void
-    var finishedChanged: (Bool) -> Void
+    var finishedChanged: () -> Void
     var dragStarted: () -> Void
     var dragMoved: () -> Void
     var dragEnded: () -> Void
     var body: some View {
         if store.placement == .orb {
-            OrbPanelView(store: store, state: orbState, openTasks: openTasks, closeTasks: closeTasks,
+            OrbPanelView(store: store, state: orbState, showFinished: $monitorState.expandedFinished, openTasks: openTasks, closeTasks: closeTasks,
                          pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
                          dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
         } else {
             AnimatedPanel(presentation: presentation, anchor: .center) {
                 ScaledPanel(scale: store.uiScale) {
-                    MonitorView(store: store, compact: true, pickTasks: pickTasks, settings: settings,
+                    MonitorView(store: store, compact: true, showFinished: $monitorState.floatingFinished, pickTasks: pickTasks, settings: settings,
                                 finishedChanged: finishedChanged, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
                 }
             }
@@ -41,11 +42,12 @@ struct FloatingPanelView: View {
 private struct OrbPanelView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var state: OrbMorphState
+    @Binding var showFinished: Bool
     var openTasks: () -> Void
     var closeTasks: () -> Void
     var pickTasks: () -> Void
     var settings: () -> Void
-    var finishedChanged: (Bool) -> Void
+    var finishedChanged: () -> Void
     var dragStarted: () -> Void
     var dragMoved: () -> Void
     var dragEnded: () -> Void
@@ -54,7 +56,7 @@ private struct OrbPanelView: View {
         ZStack {
             GlassFill()
             Color.black.opacity(state.expanded ? 0 : 1)
-            MonitorView(store: store, compact: false, drawsSurface: false, collapse: closeTasks,
+            MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                 .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
                 .scaleEffect(store.uiScale * (state.expanded || reduceMotion ? 1 : 0.72))

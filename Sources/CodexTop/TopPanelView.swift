@@ -34,10 +34,11 @@ private struct TopSurfaceOutline: Shape {
 struct TopPanelView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var state: TopPanelState
+    @ObservedObject var monitorState: MonitorPanelState
     var open: () -> Void
     var pickTasks: () -> Void
     var settings: () -> Void
-    var finishedChanged: (Bool) -> Void
+    var finishedChanged: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private func fade(_ value: CGFloat) -> Double {
@@ -55,7 +56,7 @@ struct TopPanelView: View {
                 if state.cameraHeight > 0 {
                     Color.black.frame(height: state.cameraHeight)
                 }
-                MonitorView(store: store, compact: false, drawsSurface: false,
+                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false,
                             pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                     .frame(width: state.expandedSize.width / store.uiScale, height: max(1, (state.expandedSize.height - state.cameraHeight) / store.uiScale))
                     .scaleEffect(store.uiScale, anchor: .top)

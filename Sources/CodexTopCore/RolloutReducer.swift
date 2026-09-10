@@ -16,6 +16,17 @@ public struct RolloutReducer: Sendable {
         // Old records may arrive after newer records during a compaction/replay.
         if let at, let last = activity.lastEventAt, at < last { return }
         let type = payload["type"] as? String ?? ""
+        if kind == "event_msg", ["task_complete", "turn_complete", "turn_aborted", "task_cancelled", "turn_cancelled", "task_failed", "turn_failed"].contains(type),
+           let turn = payload["turn_id"] as? String, let current = activity.turnID, turn != current { return }
+        let userItem = type == "item_completed" && ((payload["item"] as? [String: Any])?["type"] as? String)?.lowercased() == "usermessage"
+        let explicitContinuation = kind == "event_msg" && (["task_started", "turn_started", "user_message", "user_input", "approval_resolved"].contains(type) || userItem)
+        // A trailing explanation or tool result does not prove a failed turn resumed.
+        if activity.phase == .failed && !explicitContinuation {
+            if kind == "event_msg", type == "token_count", let limits = payload["rate_limits"] as? [String: Any], let at {
+                updateQuota(limits, at: at); activity.lastEventAt = at
+            }
+            return
+        }
         if kind == "event_msg" {
             switch type {
             case "task_started", "turn_started":
@@ -24,7 +35,6 @@ public struct RolloutReducer: Sendable {
                 waitingCallIDs.removeAll()
                 asynchronousQuestion = false
             case "task_complete", "turn_complete":
-                if let turn = payload["turn_id"] as? String, let current = activity.turnID, turn != current { return }
                 activity.phase = asynchronousQuestion ? .waiting : .completed
                 activity.detail = asynchronousQuestion ? "等待你的回答" : "本轮执行已结束"
                 waitingCallIDs.removeAll()
@@ -69,7 +79,7 @@ public struct RolloutReducer: Sendable {
         }
     }
     private mutating func active(_ at: Date?, detail: String) {
-        if activity.phase.isFinished { activity.startedAt = at; activity.turnID = nil }
+        if activity.phase.isFinished || activity.phase == .failed { activity.startedAt = at; activity.turnID = nil }
         activity.phase = .running; activity.detail = detail
     }
     private mutating func updateQuota(_ limits: [String: Any], at: Date) {

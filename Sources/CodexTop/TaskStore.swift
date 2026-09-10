@@ -103,8 +103,7 @@ import CodexTopCore
         MonitoringPolicy.applySelection(draft, original: original, preferences: &preferences); save(); onChange?()
     }
     func setAutoMonitor(_ enabled: Bool) {
-        preferences.autoMonitor = enabled
-        if enabled { preferences.autoEnabledAt = .now }
+        MonitoringPolicy.setAutoMonitor(enabled, preferences: &preferences, tasks: tasks, now: .now)
         save()
     }
     func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : .top) }

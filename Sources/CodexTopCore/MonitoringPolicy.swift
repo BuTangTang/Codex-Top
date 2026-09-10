@@ -13,6 +13,8 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var initialized = false
     public var autoMonitor = true
     public var autoEnabledAt = Date()
+    // Optional so older preferences can establish a conservative baseline on refresh.
+    public var autoBaselineIDs: Set<String>?
     public var codexHome: String?
     public var preferredDisplay: String?
     public var floating = false
@@ -52,16 +54,30 @@ public enum MonitoringPolicy {
         let graph = TaskGraph(tasks: tasks)
         if !preferences.initialized {
             preferences.autoEnabledAt = now
+            preferences.autoBaselineIDs = Set(tasks.map(\.id))
             for t in tasks where t.activity.phase.isActive {
                 let root = graph.rootIDs[t.id] ?? t.id
                 if !preferences.excludedIDs.contains(root) { preferences.selectedIDs.insert(root) }
             }
             preferences.initialized = true
         }
+        if preferences.autoBaselineIDs == nil {
+            // Keep legacy catch-up for later tasks, without guessing which same-second IDs were new.
+            preferences.autoBaselineIDs = Set(tasks.filter { $0.createdAt < preferences.autoEnabledAt }.map(\.id))
+        }
         guard preferences.autoMonitor else { return }
-        for t in tasks where t.createdAt >= preferences.autoEnabledAt && (t.activity.startedAt != nil || t.activity.phase.isActive || t.activity.phase.isFinished || t.activity.phase == .failed) {
+        // SQLite creation timestamps have whole-second precision; Date() does not.
+        let creationBoundary = Date(timeIntervalSince1970: floor(preferences.autoEnabledAt.timeIntervalSince1970))
+        for t in tasks where t.createdAt >= creationBoundary && preferences.autoBaselineIDs?.contains(t.id) != true && (t.activity.startedAt != nil || t.activity.phase.isActive || t.activity.phase.isFinished || t.activity.phase == .failed) {
             let root = graph.rootIDs[t.id] ?? t.id
             if !preferences.excludedIDs.contains(root) { preferences.selectedIDs.insert(root) }
+        }
+    }
+    public static func setAutoMonitor(_ enabled: Bool, preferences: inout MonitorPreferences, tasks: [CodexTask], now: Date) {
+        preferences.autoMonitor = enabled
+        if enabled {
+            preferences.autoEnabledAt = now
+            preferences.autoBaselineIDs = Set(tasks.map(\.id))
         }
     }
     public static func applySelection(_ draft: Set<String>, original: Set<String>, preferences: inout MonitorPreferences) {

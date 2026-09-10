@@ -33,6 +33,62 @@ final class CoreTests: XCTestCase {
         reducer.consume(event("turn_aborted", at: time.addingTimeInterval(22)))
         XCTAssertEqual(reducer.activity.phase, .stopped)
     }
+    func testEveryTerminalEventIgnoresAnOlderTurnAndAcceptsTheCurrentTurn() {
+        let terminals: [(String, TaskPhase)] = [("task_complete", .completed), ("turn_complete", .completed),
+            ("turn_aborted", .stopped), ("task_cancelled", .stopped), ("turn_cancelled", .stopped),
+            ("task_failed", .failed), ("turn_failed", .failed)]
+        for (type, expected) in terminals {
+            var reducer = RolloutReducer()
+            reducer.consume(event("task_started", extra: ["turn_id": "first"]))
+            reducer.consume(event("task_complete", at: time.addingTimeInterval(1), extra: ["turn_id": "first"]))
+            reducer.consume(event("task_started", at: time.addingTimeInterval(2), extra: ["turn_id": "second"]))
+            reducer.consume(event(type, at: time.addingTimeInterval(3), extra: ["turn_id": "first"]))
+            XCTAssertEqual(reducer.activity.phase, .running, type)
+            XCTAssertEqual(reducer.activity.turnID, "second", type)
+            XCTAssertEqual(reducer.activity.lastEventAt, time.addingTimeInterval(2), type)
+            reducer.consume(event(type, at: time.addingTimeInterval(4), extra: ["turn_id": "second"]))
+            XCTAssertEqual(reducer.activity.phase, expected, type)
+        }
+    }
+    func testFailedTurnSurvivesTrailingMessagesToolsAndCompletionWhileQuotaStillUpdates() {
+        let trailing: [(String, String, [String: Any])] = [
+            ("event_msg", "agent_message", [:]), ("event_msg", "agent_reasoning", [:]),
+            ("event_msg", "item_completed", ["item": ["type": "commandExecution"]]),
+            ("event_msg", "request_user_input", [:]), ("event_msg", "task_complete", ["turn_id": "failed"]),
+            ("response_item", "function_call", ["name": "exec_command"]),
+            ("response_item", "custom_tool_call", ["name": "request_user_input", "call_id": "question"]),
+            ("response_item", "function_call_output", ["call_id": "question"])
+        ]
+        for failure in ["task_failed", "turn_failed"] {
+            var reducer = RolloutReducer()
+            reducer.consume(event("task_started", extra: ["turn_id": "failed"]))
+            reducer.consume(event(failure, at: time.addingTimeInterval(1), extra: ["turn_id": "failed"]))
+            for (index, item) in trailing.enumerated() {
+                reducer.consume(event(item.1, at: time.addingTimeInterval(Double(index + 2)), extra: item.2, kind: item.0))
+                XCTAssertEqual(reducer.activity.phase, .failed, "\(failure) followed by \(item.1)")
+                XCTAssertEqual(reducer.activity.turnID, "failed")
+            }
+            reducer.consume(event("token_count", at: time.addingTimeInterval(20), extra: ["rate_limits": ["limit_id": "codex", "primary": ["used_percent": 19.0, "window_minutes": 300]]]))
+            XCTAssertEqual(reducer.activity.phase, .failed)
+            XCTAssertEqual(reducer.quota?.fiveHour?.remainingPercent, 81)
+        }
+    }
+    func testFailedTurnResumesOnlyOnExplicitStartOrUserContinuation() {
+        let continuations: [(String, [String: Any], String?)] = [
+            ("task_started", ["turn_id": "resumed"], "resumed"), ("turn_started", ["turn_id": "resumed"], "resumed"),
+            ("user_message", [:], nil), ("user_input", [:], nil), ("approval_resolved", [:], nil),
+            ("item_completed", ["item": ["type": "userMessage"]], nil)
+        ]
+        for (type, extra, expectedTurn) in continuations {
+            var reducer = RolloutReducer()
+            reducer.consume(event("task_started", extra: ["turn_id": "failed"]))
+            reducer.consume(event("task_failed", at: time.addingTimeInterval(1)))
+            reducer.consume(event(type, at: time.addingTimeInterval(2), extra: extra))
+            XCTAssertEqual(reducer.activity.phase, .running, type)
+            XCTAssertEqual(reducer.activity.startedAt, time.addingTimeInterval(2), type)
+            XCTAssertEqual(reducer.activity.turnID, expectedTurn, type)
+        }
+    }
     func testWaitingOnlyResolvesOnMatchingAnswer() {
         var reducer = RolloutReducer()
         reducer.consume(event("function_call", extra: ["name": "request_user_input", "call_id": "question"], kind: "response_item"))
@@ -104,6 +160,57 @@ final class CoreTests: XCTestCase {
         let fresh = task("fresh", phase: .completed, createdAt: time.addingTimeInterval(1))
         MonitoringPolicy.reconcile(&preferences, tasks: [old, active, fresh], now: time.addingTimeInterval(2))
         XCTAssertEqual(preferences.selectedIDs, ["active", "fresh"])
+    }
+    func testSameSecondAutoEnableAddsNewIDsButNotKnownTasksAndPreservesExclusions() {
+        var p = MonitorPreferences(); p.initialized = true; p.autoMonitor = false
+        let old = task("known", phase: .completed, createdAt: time)
+        MonitoringPolicy.setAutoMonitor(true, preferences: &p, tasks: [old], now: time.addingTimeInterval(0.25))
+        var fresh = task("fresh", createdAt: time)
+        MonitoringPolicy.reconcile(&p, tasks: [old, fresh], now: time.addingTimeInterval(0.4))
+        XCTAssertTrue(p.selectedIDs.isEmpty, "An idle task has not started yet")
+        fresh.activity = TaskActivity(phase: .running, startedAt: time.addingTimeInterval(0.5))
+        MonitoringPolicy.reconcile(&p, tasks: [old, fresh], now: time.addingTimeInterval(1))
+        XCTAssertEqual(p.selectedIDs, ["fresh"])
+        MonitoringPolicy.applySelection([], original: ["fresh"], preferences: &p)
+        MonitoringPolicy.reconcile(&p, tasks: [old, fresh], now: time.addingTimeInterval(2))
+        XCTAssertTrue(p.selectedIDs.isEmpty)
+        XCTAssertTrue(p.excludedIDs.contains("fresh"))
+
+        MonitoringPolicy.setAutoMonitor(false, preferences: &p, tasks: [old, fresh], now: time.addingTimeInterval(2))
+        let whileOff = task("while-off", phase: .running, createdAt: time.addingTimeInterval(2))
+        MonitoringPolicy.reconcile(&p, tasks: [old, fresh, whileOff], now: time.addingTimeInterval(2.1))
+        XCTAssertTrue(p.selectedIDs.isEmpty)
+        MonitoringPolicy.setAutoMonitor(true, preferences: &p, tasks: [old, fresh, whileOff], now: time.addingTimeInterval(2.25))
+        let afterEnable = task("after-enable", phase: .waiting, createdAt: time.addingTimeInterval(2))
+        MonitoringPolicy.reconcile(&p, tasks: [old, fresh, whileOff, afterEnable], now: time.addingTimeInterval(3))
+        XCTAssertEqual(p.selectedIDs, ["after-enable"])
+    }
+    func testFirstScanBoundaryAndRestartKeepHistoricalTasksOut() throws {
+        var p = MonitorPreferences()
+        let old = task("same-second-history", phase: .completed, createdAt: time)
+        let active = task("active", phase: .running)
+        MonitoringPolicy.reconcile(&p, tasks: [old, active], now: time.addingTimeInterval(0.25))
+        XCTAssertEqual(p.selectedIDs, ["active"])
+        p = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
+        let fresh = task("fresh", phase: .completed, createdAt: time)
+        MonitoringPolicy.reconcile(&p, tasks: [old, active, fresh], now: time.addingTimeInterval(2))
+        XCTAssertEqual(p.selectedIDs, ["active", "fresh"])
+        XCTAssertEqual(p.autoBaselineIDs, ["same-second-history", "active"])
+    }
+    func testLegacyPreferencesEstablishBoundaryBaselineWithoutLosingLaterCatchUp() throws {
+        var p = MonitorPreferences(); p.initialized = true; p.autoEnabledAt = time.addingTimeInterval(0.25)
+        p.selectedIDs = ["kept"]; p.excludedIDs = ["excluded"]
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(p)) as? [String: Any])
+        legacy.removeValue(forKey: "autoBaselineIDs")
+        p = try JSONDecoder().decode(MonitorPreferences.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(p.autoBaselineIDs)
+        let boundary = task("ambiguous-history", phase: .completed, createdAt: time)
+        let later = task("later", phase: .completed, createdAt: time.addingTimeInterval(1))
+        let excluded = task("excluded", phase: .running, createdAt: time.addingTimeInterval(1))
+        MonitoringPolicy.reconcile(&p, tasks: [boundary, later, excluded], now: time.addingTimeInterval(2))
+        XCTAssertEqual(p.selectedIDs, ["kept", "later"])
+        XCTAssertEqual(p.autoBaselineIDs, ["ambiguous-history"])
+        XCTAssertEqual(p.excludedIDs, ["excluded"])
     }
     func testManualExclusionWinsAndSelectionPreservesConcurrentAddition() {
         var p = MonitorPreferences(); p.initialized = true; p.autoEnabledAt = time

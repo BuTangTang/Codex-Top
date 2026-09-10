@@ -1,19 +1,28 @@
 import SwiftUI
 import CodexTopCore
 
+@MainActor final class MonitorPanelState: ObservableObject {
+    @Published var expandedFinished = false
+    @Published var floatingFinished = false
+}
+
 struct MonitorView: View {
     @ObservedObject var store: TaskStore
     let compact: Bool
+    @Binding var showFinished: Bool
     var drawsSurface = true
     var collapse: (() -> Void)? = nil
     var pickTasks: () -> Void
     var settings: () -> Void
-    var finishedChanged: (Bool) -> Void = { _ in }
+    var finishedChanged: () -> Void = {}
     var dragStarted: () -> Void = {}
     var dragMoved: () -> Void = {}
     var dragEnded: () -> Void = {}
-    @State private var showFinished = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var visibleTaskIDs: [String] {
+        (store.active + (showFinished ? store.finished : [])).map(\.id)
+    }
 
     var body: some View {
         Group {
@@ -43,23 +52,20 @@ struct MonitorView: View {
                         VStack(spacing: 0) {
                             ScrollView {
                                 LazyVStack(spacing: 0) {
-                                    ForEach(store.active) { task in
-                                        VStack(spacing: 0) { taskRow(task); separator }
+                                    ForEach(visibleTaskIDs, id: \.self) { taskID in
+                                        VStack(spacing: 0) {
+                                            MonitorTaskRow(store: store, taskID: taskID, compact: compact)
+                                            separator
+                                        }.id(taskID)
                                             .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                                     }
-                                    if showFinished {
-                                        ForEach(store.finished) { task in
-                                            VStack(spacing: 0) { taskRow(task); separator }.id(task.id)
-                                                .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-                                        }
-                                    }
                                 }
-                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: store.active.map(\.id))
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: visibleTaskIDs)
                             }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
                             if !store.finished.isEmpty {
                                 Button {
                                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
-                                    finishedChanged(showFinished)
+                                    finishedChanged()
                                     if showFinished, let first = store.finished.first {
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                                             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { proxy.scrollTo(first.id, anchor: .top) }
@@ -140,37 +146,6 @@ struct MonitorView: View {
 
     private var separator: some View { Rectangle().fill(Palette.hairline).frame(height: 0.5).padding(.horizontal, 16) }
 
-    private func taskRow(_ task: CodexTask) -> some View {
-        let activity = store.graph.activity(for: task)
-        let childCount = store.graph.children[task.id]?.count ?? 0
-        return Button { store.openTask(task) } label: {
-            HStack(spacing: compact ? 11 : 14) {
-                ActivityIndicator(phase: activity.phase, small: compact)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(task.title).font(PanelFonts.task).foregroundStyle(Palette.primary).lineLimit(1)
-                    if !compact {
-                        HStack(spacing: 5) {
-                            Text(activity.detail).lineLimit(1)
-                            if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                        }.font(PanelFonts.detail).foregroundStyle(Palette.secondary)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: compact ? 8 : 10) {
-                    if activity.phase == .running {
-                        if compact { Text("运行中").foregroundStyle(activity.phase.tint) }
-                        if let started = activity.startedAt {
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
-                                let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
-                                Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
-                            }.foregroundStyle(Palette.secondary)
-                        }
-                    } else { Text(activity.phase.label).foregroundStyle(activity.phase.tint) }
-                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary)
-                }.font(.system(size: 12)).fixedSize()
-            }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
-        }.buttonStyle(QuietRowStyle()).help("\(task.title)\n\(activity.detail)\n点击回到 Codex")
-    }
-
     private var footer: some View {
         VStack(spacing: 0) {
             Rectangle().fill(Palette.hairline).frame(height: 0.5)
@@ -194,6 +169,47 @@ struct MonitorView: View {
                 Button(action: settings) { Image(systemName: "gearshape.fill").font(.system(size: 15)).frame(width: 28, height: 30) }
                     .buttonStyle(QuietButtonStyle()).help("监控设置").accessibilityLabel("监控设置")
             }.foregroundStyle(Palette.secondary).font(.system(size: 12)).padding(.horizontal, 18).frame(height: PanelMetrics.footer)
+        }
+    }
+}
+
+/// Keep one row identity across active/finished transitions, but observe its current data directly.
+/// A lazy row must not retain a task snapshot captured by an older group-content closure.
+private struct MonitorTaskRow: View {
+    @ObservedObject var store: TaskStore
+    let taskID: String
+    let compact: Bool
+
+    var body: some View {
+        if let task = store.graph.roots.first(where: { $0.id == taskID }) {
+            let activity = store.graph.activity(for: task)
+            let childCount = store.graph.children[taskID]?.count ?? 0
+            Button { store.openTask(task) } label: {
+                HStack(spacing: compact ? 11 : 14) {
+                    ActivityIndicator(phase: activity.phase, small: compact)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.title).font(PanelFonts.task).foregroundStyle(Palette.primary).lineLimit(1)
+                        if !compact {
+                            HStack(spacing: 5) {
+                                Text(activity.detail).lineLimit(1)
+                                if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
+                            }.font(PanelFonts.detail).foregroundStyle(Palette.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: compact ? 8 : 10) {
+                        if activity.phase == .running {
+                            if compact { Text("运行中").foregroundStyle(activity.phase.tint) }
+                            if let started = activity.startedAt {
+                                TimelineView(.periodic(from: .now, by: 1)) { context in
+                                    let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
+                                    Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
+                                }.foregroundStyle(Palette.secondary)
+                            }
+                        } else { Text(activity.phase.label).foregroundStyle(activity.phase.tint) }
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary)
+                    }.font(.system(size: 12)).fixedSize()
+                }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
+            }.buttonStyle(QuietRowStyle()).help("\(task.title)\n\(activity.detail)\n点击回到 Codex")
         }
     }
 }

@@ -80,8 +80,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var orbMotion: Task<Void, Never>?
     private var orbTarget = CGRect.zero
     private var previousPlacement: PanelPlacement = .top
-    private var expandedFinished = false
-    private var floatingFinished = false
+    private let monitorState = MonitorPanelState()
     private var dragging = false
     private var dragStart = CGPoint.zero
     private var dragPointerStart = CGPoint.zero
@@ -110,17 +109,17 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         top.title = "Codex Top 监控任务"; floating.title = "Codex Top 悬浮任务"
         floating.isMovableByWindowBackground = false; floating.delegate = self
         let topView = HoverHostingView(rootView: TopPanelView(
-            store: store, state: topState, open: { [weak self] in self?.toggleExpanded() },
-            pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, finishedChanged: { [weak self] value in
-                self?.expandedFinished = value; self?.updateContentSize(animated: true)
+            store: store, state: topState, monitorState: monitorState, open: { [weak self] in self?.toggleExpanded() },
+            pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, finishedChanged: { [weak self] in
+                self?.updateContentSize(animated: true)
             }))
         topView.sizingOptions = []
         topView.hoverChanged = { [weak self] value in self?.hoverTop(value) }
         top.contentView = topView
         let floatingView = HoverHostingView(rootView: FloatingPanelView(
-            store: store, presentation: floatingPresentation, orbState: orbState,
-            pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, openTasks: { [weak self] in self?.toggleExpanded() }, closeTasks: { [weak self] in self?.dismissExpanded() }, finishedChanged: { [weak self] value in
-                if self?.store.placement == .orb { self?.expandedFinished = value } else { self?.floatingFinished = value }; self?.updateContentSize(animated: true)
+            store: store, presentation: floatingPresentation, orbState: orbState, monitorState: monitorState,
+            pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, openTasks: { [weak self] in self?.toggleExpanded() }, closeTasks: { [weak self] in self?.dismissExpanded() }, finishedChanged: { [weak self] in
+                self?.updateContentSize(animated: true)
             }, dragStarted: { [weak self] in self?.beginDrag() }, dragMoved: { [weak self] in self?.moveDrag() }, dragEnded: { [weak self] in self?.endDrag() }))
         floatingView.sizingOptions = []
         floatingView.hoverChanged = { [weak self] value in self?.hoverFloating(value) }
@@ -137,15 +136,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         applyMode()
     }
     func layout(recoverFloating: Bool) {
+        cancelHoverTransitions()
         displays = DisplayChoice.available()
         guard let chosen else { return }
         positioning = true; defer { positioning = false }
-        topHovered = false
+        topHovered = false; orbHovered = false
         if store.placement == .orb && recoverFloating {
-            orbMotion?.cancel(); orbMotion = nil; orbCanvas = nil; orbState.expanded = false
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
-            orbAnchor = WindowGeometry.floating(size: CGSize(width: 44, height: 44), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY)
-            floating.setFrame(orbAnchor, display: true)
+            let anchor = WindowGeometry.floating(size: CGSize(width: 44, height: 44), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY)
+            restoreCollapsedOrb(to: anchor)
         }
         updateContentSize()
         if store.placement == .top || store.placement == .floating { top.orderFrontRegardless() }
@@ -162,7 +161,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
     }
     private func panelHeight(compact: Bool) -> CGFloat {
-        let includesFinished = compact ? floatingFinished : expandedFinished
+        let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
         let rows = min(store.active.count + (includesFinished ? store.finished.count : 0), 4)
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
         let body = store.selected.isEmpty ? 195 : CGFloat(rows) * (compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow) + (store.finished.isEmpty ? 0 : PanelMetrics.disclosure)
@@ -227,6 +226,21 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let expanded = WindowGeometry.expandedOrb(from: orbAnchor, size: size, visible: display.screen.visibleFrame)
         if orbState.expandedSize != expanded.size { orbState.expandedSize = expanded.size }
         animateOrb(to: orbState.expanded ? expanded : orbAnchor, animated: animated)
+    }
+    private func restoreCollapsedOrb(to anchor: CGRect) {
+        orbMotion?.cancel(); orbMotion = nil
+        orbCanvas = nil; orbAnchor = anchor; orbTarget = anchor
+        let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
+        // A cancelled morph can still have coordinates relative to its larger canvas.
+        // Restore both the drawing surface and the native window before layout can early-return.
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            orbState.expanded = false; orbState.hovered = false
+            orbState.surfaceFrame = CGRect(origin: .zero, size: anchor.size)
+        }
+        floating.hasShadow = false
+        floating.resignKey()
+        floating.setFrame(anchor, display: true)
     }
     private func animateOrb(to target: CGRect, animated: Bool) {
         guard target != orbTarget || floating.frame != target && orbMotion == nil else { return }
@@ -297,19 +311,18 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
     }
     func applyMode() {
-        hideTask?.cancel(); revealTask?.cancel()
+        cancelHoverTransitions()
         let wasPositioning = positioning; positioning = true
         orbMotion?.cancel(); orbMotion = nil; orbCanvas = nil
-        if previousPlacement == .orb && orbAnchor.width > 0 { floating.setFrame(orbAnchor, display: true) }
+        if previousPlacement == .orb && orbAnchor.width > 0 { restoreCollapsedOrb(to: orbAnchor) }
         orbState.expanded = false
         if store.placement == .orb {
             let frame = floating.frame
             let display = displays.first { $0.screen.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) } ?? chosen
             if let display {
-                orbAnchor = WindowGeometry.clamp(CGRect(x: frame.midX - 22, y: frame.midY - 22, width: 44, height: 44), to: display.screen.visibleFrame)
-                floating.setFrame(orbAnchor, display: true)
+                let anchor = WindowGeometry.clamp(CGRect(x: frame.midX - 22, y: frame.midY - 22, width: 44, height: 44), to: display.screen.visibleFrame)
+                restoreCollapsedOrb(to: anchor)
             }
-            orbState.surfaceFrame = CGRect(origin: .zero, size: CGSize(width: 44, height: 44))
         }
         floating.hasShadow = store.placement != .orb
         previousPlacement = store.placement
@@ -362,8 +375,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         top.orderFrontRegardless(); updateContentSize(animated: true)
     }
     private func dismissExpanded(suppressHover: Bool = true) {
+        revealTask?.cancel(); revealTask = nil
         if store.placement == .orb {
-            if orbState.expanded && suppressHover { orbHoverSuppressed = true; revealTask?.cancel() }
+            if orbState.expanded && suppressHover { orbHoverSuppressed = true }
             floating.resignKey()
             setOrbExpanded(false)
             return
@@ -375,11 +389,13 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private func hoverTop(_ value: Bool) {
         topHovered = value
         revealTask?.cancel()
-        if value && store.placement != .floating && picker?.isVisible != true && settings?.isVisible != true && !dragging {
+        if value && [.top, .menuBar].contains(store.placement) && canRevealOnHover {
             hideTask?.cancel()
+            let placement = store.placement
             revealTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(80))
-                guard !Task.isCancelled, let self, self.topHovered else { return }
+                guard !Task.isCancelled, let self, self.topHovered,
+                      self.store.placement == placement, self.canRevealOnHover else { return }
                 self.revealExpanded()
             }
         } else { scheduleHide() }
@@ -403,14 +419,22 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         revealTask?.cancel()
         if !value { orbHoverSuppressed = false }
         if value && orbHoverSuppressed { return }
-        if value && picker?.isVisible != true && settings?.isVisible != true {
+        if value && canRevealOnHover {
             hideTask?.cancel()
             revealTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(180))
-                guard !Task.isCancelled, let self, self.orbHovered else { return }
+                guard !Task.isCancelled, let self, self.orbHovered,
+                      self.store.placement == .orb, self.canRevealOnHover else { return }
                 self.revealExpanded()
             }
         } else { scheduleHide() }
+    }
+    private var canRevealOnHover: Bool {
+        !dragging && picker?.isVisible != true && settings?.isVisible != true
+    }
+    private func cancelHoverTransitions() {
+        hideTask?.cancel(); hideTask = nil
+        revealTask?.cancel(); revealTask = nil
     }
     private func beginDrag() {
         if store.placement == .orb && (orbState.expanded || orbMotion != nil) { return }
@@ -474,15 +498,17 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         store.saveFloatingPosition(display: screen.id, x: Double((frame.minX - visible.minX) / max(1, visible.width - frame.width)), y: Double((frame.minY - visible.minY) / max(1, visible.height - frame.height)))
     }
     func showPicker() {
+        cancelHoverTransitions()
         if let picker, picker.isVisible { picker.makeKeyAndOrderFront(nil); return }
-        hideTask?.cancel(); dismissExpanded()
+        dismissExpanded()
         let window = makeWindow(title: "选择监控任务", size: CGSize(width: 450 * store.uiScale, height: 635 * store.uiScale), popover: true)
         window.contentView = NSHostingView(rootView: TaskPickerView(store: store, close: { [weak self] in self?.picker?.close(); self?.picker = nil }))
         picker = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
     func showSettings() {
+        cancelHoverTransitions()
         if let settings, settings.isVisible { settings.makeKeyAndOrderFront(nil); return }
-        hideTask?.cancel(); dismissExpanded()
+        dismissExpanded()
         let window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610))
         window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }))
         settings = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
