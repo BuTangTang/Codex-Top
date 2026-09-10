@@ -140,6 +140,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         store.onModeChange = { [weak self] in self?.applyMode() }
         store.onAppearanceChange = { [weak self] in self?.applyAppearance() }
         store.onAppearanceWillChange = { [weak self] in self?.prepareThemeReveal() ?? false }
+        store.onExternalNavigation = { [weak self] in
+            guard let self, self.store.placement != .floating else { return }
+            self.dismissExpanded()
+        }
         observer = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.layout(recoverFloating: true) }
         }
@@ -197,8 +201,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let expandedFrame: CGRect
         if isPopover {
             let desired = CGRect(x: anchor.midX - size.width / 2, y: anchor.minY - size.height - 8, width: size.width, height: size.height)
-            expandedFrame = WindowGeometry.clamp(desired, to: display.screen.visibleFrame)
-            compactFrame = CGRect(x: expandedFrame.midX - 22, y: expandedFrame.maxY - 22, width: 44, height: 22)
+            expandedFrame = WindowGeometry.pixelAligned(WindowGeometry.clamp(desired, to: display.screen.visibleFrame), scale: display.screen.backingScaleFactor)
+            // A status item owns its collapsed representation. Its popover only has
+            // a full-size window, which is hidden after the closing transition.
+            compactFrame = expandedFrame
         } else {
             compactFrame = WindowGeometry.compact(screen: chosen.screen.frame, visible: chosen.screen.visibleFrame, notchWidth: cameraWidth, notchHeight: cameraHeight)
             expandedFrame = WindowGeometry.expanded(from: compactFrame, size: size, visible: chosen.screen.visibleFrame)
@@ -355,6 +361,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     /// SwiftUI animates the surface at the display refresh rate. AppKit only prepares the canvas
     /// and trims it at completion, avoiding a resize and layout of the whole window every 16ms.
     private func animateTop(to target: CGRect, progress targetProgress: CGFloat, animated: Bool) {
+        if store.placement == .menuBar {
+            animateStatusPopover(to: target, progress: targetProgress, animated: animated)
+            return
+        }
         if topTarget == target && topState.progress == targetProgress && topState.surfaceSize == target.size { return }
         themeReveal.cancel()
         topMotion?.cancel(); topMotion = nil; topTarget = target
@@ -378,9 +388,36 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             if !self.topExpanded && [.orb, .menuBar].contains(self.store.placement) { self.top.orderOut(nil) }
         }
     }
+    private func animateStatusPopover(to target: CGRect, progress targetProgress: CGFloat, animated: Bool) {
+        let unchanged = topTarget == target && topState.progress == targetProgress && topState.surfaceSize == target.size
+        if unchanged && (animated || topMotion == nil) {
+            if targetProgress == 0 && topMotion == nil { top.orderOut(nil) }
+            return
+        }
+        themeReveal.cancel()
+        topMotion?.cancel(); topMotion = nil
+        topTarget = target
+        topState.surfaceSize = target.size
+        if top.frame != target { top.setFrame(target, display: true) }
+        guard animated, top.isVisible, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { topState.progress = targetProgress }
+            if targetProgress == 0 { top.orderOut(nil) }
+            return
+        }
+        let duration = targetProgress > 0 ? 0.20 : 0.16
+        withAnimation(.easeInOut(duration: duration)) { topState.progress = targetProgress }
+        topMotion = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(duration + 0.02)) } catch { return }
+            guard !Task.isCancelled, let self, self.store.placement == .menuBar else { return }
+            self.topMotion = nil
+            if !self.topExpanded { self.top.resignKey(); self.top.orderOut(nil) }
+        }
+    }
     func applyMode() {
         themeReveal.cancel()
         cancelHoverTransitions()
+        topMotion?.cancel(); topMotion = nil
         stopOrbClickMonitoring()
         let wasPositioning = positioning; positioning = true
         orbMotion?.cancel(); orbMotion = nil; orbCanvas = nil
@@ -466,10 +503,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         updateContentSize(animated: true)
     }
     private func hoverTop(_ value: Bool) {
-        guard [.top, .menuBar].contains(store.placement) else { return }
+        guard store.placement == .top else { return }
         topHovered = value
         revealTask?.cancel()
-        if value && [.top, .menuBar].contains(store.placement) && canRevealOnHover {
+        if value && canRevealOnHover {
             hideTask?.cancel()
             let placement = store.placement
             revealTask = Task { [weak self] in
@@ -482,15 +519,17 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func scheduleHide() {
         hideTask?.cancel()
-        guard [.top, .menuBar].contains(store.placement) else { return }
+        guard store.placement == .top else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, let self, !self.topHovered,
-                  [.top, .menuBar].contains(self.store.placement) else { return }
+                  self.store.placement == .top else { return }
             self.dismissExpanded()
         }
     }
     func toggleStatusPanel(anchor: CGRect?) {
+        guard store.placement == .menuBar else { return }
+        cancelHoverTransitions()
         statusAnchor = anchor
         toggleExpanded()
     }

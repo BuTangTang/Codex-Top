@@ -181,8 +181,9 @@ struct SettingsView: View {
                 Toggle("自动监控新任务", isOn: Binding(get: { store.preferences.autoMonitor }, set: { store.setAutoMonitor($0) }))
                 Text("新建并开始执行后加入列表。手动取消关注的任务不会再次自动加入。").font(.caption).foregroundStyle(.secondary)
                 Toggle("暂停刷新", isOn: $store.paused)
-                Button("立即刷新") { Task { await store.refresh() } }.disabled(store.refreshing)
+                Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
+            Section("账户额度") { UsageSettingsContent(store: store) }
             Section("显示位置") {
                 Picker("显示方式", selection: Binding(get: { store.placement }, set: { store.setPlacement($0) })) {
                     Text("顶部").tag(PanelPlacement.top)

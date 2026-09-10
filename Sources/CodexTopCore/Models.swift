@@ -70,11 +70,19 @@ public struct QuotaWindow: Equatable, Sendable {
     public let minutes: Int
     public let usedPercent: Double
     public let resetsAt: Date?
+    public init(minutes: Int, usedPercent: Double, resetsAt: Date? = nil) {
+        self.minutes = minutes; self.usedPercent = usedPercent; self.resetsAt = resetsAt
+    }
     public var remainingPercent: Int { Int(max(0, min(100, 100 - usedPercent)).rounded()) }
 }
+public enum QuotaOrigin: String, Sendable { case log, account }
 public struct QuotaSnapshot: Equatable, Sendable {
     public let observedAt: Date
     public let windows: [QuotaWindow]
+    public let origin: QuotaOrigin
+    public init(observedAt: Date, windows: [QuotaWindow], origin: QuotaOrigin = .log) {
+        self.observedAt = observedAt; self.windows = windows; self.origin = origin
+    }
     public var fiveHour: QuotaWindow? { windows.first { $0.minutes == 300 } }
     public var weekly: QuotaWindow? { windows.first { $0.minutes == 10080 } }
 }
@@ -101,4 +109,3 @@ public enum CodexSourceError: LocalizedError {
         }
     }
 }
-

@@ -23,6 +23,7 @@ import CodexTopCore
         menu.addItem(.separator())
         add("设置…", #selector(settings), to: menu, key: ",")
         add("立即刷新", #selector(refresh), to: menu)
+        add("Codex 用量页面…", #selector(usage), to: menu)
         menu.addItem(.separator())
         add("退出 Codex Top", #selector(quit), to: menu, key: "q")
         statusMenu = menu
@@ -72,6 +73,7 @@ import CodexTopCore
         button.toolTip = "Codex Top · \(store.runningCount) 个运行中 · \(store.attentionCount) 个待处理"
         button.setAccessibilityLabel(button.toolTip)
     }
+    func applicationWillTerminate(_ notification: Notification) { store?.stop() }
     private func add(_ title: String, _ action: Selector, to menu: NSMenu, key: String = "") {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
     }
@@ -90,7 +92,12 @@ import CodexTopCore
         }
     }
     @objc private func showTasks() {
-        if store.placement == .menuBar { windows.toggleStatusPanel(anchor: statusItem.button?.window?.frame) }
+        if store.placement == .menuBar {
+            let anchor = statusItem.button.flatMap { button in
+                button.window.map { $0.convertToScreen(button.convert(button.bounds, to: nil)) }
+            }
+            windows.toggleStatusPanel(anchor: anchor)
+        }
         else { windows.toggleExpanded() }
     }
     @objc private func pickTasks() { windows.showPicker() }
@@ -99,7 +106,8 @@ import CodexTopCore
     @objc private func menuBarOnly() { store.setPlacement(.menuBar) }
     @objc private func recover() { windows.recoverWindows() }
     @objc private func settings() { windows.showSettings() }
-    @objc private func refresh() { Task { await store.refresh() } }
+    @objc private func refresh() { store.refreshQuota(force: true); Task { await store.refresh() } }
+    @objc private func usage() { store.openUsagePage() }
     @objc private func quit() { store.stop(); NSApp.terminate(nil) }
 }
 

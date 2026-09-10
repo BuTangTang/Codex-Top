@@ -8,6 +8,8 @@ import CodexTopCore
     @Published private(set) var tasks: [CodexTask] = []
     @Published private(set) var graph = TaskGraph(tasks: [])
     @Published private(set) var quota: QuotaSnapshot?
+    @Published private(set) var quotaRefreshing = false
+    @Published private(set) var quotaWarning: String?
     @Published private(set) var sourceWarning: String?
     @Published var notice: String? { didSet { if notice != oldValue { onChange?() } } }
     @Published var dockingHint = false
@@ -23,7 +25,14 @@ import CodexTopCore
     var onModeChange: (() -> Void)?
     var onAppearanceChange: (() -> Void)?
     var onAppearanceWillChange: (() -> Bool)?
+    var onExternalNavigation: (() -> Void)?
     private var source: LocalCodexSource
+    private var usageClient: AccountUsageClient
+    private var accountQuota: QuotaSnapshot?
+    private var logQuota: QuotaSnapshot?
+    private var usageLoop: Task<Void, Never>?
+    private var usageRequest: Task<Void, Never>?
+    private var usageRequestID = UUID()
     private let file: PreferencesFile
     private var persistenceAvailable = true
     private var refreshLoop: Task<Void, Never>?
@@ -39,6 +48,7 @@ import CodexTopCore
         preferences = loaded
         let root = loaded.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot
         source = LocalCodexSource(root: root)
+        usageClient = AccountUsageClient(root: root)
         notice = failure
     }
     var rootURL: URL { preferences.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot }
@@ -58,6 +68,7 @@ import CodexTopCore
     var runningCount: Int { statusSummary.running }
     var attentionCount: Int { statusSummary.attention }
     func start() {
+        guard refreshLoop == nil else { return }
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -65,8 +76,56 @@ import CodexTopCore
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+        startUsageLoop()
     }
-    func stop() { refreshLoop?.cancel(); refreshLoop = nil }
+    func stop() {
+        refreshLoop?.cancel(); refreshLoop = nil
+        usageLoop?.cancel(); usageLoop = nil
+        cancelUsageRequest()
+    }
+    private func startUsageLoop() {
+        guard !demo, usageLoop == nil else { return }
+        usageLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.refreshQuota()
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
+        }
+    }
+    func refreshQuota(force: Bool = false) {
+        guard !demo, usageRequest == nil, force || !paused else { return }
+        let generation = sourceGeneration, requestID = UUID(), client = usageClient
+        usageRequestID = requestID; quotaRefreshing = true
+        usageRequest = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.usageRequestID == requestID {
+                    self.usageRequest = nil; self.quotaRefreshing = false
+                }
+            }
+            do {
+                let snapshot = try await client.snapshot(force: force)
+                guard !Task.isCancelled, generation == self.sourceGeneration else { return }
+                self.accountQuota = snapshot; self.quotaWarning = nil
+                self.updateQuota()
+            } catch {
+                guard !Task.isCancelled, generation == self.sourceGeneration else { return }
+                self.quotaWarning = "账户额度暂时无法更新，可打开官方用量页面查看。"
+            }
+        }
+    }
+    private func cancelUsageRequest() {
+        usageRequestID = UUID(); usageRequest?.cancel(); usageRequest = nil; quotaRefreshing = false
+    }
+    private func resetUsageSource() {
+        cancelUsageRequest()
+        usageClient = AccountUsageClient(root: rootURL)
+        accountQuota = nil; logQuota = nil; quota = nil; quotaWarning = nil
+        refreshQuota()
+    }
+    private func updateQuota() {
+        quota = [accountQuota, logQuota].compactMap { $0 }.max { $0.observedAt < $1.observedAt }
+    }
     func refresh() async {
         guard !refreshing else { return }
         refreshing = true
@@ -76,7 +135,8 @@ import CodexTopCore
             let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
             let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot()
             guard generation == sourceGeneration else { return }
-            tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks); quota = snapshot.quota
+            tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
+            logQuota = snapshot.quota; updateQuota()
             sourceWarning = snapshot.warning; lastRefresh = snapshot.observedAt
             let previous = preferences
             MonitoringPolicy.reconcile(&preferences, tasks: tasks, now: snapshot.observedAt)
@@ -144,16 +204,37 @@ import CodexTopCore
             preferences.codexHome = url.path; preferences.initialized = false
             preferences.selectedIDs.removeAll(); preferences.excludedIDs.removeAll()
             source = LocalCodexSource(root: url); tasks = []; graph = TaskGraph(tasks: []); quota = nil
+            resetUsageSource()
             sourceWarning = nil; loading = true; save(); onChange?()
             Task { await refresh() }
         }
     }
     func openTask(_ task: CodexTask) {
         if demo { notice = "这是演示任务。实际任务会在 Codex 中打开。"; return }
-        guard let link = task.deepLink, NSWorkspace.shared.open(link) else {
-            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(task.id, forType: .string)
-            notice = "无法打开 Codex，任务 ID 已复制。请确认已安装 Codex。"; return
+        guard let link = task.deepLink,
+              let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
+            taskNavigationFailed(id: task.id); return
         }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { [weak self] _, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if error != nil { self.taskNavigationFailed(id: task.id) }
+                else { self.onExternalNavigation?() }
+            }
+        }
+    }
+    private func taskNavigationFailed(id: String) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string)
+        notice = "无法打开 Codex，任务 ID 已复制。请确认已安装 Codex。"
+    }
+    func openUsagePage() {
+        // The desktop deep-link whitelist does not currently include settings/usage.
+        // This is the official usage destination referenced by the Codex app itself.
+        let url = URL(string: "https://chatgpt.com/codex/settings/usage")!
+        if NSWorkspace.shared.open(url) { onExternalNavigation?() }
+        else { notice = "无法打开用量页面，请在浏览器中访问 chatgpt.com/codex/settings/usage。" }
     }
     func restorePreferences() {
         do {
@@ -164,6 +245,7 @@ import CodexTopCore
             preferences = MonitorPreferences(); persistenceAvailable = true; notice = nil; save()
             sourceGeneration += 1; tasks = []; graph = TaskGraph(tasks: []); quota = nil; sourceWarning = nil; loading = true
             source = LocalCodexSource(root: LocalCodexSource.defaultRoot); onDisplayChange?(); onModeChange?(); onAppearanceChange?()
+            resetUsageSource()
             Task { await refresh() }
         } catch { notice = "无法备份原设置，尚未重置。" }
     }

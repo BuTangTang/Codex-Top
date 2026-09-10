@@ -151,18 +151,7 @@ struct MonitorView: View {
         VStack(spacing: 0) {
             Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5)
             HStack(spacing: 12) {
-                Image(systemName: "chart.bar.xaxis").font(.system(size: 14))
-                if let quota = store.quota {
-                    HStack(spacing: 10) {
-                        if let five = quota.fiveHour { Text("5h 剩余 \(five.remainingPercent)%") }
-                        if quota.fiveHour != nil && quota.weekly != nil { Text("·") }
-                        if let week = quota.weekly { Text("本周剩余 \(week.remainingPercent)%") }
-                    }.help("来自日志，更新于 \(quota.observedAt.formatted(date: .abbreviated, time: .standard))")
-                    if Date().timeIntervalSince(quota.observedAt) > 300 { Text("历史值").font(.system(size: 12)).foregroundStyle(TaskPhase.waiting.tint(store.theme.colorScheme)) }
-                } else {
-                    Text(store.demo ? "演示模式 · 额度暂无数据" : "额度暂无数据").help("等待 Codex 写入用量记录")
-                }
-                Spacer(minLength: 0)
+                UsageSummaryButton(store: store)
                 if store.paused { Text("已暂停").font(.system(size: 13)) }
                 Button { store.setTheme(store.theme == .dark ? .light : .dark) } label: {
                     ThemeToggleIcon(theme: store.theme).font(.system(size: 15)).frame(width: 26, height: 30)

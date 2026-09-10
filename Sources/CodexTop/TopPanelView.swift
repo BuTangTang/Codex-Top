@@ -47,6 +47,26 @@ struct TopPanelView: View {
     }
 
     var body: some View {
+        Group {
+            if store.placement == .menuBar { statusPopover }
+            else { topSurface }
+        }
+        .environment(\.colorScheme, store.theme == .light ? .light : .dark)
+    }
+
+    private var statusPopover: some View {
+        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished,
+                    pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
+            .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
+            .scaleEffect(store.uiScale, anchor: .topLeading)
+            .frame(width: state.expandedSize.width, height: state.expandedSize.height, alignment: .topLeading)
+            .scaleEffect(reduceMotion ? 1 : 0.96 + 0.04 * state.progress, anchor: .top)
+            .opacity(Double(state.progress))
+            .allowsHitTesting(state.progress > 0.92)
+            .accessibilityHidden(state.progress < 0.99)
+    }
+
+    private var topSurface: some View {
         GeometryReader { geometry in
             let outline = TopSurfaceOutline(progress: state.progress, attached: state.cameraHeight > 0)
             ZStack(alignment: .top) {
@@ -82,6 +102,5 @@ struct TopPanelView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
-        .environment(\.colorScheme, store.theme == .light ? .light : .dark)
     }
 }
