@@ -140,3 +140,5 @@ D-47 检查点 ZIP SHA-256：`6fa25cd0ad82a5877c67e1d90a7a0f756c7753336e149da2d3
 - v0.1.0-beta.1 DMG 已生成，挂载后核对真实模式、版本、Applications 链接、说明、签名和二进制一致，并已卸载。
 - 用户要求 README 增加实际应用截图，采用隔离副本与明确标注的示例任务。当前 Mac 锁定，截图和实际拖动需要用户解锁后继续；未把尝试写成通过。
 - 发布标识和哈希见 [修订记录](../../validation/notch-orb-refinement.md)。
+
+- 发布回执：`bb5463a` 已推送 main，`v0.1.0-beta.1` 公开 Pre-release 已发布，DMG/校验文件/Windows 提示词三个附件上传成功，服务器 DMG 摘要与本地一致。桌面真实应用同步 beta；截图副本和调试提示服务已清理。剩余 README 实拍需要用户解锁。
