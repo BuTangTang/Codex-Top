@@ -5,12 +5,14 @@ let package = Package(
     name: "CodexTop",
     platforms: [.macOS(.v14)],
     products: [
+        .executable(name: "CodexTop", targets: ["CodexTop"]),
         .library(name: "CodexTopCore", targets: ["CodexTopCore"]),
         .executable(name: "codex-top-inspect", targets: ["CodexTopInspect"])
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
         .target(name: "CodexTopCore", dependencies: ["CSQLite"]),
+        .executableTarget(name: "CodexTop", dependencies: ["CodexTopCore"]),
         .executableTarget(name: "CodexTopInspect", dependencies: ["CodexTopCore"]),
         .testTarget(name: "CodexTopCoreTests", dependencies: ["CodexTopCore", "CSQLite"])
     ]

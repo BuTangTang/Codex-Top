@@ -1,5 +1,12 @@
 import Foundation
 
+public enum PanelTheme: String, Codable, CaseIterable, Sendable {
+    case dark, light
+}
+public enum PanelPlacement: String, Codable, CaseIterable, Sendable {
+    case top, floating, orb, menuBar
+}
+
 public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var selectedIDs: Set<String> = []
     public var excludedIDs: Set<String> = []
@@ -12,6 +19,15 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var floatingDisplay: String?
     public var floatingX: Double = 0.72
     public var floatingY: Double = 0.7
+    // Optional for compatibility with preferences written before themes were added.
+    public var theme: PanelTheme?
+    public var placement: PanelPlacement?
+    public var uiScale: Double?
+    public var resolvedPlacement: PanelPlacement { placement ?? (floating ? .floating : .top) }
+    public var resolvedScale: Double {
+        guard let uiScale, uiScale.isFinite else { return 1 }
+        return min(1, max(0.8, uiScale))
+    }
     public init() {}
 }
 

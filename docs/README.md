@@ -3,6 +3,9 @@
 Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列表置顶悬浮。
 
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [使用说明](usage.md)
+- [开发与打包](development.md)
+- [M2 实机验收及待检查项](validation/M2.md)
 
 - [需求与验收标准](REQ-001-任务监控/requirement.md)
 - [详细设计](REQ-001-任务监控/detailed-design.md)

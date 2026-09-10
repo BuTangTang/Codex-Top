@@ -140,12 +140,40 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Set(graph.children["a"]!.map(\.id)), ["b", "c"])
         XCTAssertEqual(graph.rootIDs["y"], "x")
     }
+    func testThemeAdditionKeepsOlderPreferencesReadable() throws {
+        var preferences = MonitorPreferences()
+        preferences.selectedIDs = ["kept-task"]
+        preferences.theme = .light
+        let data = try JSONEncoder().encode(preferences)
+        XCTAssertEqual(try JSONDecoder().decode(MonitorPreferences.self, from: data).theme, .light)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "theme")
+        let restored = try JSONDecoder().decode(MonitorPreferences.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertEqual(restored.selectedIDs, ["kept-task"])
+        XCTAssertNil(restored.theme)
+    }
+
     func testPreferencesRoundTripAndCorruptionIsNotSilentlyOverwritten() throws {
         let file = PreferencesFile(url: try temporary().appendingPathComponent("preferences.json"))
         var p = MonitorPreferences(); p.selectedIDs = ["a"]; p.preferredDisplay = "display-one"; p.floating = true
         try file.save(p); XCTAssertEqual(try file.load(), p)
         let corrupt = Data("broken".utf8); try corrupt.write(to: file.url)
         XCTAssertThrowsError(try file.load()); XCTAssertEqual(try Data(contentsOf: file.url), corrupt)
+    }
+    func testDisplayModesAndScalePreserveLegacyPreferencesAndTaskSelection() throws {
+        var p = MonitorPreferences(); p.floating = true; p.selectedIDs = ["kept"]
+        let legacy = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
+        XCTAssertEqual(legacy.resolvedPlacement, .floating)
+        XCTAssertEqual(legacy.resolvedScale, 1)
+        for mode in PanelPlacement.allCases {
+            p.placement = mode; p.uiScale = 0.8
+            let restored = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
+            XCTAssertEqual(restored.resolvedPlacement, mode)
+            XCTAssertEqual(restored.resolvedScale, 0.8)
+            XCTAssertEqual(restored.selectedIDs, ["kept"])
+        }
+        p.uiScale = -5; XCTAssertEqual(p.resolvedScale, 0.8)
+        p.uiScale = 8; XCTAssertEqual(p.resolvedScale, 1)
     }
     func testRealSQLiteReadOnlyAdapterFiltersArchivesAndBlocksOutsidePaths() async throws {
         let root = try temporary(), db = root.appendingPathComponent("state_5.sqlite"), log = root.appendingPathComponent("rollout.jsonl")
