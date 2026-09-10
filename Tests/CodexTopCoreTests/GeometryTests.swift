@@ -3,6 +3,25 @@ import CoreGraphics
 @testable import CodexTopCore
 
 final class GeometryTests: XCTestCase {
+    func testScaledOrbNoticeEndpointsAreStableOnOneAndTwoTimesDisplays() {
+        let visible = CGRect(x: -1920, y: -1080, width: 1920, height: 1040)
+        let orb = CGRect(x: -600, y: -400, width: 44, height: 44)
+        for backing in [CGFloat(1), 2] {
+            for uiScale in [CGFloat(0.8), 0.9, 1] {
+                for logicalHeight in [CGFloat(335), 387] {
+                    let raw = WindowGeometry.expandedOrb(from: orb, size: CGSize(width: 410 * uiScale, height: logicalHeight * uiScale), visible: visible)
+                    let aligned = WindowGeometry.pixelAligned(raw, scale: backing)
+                    XCTAssertTrue(visible.contains(aligned))
+                    XCTAssertTrue(aligned.contains(orb))
+                    for value in [aligned.minX, aligned.minY, aligned.width, aligned.height] {
+                        XCTAssertEqual(value * backing, (value * backing).rounded(), accuracy: 0.0001)
+                    }
+                    XCTAssertEqual(aligned, WindowGeometry.pixelAligned(aligned, scale: backing))
+                    XCTAssertLessThanOrEqual(abs(aligned.height - raw.height), 0.5 / backing + 0.0001)
+                }
+            }
+        }
+    }
     func testNotchLayoutLeavesCameraWidthAndUsesLogicalCoordinates() {
         let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
         let top = WindowGeometry.compact(screen: screen, visible: screen.insetBy(dx: 0, dy: 32), notchWidth: 180, notchHeight: 32)

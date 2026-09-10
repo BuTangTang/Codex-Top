@@ -77,9 +77,8 @@ struct TopPanelView: View {
             .frame(width: state.surfaceSize.width, height: state.surfaceSize.height, alignment: .top)
             .clipShape(outline)
             .overlay {
-                if store.theme == .light {
-                    outline.stroke(.white.opacity(0.65 * Double(state.progress)), lineWidth: 0.6).padding(0.5)
-                }
+                outline.stroke(.white.opacity(store.theme == .light ? 0.65 * Double(state.progress) : 0), lineWidth: 0.6).padding(0.5)
+                    .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }

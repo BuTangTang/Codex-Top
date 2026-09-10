@@ -52,10 +52,11 @@ private struct OrbPanelView: View {
     var dragMoved: () -> Void
     var dragEnded: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var attentionScale: CGFloat = 1
+    private var shouldBreathe: Bool { store.attentionCount > 0 && !state.expanded && !reduceMotion }
     var body: some View {
         ZStack {
             GlassFill()
-            Color.black.opacity(state.expanded ? 0 : 1)
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                 .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
@@ -78,14 +79,37 @@ private struct OrbPanelView: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { openTasks() }
                 .accessibilityHidden(state.expanded)
-                .help(store.dockingHint ? "松手收进状态栏" : "\(store.statusSummary.phase.label) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理\n悬停或点击展开，拖动移动")
+                .help("\(store.statusSummary.phase.label) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理\n点击展开，拖动移动，右键打开菜单")
         }
         .frame(width: state.surfaceFrame.width, height: state.surfaceFrame.height)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(store.dockingHint ? Palette.accent : .clear, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .circular))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .circular)
+                .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+                .opacity(store.theme == .light && !state.expanded ? 1 : 0)
+                .animation(.easeOut(duration: 0.10), value: state.expanded)
+                .allowsHitTesting(false)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .circular).stroke(store.dockingHint ? Palette.accent : .clear, lineWidth: 1))
+        .scaleEffect(state.expanded || reduceMotion ? 1 : attentionScale)
         .position(x: state.surfaceFrame.midX, y: state.surfaceFrame.midY)
         .environment(\.colorScheme, store.theme == .light ? .light : .dark)
         .onExitCommand(perform: closeTasks)
+        .task(id: shouldBreathe) {
+            guard shouldBreathe else {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { attentionScale = 1 }
+                return
+            }
+            // Animate the clipped surface only; the native 44pt window stays fixed.
+            // Finite half-cycles stop when state changes, without repeatForever residue.
+            while !Task.isCancelled {
+                withAnimation(.easeInOut(duration: 0.9)) { attentionScale = 0.94 }
+                do { try await Task.sleep(for: .seconds(0.9)) } catch { return }
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.9)) { attentionScale = 1 }
+                do { try await Task.sleep(for: .seconds(0.9)) } catch { return }
+            }
+        }
     }
 }
 
@@ -101,17 +125,34 @@ private struct StatusRing: View {
     private var currentPhase: TaskPhase { store.statusSummary.phase }
     private var phase: TaskPhase { completionFlashing && store.attentionCount == 0 ? .completed : currentPhase }
     private var animationTrigger: String { "\(currentPhase.rawValue)-\(store.completionSequence)" }
-    private var animated: Bool { [.running, .waiting, .failed].contains(phase) && !reduceMotion && visible }
+    private var animated: Bool { phase == .running && !reduceMotion && visible }
     var body: some View {
         TimelineView(.animation(paused: !animated)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
-            let breath = 0.68 + 0.32 * (sin(time * .pi * 1.6) + 1) / 2
             Circle()
                 .trim(from: phase == .running ? 0.08 : 0, to: phase == .running ? 0.78 : phase == .completed ? completion : 1)
-                .stroke(phase.tint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .stroke(phase.tint(store.theme.colorScheme), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
                 .rotationEffect(.degrees(phase == .running && !reduceMotion ? time * 300 : -90))
-                .opacity([.waiting, .failed].contains(phase) && !reduceMotion ? breath : phase == .idle ? 0.55 : 1)
+                .opacity(phase == .idle ? 0.55 : 1)
                 .padding(7)
+        }
+        .overlay {
+            Group {
+                if currentPhase == .completed && store.runningCount == 0 {
+                    Image(systemName: "checkmark").font(.system(size: 12, weight: .medium))
+                } else {
+                    Text(store.runningCount > 99 ? "99+" : String(store.runningCount))
+                        .font(.system(size: 15, weight: .medium, design: .rounded)).monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: store.runningCount)
+                        .lineLimit(1).minimumScaleFactor(0.65)
+                }
+            }
+            .foregroundStyle(currentPhase == .completed ? phase.tint(store.theme.colorScheme) : Palette.primary(store.theme.colorScheme))
+            .frame(width: 24, height: 24)
+            .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
+            .accessibilityHidden(true)
         }
         .scaleEffect(hovered && !reduceMotion ? 1.08 : 1)
         .animation(reduceMotion ? nil : .smooth(duration: 0.14), value: hovered)

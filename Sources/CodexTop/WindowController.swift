@@ -42,6 +42,7 @@ final class UtilityPanel: NSPanel {
 // The small top panel must never need a click merely to activate SwiftUI tracking.
 final class HoverHostingView<Content: View>: NSHostingView<Content> {
     var hoverChanged: (Bool) -> Void = { _ in }
+    var contextMenuProvider: () -> NSMenu? = { nil }
     private var hoverArea: NSTrackingArea?
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
@@ -52,10 +53,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     override func mouseEntered(with event: NSEvent) { hoverChanged(true) }
     override func mouseExited(with event: NSEvent) { hoverChanged(false) }
+    override func rightMouseDown(with event: NSEvent) {
+        if let menu = contextMenuProvider() { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+        else { super.rightMouseDown(with: event) }
+    }
 }
 
 @MainActor final class WindowController: NSObject, NSWindowDelegate {
     let store: TaskStore
+    var orbContextMenu: NSMenu?
     private let top = UtilityPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     private let floating = UtilityPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     private var picker: NSWindow?
@@ -72,20 +78,21 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var savePositionTask: Task<Void, Never>?
     private var positioning = false
     private var topHovered = false
-    private var orbHovered = false
-    private var orbHoverSuppressed = false
     private let orbState = OrbMorphState()
     private var orbAnchor = CGRect.zero
     private var orbCanvas: CGRect?
     private var orbMotion: Task<Void, Never>?
     private var orbTarget = CGRect.zero
+    private var orbClickMonitors: [Any] = []
     private var previousPlacement: PanelPlacement = .top
     private let monitorState = MonitorPanelState()
     private var dragging = false
+    private var dragExceededClickThreshold = false
     private var dragStart = CGPoint.zero
     private var dragPointerStart = CGPoint.zero
     private var dockCandidate: DisplayChoice?
     private var statusAnchor: CGRect?
+    private let themeReveal = ThemeReveal()
     private var displays: [DisplayChoice] = []
     private var chosen: DisplayChoice? {
         displays.first { $0.id == store.preferences.preferredDisplay } ?? displays.first(where: \.isPrimary) ?? displays.first
@@ -123,11 +130,16 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             }, dragStarted: { [weak self] in self?.beginDrag() }, dragMoved: { [weak self] in self?.moveDrag() }, dragEnded: { [weak self] in self?.endDrag() }))
         floatingView.sizingOptions = []
         floatingView.hoverChanged = { [weak self] value in self?.hoverFloating(value) }
+        floatingView.contextMenuProvider = { [weak self] in
+            guard let self, self.store.placement == .orb, !self.orbState.expanded else { return nil }
+            return self.orbContextMenu
+        }
         floating.contentView = floatingView
         store.onChange = { [weak self] in self?.updateContentSize(animated: true) }
         store.onDisplayChange = { [weak self] in self?.layout(recoverFloating: true) }
         store.onModeChange = { [weak self] in self?.applyMode() }
         store.onAppearanceChange = { [weak self] in self?.applyAppearance() }
+        store.onAppearanceWillChange = { [weak self] in self?.prepareThemeReveal() ?? false }
         observer = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.layout(recoverFloating: true) }
         }
@@ -136,11 +148,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         applyMode()
     }
     func layout(recoverFloating: Bool, bringAuxiliaryToChosen: Bool = false) {
+        themeReveal.cancel()
         cancelHoverTransitions()
         displays = DisplayChoice.available()
         guard let chosen else { return }
         positioning = true; defer { positioning = false }
-        topHovered = false; orbHovered = false
+        topHovered = false
         if store.placement == .orb && recoverFloating {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
             let anchor = WindowGeometry.floating(size: CGSize(width: 44, height: 44), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY)
@@ -215,19 +228,58 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: value ? 0.26 : 0.22)) {
             orbState.expanded = value
         }
+        updateOrbClickMonitoring()
         updateOrbLayout(animated: true)
+    }
+    private func updateOrbClickMonitoring() {
+        stopOrbClickMonitoring()
+        guard store.placement == .orb, orbState.expanded else { return }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        // Local and global monitors are complementary. Return the local event unchanged
+        // so the same click still reaches the other window or application.
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: clicks, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handleOrbClick(event) }
+            return event
+        }) { orbClickMonitors.append(monitor) }
+        if let monitor = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.store.placement == .orb, self.orbState.expanded else { return }
+                self.dismissExpanded()
+            }
+        }) { orbClickMonitors.append(monitor) }
+    }
+    private func stopOrbClickMonitoring() {
+        orbClickMonitors.forEach { NSEvent.removeMonitor($0) }
+        orbClickMonitors.removeAll()
+    }
+    private func handleOrbClick(_ event: NSEvent) {
+        guard store.placement == .orb, orbState.expanded, !dragging else { return }
+        if event.window === floating {
+            let point = floating.convertPoint(toScreen: event.locationInWindow)
+            // The backing window temporarily includes the ring and expanded endpoints.
+            // Its transparent extra canvas is outside the task panel.
+            if orbTarget.contains(point) { return }
+        }
+        dismissExpanded()
     }
     private func updateOrbLayout(animated: Bool) {
         guard store.placement == .orb, !dragging, let chosen else { return }
         if orbAnchor.width == 0 { orbAnchor = floating.frame }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
-        orbAnchor = WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame)
+        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame), on: display)
         let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false) * store.uiScale)
-        let expanded = WindowGeometry.expandedOrb(from: orbAnchor, size: size, visible: display.screen.visibleFrame)
-        if orbState.expandedSize != expanded.size { orbState.expandedSize = expanded.size }
+        let expanded = WindowGeometry.pixelAligned(WindowGeometry.expandedOrb(from: orbAnchor, size: size, visible: display.screen.visibleFrame), scale: display.screen.backingScaleFactor)
+        if orbState.expandedSize != expanded.size {
+            withAnimation(animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? .smooth(duration: orbState.expanded ? 0.26 : 0.22) : nil) {
+                orbState.expandedSize = expanded.size
+            }
+        }
         animateOrb(to: orbState.expanded ? expanded : orbAnchor, animated: animated)
     }
     private func restoreCollapsedOrb(to anchor: CGRect) {
+        stopOrbClickMonitoring()
+        let display = displays.first { $0.screen.frame.contains(CGPoint(x: anchor.midX, y: anchor.midY)) } ?? chosen
+        let anchor = display.map { alignedOrb(anchor, on: $0) } ?? anchor
         orbMotion?.cancel(); orbMotion = nil
         orbCanvas = nil; orbAnchor = anchor; orbTarget = anchor
         let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
@@ -242,8 +294,22 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         floating.resignKey()
         floating.setFrame(anchor, display: true)
     }
+    private func alignedOrb(_ frame: CGRect, on display: DisplayChoice) -> CGRect {
+        let scale = display.screen.backingScaleFactor
+        // Keep the 44pt circle square and align both axes to device pixels. Normalized
+        // saved positions otherwise leave different fractional coverage on each edge.
+        return CGRect(x: (frame.minX * scale).rounded() / scale,
+                      y: (frame.minY * scale).rounded() / scale, width: 44, height: 44)
+    }
     private func animateOrb(to target: CGRect, animated: Bool) {
-        guard target != orbTarget || floating.frame != target && orbMotion == nil else { return }
+        let frame = floating.frame
+        let tolerance = 1 / (floating.screen?.backingScaleFactor ?? 1)
+        let reached = abs(frame.minX - target.minX) <= tolerance && abs(frame.minY - target.minY) <= tolerance &&
+            abs(frame.width - target.width) <= tolerance && abs(frame.height - target.height) <= tolerance
+        // AppKit can quantize a window frame. A periodic data refresh must not replay
+        // the morph just because the unchanged target differs by a fraction of a pixel.
+        guard target != orbTarget || !reached && orbMotion == nil else { return }
+        themeReveal.cancel()
         orbMotion?.cancel(); orbMotion = nil; orbTarget = target
         let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
         floating.hasShadow = orbState.expanded
@@ -282,6 +348,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func setFrame(_ frame: CGRect, for window: NSWindow, animated: Bool) {
         guard window.frame != frame else { return }
+        themeReveal.cancel()
         window.setFrame(frame, display: true, animate: animated && window.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
@@ -289,6 +356,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     /// and trims it at completion, avoiding a resize and layout of the whole window every 16ms.
     private func animateTop(to target: CGRect, progress targetProgress: CGFloat, animated: Bool) {
         if topTarget == target && topState.progress == targetProgress && topState.surfaceSize == target.size { return }
+        themeReveal.cancel()
         topMotion?.cancel(); topMotion = nil; topTarget = target
         guard animated, top.isVisible, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             topState.surfaceSize = target.size; topState.progress = targetProgress
@@ -311,7 +379,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
     }
     func applyMode() {
+        themeReveal.cancel()
         cancelHoverTransitions()
+        stopOrbClickMonitoring()
         let wasPositioning = positioning; positioning = true
         orbMotion?.cancel(); orbMotion = nil; orbCanvas = nil
         if previousPlacement == .orb && orbAnchor.width > 0 { restoreCollapsedOrb(to: orbAnchor) }
@@ -327,7 +397,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         floating.hasShadow = store.placement != .orb
         previousPlacement = store.placement
         positioning = wasPositioning
-        orbHovered = false; topHovered = false; orbHoverSuppressed = false
+        topHovered = false; orbState.hovered = false
         if store.placement == .floating || store.placement == .orb {
             dismissExpanded(); floatingDismissTask?.cancel()
             floating.orderFrontRegardless(); floating.contentView?.layoutSubtreeIfNeeded(); floating.displayIfNeeded()
@@ -351,6 +421,16 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private func applyAppearance() {
         let appearance = NSAppearance(named: store.theme == .light ? .aqua : .darkAqua)
         for window in [top, floating, picker, settings].compactMap({ $0 }) { window.appearance = appearance }
+        themeReveal.reveal()
+    }
+    private func prepareThemeReveal() -> Bool {
+        let windows = [settings, picker, floating, top].compactMap { $0 }.filter(\.isVisible)
+        let event = NSApp.currentEvent
+        let clickedWindow = event.flatMap { [.leftMouseDown, .leftMouseUp].contains($0.type) ? $0.window : nil }
+        guard let window = windows.first(where: { $0 === clickedWindow }) ?? windows.first(where: \.isKeyWindow) ?? windows.first else { return false }
+        let point = event.flatMap { $0.window === window && [.leftMouseDown, .leftMouseUp].contains($0.type) ? $0.locationInWindow : nil }
+        let radius: CGFloat = window === settings ? 0 : window === floating && store.placement == .orb ? 22 : 20
+        return themeReveal.prepare(window: window, oldTheme: store.theme, pointInWindow: point, cornerRadius: radius)
     }
     func toggleExpanded() {
         hideTask?.cancel(); revealTask?.cancel()
@@ -374,10 +454,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         hideTask?.cancel(); topExpanded = true
         top.orderFrontRegardless(); updateContentSize(animated: true)
     }
-    private func dismissExpanded(suppressHover: Bool = true) {
+    private func dismissExpanded() {
         revealTask?.cancel(); revealTask = nil
         if store.placement == .orb {
-            if orbState.expanded && suppressHover { orbHoverSuppressed = true }
             floating.resignKey()
             setOrbExpanded(false)
             return
@@ -387,6 +466,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         updateContentSize(animated: true)
     }
     private func hoverTop(_ value: Bool) {
+        guard [.top, .menuBar].contains(store.placement) else { return }
         topHovered = value
         revealTask?.cancel()
         if value && [.top, .menuBar].contains(store.placement) && canRevealOnHover {
@@ -402,10 +482,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func scheduleHide() {
         hideTask?.cancel()
+        guard [.top, .menuBar].contains(store.placement) else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled, let self, !self.topHovered, !self.orbHovered else { return }
-            self.dismissExpanded(suppressHover: false)
+            guard !Task.isCancelled, let self, !self.topHovered,
+                  [.top, .menuBar].contains(self.store.placement) else { return }
+            self.dismissExpanded()
         }
     }
     func toggleStatusPanel(anchor: CGRect?) {
@@ -414,20 +496,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func hoverFloating(_ value: Bool) {
         guard store.placement == .orb, !dragging else { return }
-        orbHovered = value
         orbState.hovered = value
-        revealTask?.cancel()
-        if !value { orbHoverSuppressed = false }
-        if value && orbHoverSuppressed { return }
-        if value && canRevealOnHover {
-            hideTask?.cancel()
-            revealTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(180))
-                guard !Task.isCancelled, let self, self.orbHovered,
-                      self.store.placement == .orb, self.canRevealOnHover else { return }
-                self.revealExpanded()
-            }
-        } else { scheduleHide() }
     }
     private var canRevealOnHover: Bool {
         !dragging && picker?.isVisible != true && settings?.isVisible != true
@@ -438,7 +507,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func beginDrag() {
         if store.placement == .orb && (orbState.expanded || orbMotion != nil) { return }
-        dragging = true; dragStart = floating.frame.origin; orbHovered = false
+        dragging = true; dragStart = floating.frame.origin; orbState.hovered = false
+        dragExceededClickThreshold = false
+        if store.placement == .orb { dockCandidate = nil; store.dockingHint = false }
         dragPointerStart = dragPointerLocation
         hideTask?.cancel(); revealTask?.cancel(); dismissExpanded()
     }
@@ -446,6 +517,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         guard dragging else { return }
         let point = dragPointerLocation
         var origin = CGPoint(x: dragStart.x + point.x - dragPointerStart.x, y: dragStart.y + point.y - dragPointerStart.y)
+        if hypot(origin.x - dragStart.x, origin.y - dragStart.y) >= 4 { dragExceededClickThreshold = true }
         if let display = displays.first(where: { $0.screen.frame.contains(point) }) {
             origin.y = min(origin.y, display.screen.visibleFrame.maxY - floating.frame.height)
         }
@@ -460,21 +532,27 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         updateDockCandidate()
         dragging = false
         let target = dockCandidate
-        let moved = hypot(floating.frame.minX - dragStart.x, floating.frame.minY - dragStart.y) >= 4
+        let moved = dragExceededClickThreshold || hypot(floating.frame.minX - dragStart.x, floating.frame.minY - dragStart.y) >= 4
         dockCandidate = nil; store.dockingHint = false
-        if moved, let target, WindowGeometry.shouldDock(floating.frame, to: target.screen.visibleFrame) {
+        if store.placement == .floating, moved, let target, WindowGeometry.shouldDock(floating.frame, to: target.screen.visibleFrame) {
             store.dockToMenuBar(display: target.id)
         } else {
             if let display = displays.first(where: { $0.screen.frame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) }) ?? chosen {
-                floating.setFrame(WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame), display: true)
+                let frame = WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame)
+                floating.setFrame(store.placement == .orb ? alignedOrb(frame, on: display) : frame, display: true)
             }
             if store.placement == .orb { orbAnchor = floating.frame }
             persistFloatingPosition()
-            orbHovered = store.placement == .orb && floating.frame.contains(dragPointerLocation)
+            orbState.hovered = store.placement == .orb && floating.frame.contains(dragPointerLocation)
             if store.placement == .orb && !moved { toggleExpanded() }
         }
     }
     private func updateDockCandidate() {
+        guard store.placement == .floating else {
+            dockCandidate = nil
+            if store.dockingHint { store.dockingHint = false }
+            return
+        }
         let center = CGPoint(x: floating.frame.midX, y: floating.frame.midY)
         dockCandidate = displays.first {
             $0.screen.frame.contains(center) && WindowGeometry.shouldDock(floating.frame, to: $0.screen.visibleFrame)

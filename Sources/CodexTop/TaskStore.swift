@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 import CodexTopCore
 
 @MainActor final class TaskStore: ObservableObject {
@@ -21,6 +22,7 @@ import CodexTopCore
     var onDisplayChange: (() -> Void)?
     var onModeChange: (() -> Void)?
     var onAppearanceChange: (() -> Void)?
+    var onAppearanceWillChange: (() -> Bool)?
     private var source: LocalCodexSource
     private let file: PreferencesFile
     private var persistenceAvailable = true
@@ -117,7 +119,18 @@ import CodexTopCore
         save(); onModeChange?()
     }
     func setScale(_ value: Double) { preferences.uiScale = min(1, max(0.8, value)); save(); onChange?() }
-    func setTheme(_ theme: PanelTheme) { preferences.theme = theme; save(); onAppearanceChange?() }
+    func setTheme(_ theme: PanelTheme) {
+        guard self.theme != theme else { return }
+        if onAppearanceWillChange?() == true {
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { preferences.theme = theme }
+        } else {
+            withAnimation(ThemeMotion.transition(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)) {
+                preferences.theme = theme
+            }
+        }
+        save(); onAppearanceChange?()
+    }
     func setDisplay(_ id: String) { preferences.preferredDisplay = id.isEmpty ? nil : id; save(); onDisplayChange?() }
     func saveFloatingPosition(display: String, x: Double, y: Double) {
         preferences.floatingDisplay = display; preferences.floatingX = x; preferences.floatingY = y; save()

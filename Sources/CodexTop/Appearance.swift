@@ -14,27 +14,38 @@ enum PanelMetrics {
 }
 
 enum PanelFonts {
-    static let header = Font.system(size: 16, weight: .semibold, design: .rounded)
-    static let task = Font.system(size: 14, weight: .medium)
-    static let detail = Font.system(size: 12)
-    static let label = Font.system(size: 13, weight: .medium)
+    static let header = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let task = Font.system(size: 16, weight: .medium)
+    static let detail = Font.system(size: 14)
+    static let label = Font.system(size: 14, weight: .medium)
 }
 
 enum Palette {
-    static let hairline = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.white.withAlphaComponent(0.10) : NSColor.black.withAlphaComponent(0.10) })
     static let accent = Color(red: 0.19, green: 0.52, blue: 1)
-    static let primary = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : NSColor(calibratedWhite: 0.12, alpha: 1) })
-    static let secondary = Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(calibratedWhite: 0.65, alpha: 1) : NSColor(calibratedWhite: 0.40, alpha: 1) })
+    // Explicit endpoints can interpolate. Dynamic NSColor providers jump when AppKit changes appearance.
+    static func primary(_ scheme: ColorScheme) -> Color { scheme == .dark ? .white : Color(white: 0.12) }
+    static func secondary(_ scheme: ColorScheme) -> Color { Color(white: scheme == .dark ? 0.65 : 0.40) }
+    static func hairline(_ scheme: ColorScheme) -> Color { (scheme == .dark ? Color.white : .black).opacity(0.10) }
+}
+
+extension PanelTheme {
+    var colorScheme: ColorScheme { self == .light ? .light : .dark }
+}
+
+enum ThemeMotion {
+    static func transition(reduceMotion: Bool) -> Animation {
+        .easeInOut(duration: reduceMotion ? 0.10 : 0.26)
+    }
 }
 
 extension TaskPhase {
-    var tint: Color {
+    func tint(_ scheme: ColorScheme) -> Color {
         switch self {
-        case .running: Palette.accent
-        case .waiting: Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(calibratedRed: 1, green: 0.75, blue: 0.29, alpha: 1) : NSColor(calibratedRed: 0.63, green: 0.36, blue: 0.025, alpha: 1) })
-        case .completed: Color(red: 0.33, green: 0.76, blue: 0.56)
-        case .failed: Color(red: 1, green: 0.43, blue: 0.43)
-        default: Palette.secondary
+        case .running: scheme == .dark ? Palette.accent : Color(red: 0.12, green: 0.40, blue: 0.86)
+        case .waiting: scheme == .dark ? Color(red: 1, green: 0.75, blue: 0.29) : Color(red: 0.84, green: 0.49, blue: 0.05)
+        case .completed: scheme == .dark ? Color(red: 0.33, green: 0.76, blue: 0.56) : Color(red: 0.10, green: 0.53, blue: 0.30)
+        case .failed: scheme == .dark ? Color(red: 1, green: 0.43, blue: 0.43) : Color(red: 0.78, green: 0.18, blue: 0.20)
+        default: Palette.secondary(scheme)
         }
     }
     var symbol: String {
@@ -56,6 +67,7 @@ struct FrostedBackdrop: NSViewRepresentable {
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
+        view.appearance = NSAppearance(named: .aqua)
         view.alphaValue = 0.72
         return view
     }
@@ -64,17 +76,22 @@ struct FrostedBackdrop: NSViewRepresentable {
 
 struct GlassFill: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        if colorScheme == .dark {
-            Color.black
-        } else {
-            FrostedBackdrop().overlay(LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        ZStack {
+            FrostedBackdrop()
+                .overlay(LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .opacity(colorScheme == .light ? 1 : 0)
+            Color.black.opacity(colorScheme == .dark ? 1 : 0)
         }
+        .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
+        .allowsHitTesting(false)
     }
 }
 
 struct PanelSurface<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewBuilder var content: Content
     var body: some View {
         let outline = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -82,15 +99,36 @@ struct PanelSurface<Content: View>: View {
             .background { GlassFill() }
             .clipShape(outline)
             .overlay(outline.stroke(.white.opacity(colorScheme == .dark ? 0 : 0.65), lineWidth: 0.6).padding(0.5))
-            .foregroundStyle(Palette.primary)
+            .foregroundStyle(Palette.primary(colorScheme))
+            .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
+    }
+}
+
+struct ThemeToggleIcon: View {
+    let theme: PanelTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        ZStack {
+            Image(systemName: "sun.max")
+                .opacity(theme == .dark ? 1 : 0)
+                .rotationEffect(.degrees(reduceMotion || theme == .dark ? 0 : -35))
+                .scaleEffect(reduceMotion || theme == .dark ? 1 : 0.8)
+            Image(systemName: "moon")
+                .opacity(theme == .light ? 1 : 0)
+                .rotationEffect(.degrees(reduceMotion || theme == .light ? 0 : 35))
+                .scaleEffect(reduceMotion || theme == .light ? 1 : 0.8)
+        }
+        .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: theme)
+        .accessibilityHidden(true)
     }
 }
 
 struct QuietButtonStyle: ButtonStyle {
     @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Palette.primary.opacity(configuration.isPressed ? 0.14 : hovered ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .background(Palette.primary(colorScheme).opacity(configuration.isPressed ? 0.14 : hovered ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
             .animation(.easeOut(duration: 0.12), value: hovered)
@@ -99,9 +137,10 @@ struct QuietButtonStyle: ButtonStyle {
 
 struct QuietRowStyle: ButtonStyle {
     @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Palette.primary.opacity(configuration.isPressed ? 0.12 : hovered ? 0.055 : 0))
+            .background(Palette.primary(colorScheme).opacity(configuration.isPressed ? 0.12 : hovered ? 0.055 : 0))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
             .animation(.easeOut(duration: 0.12), value: hovered)
@@ -145,10 +184,11 @@ struct WindowDragHandle: View {
     var ended: () -> Void
     var showsGrip = true
     @State private var active = false
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         Color.clear
             .overlay {
-                if showsGrip { Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(Palette.secondary) }
+                if showsGrip { Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(Palette.secondary(colorScheme)) }
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
@@ -163,18 +203,22 @@ struct WindowDragHandle: View {
 struct ActivityIndicator: View {
     let phase: TaskPhase
     var small = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        let tint = phase.tint(colorScheme)
         ZStack {
             if phase == .running {
-                Circle().stroke(phase.tint.opacity(0.25), lineWidth: 3)
-                Circle().trim(from: 0.12, to: 0.83).stroke(phase.tint, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-70))
+                Circle().stroke(tint.opacity(0.25), lineWidth: 3)
+                Circle().trim(from: 0.12, to: 0.83).stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-70))
             } else if phase == .waiting {
-                Circle().fill(phase.tint.opacity(0.12))
-                Circle().fill(phase.tint).padding(6)
+                Circle().fill(tint.opacity(0.12))
+                Circle().fill(tint).padding(6)
             } else {
-                Image(systemName: phase.symbol).font(.system(size: small ? 17 : 18, weight: .medium)).foregroundStyle(phase.tint)
+                Image(systemName: phase.symbol).font(.system(size: small ? 17 : 18, weight: .medium)).foregroundStyle(tint)
             }
         }.frame(width: small ? 22 : 24, height: small ? 22 : 24)
+            .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
             .accessibilityHidden(true)
     }
 }

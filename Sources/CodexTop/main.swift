@@ -6,6 +6,7 @@ import CodexTopCore
     private var store: TaskStore!
     private var windows: WindowController!
     private var statusItem: NSStatusItem!
+    private var statusMenu: NSMenu!
     private var statusObservation: AnyCancellable?
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = TaskStore(); windows = WindowController(store: store)
@@ -24,7 +25,12 @@ import CodexTopCore
         add("立即刷新", #selector(refresh), to: menu)
         menu.addItem(.separator())
         add("退出 Codex Top", #selector(quit), to: menu, key: "q")
-        statusItem.menu = menu
+        statusMenu = menu
+        windows.orbContextMenu = menu
+        // Keep the menu detached so a normal click reaches the task panel directly.
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         let main = NSMenu(); let applicationItem = NSMenuItem(); main.addItem(applicationItem)
         let appMenu = NSMenu(); applicationItem.submenu = appMenu
         add("显示任务", #selector(showTasks), to: appMenu, key: "t")
@@ -47,28 +53,41 @@ import CodexTopCore
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
         button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.layer?.cornerRadius = 0
         if store.placement == .menuBar {
             statusItem.length = NSStatusItem.variableLength
             button.image = nil
             let text = "  ● \(store.runningCount)   ● \(store.attentionCount)  "
-            let title = NSMutableAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white])
+            let title = NSMutableAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor])
             let string = text as NSString
             title.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: string.range(of: "●"))
             title.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: string.range(of: "●", options: .backwards))
             button.attributedTitle = title
-            button.layer?.backgroundColor = NSColor.black.cgColor
-            button.layer?.cornerRadius = 10
         } else {
             statusItem.length = NSStatusItem.squareLength
             button.title = ""
             button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Codex Top")
-            button.layer?.backgroundColor = NSColor.clear.cgColor
         }
         button.toolTip = "Codex Top · \(store.runningCount) 个运行中 · \(store.attentionCount) 个待处理"
         button.setAccessibilityLabel(button.toolTip)
     }
     private func add(_ title: String, _ action: Selector, to menu: NSMenu, key: String = "") {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
+    }
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        // A temporary menu owns its native tracking loop, including keyboard navigation.
+        guard statusItem.menu == nil else { return }
+        let event = NSApp.currentEvent
+        let isContextClick = event?.type == .rightMouseUp ||
+            (event?.type == .leftMouseUp && event?.modifierFlags.contains(.control) == true)
+        if isContextClick {
+            statusItem.menu = statusMenu
+            defer { statusItem.menu = nil }
+            sender.performClick(nil)
+        } else {
+            showTasks()
+        }
     }
     @objc private func showTasks() {
         if store.placement == .menuBar { windows.toggleStatusPanel(anchor: statusItem.button?.window?.frame) }

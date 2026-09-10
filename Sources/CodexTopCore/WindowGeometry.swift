@@ -2,6 +2,12 @@ import Foundation
 import CoreGraphics
 
 public enum WindowGeometry {
+    public static func pixelAligned(_ frame: CGRect, scale: CGFloat) -> CGRect {
+        let scale = scale.isFinite ? max(1, scale) : 1
+        return CGRect(x: (frame.minX * scale).rounded() / scale, y: (frame.minY * scale).rounded() / scale,
+                      width: max(1, (frame.width * scale).rounded()) / scale,
+                      height: max(1, (frame.height * scale).rounded()) / scale)
+    }
     public static func clamp(_ frame: CGRect, to visible: CGRect, inset: CGFloat = 8) -> CGRect {
         let area = visible.insetBy(dx: inset, dy: inset)
         let width = min(frame.width, max(1, area.width)), height = min(frame.height, max(1, area.height))

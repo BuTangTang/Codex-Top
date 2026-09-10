@@ -10,13 +10,13 @@ struct CompactView: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 6) {
-                Circle().fill(store.paused ? Color.gray : TaskPhase.running.tint).frame(width: 6, height: 6)
+                Circle().fill(store.paused ? Color.gray : TaskPhase.running.tint(.dark)).frame(width: 6, height: 6)
                 Text(store.paused ? "已暂停" : "\(store.runningCount) 运行中").font(.system(size: 13, weight: .medium))
             }.frame(maxWidth: .infinity)
             if notchWidth > 0 { Color.black.frame(width: notchWidth) }
             else { Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 12) }
             HStack(spacing: 6) {
-                Circle().fill(store.attentionCount > 0 ? TaskPhase.waiting.tint : .gray).frame(width: 6, height: 6)
+                Circle().fill(store.attentionCount > 0 ? TaskPhase.waiting.tint(.dark) : .gray).frame(width: 6, height: 6)
                 Text(store.attentionCount > 0 ? "\(store.attentionCount) 待处理" : store.demo ? "演示模式" : "Codex Top").font(.system(size: 13, weight: .medium))
             }.frame(maxWidth: .infinity)
         }
@@ -34,6 +34,7 @@ struct CompactView: View {
 
 struct TaskPickerView: View {
     @ObservedObject var store: TaskStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var close: () -> Void
     @State private var search = ""
     @State private var filter = "全部"
@@ -57,28 +58,28 @@ struct TaskPickerView: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("选择监控任务").font(PanelFonts.header)
-                    Text("全部任务").font(.system(size: 13)).foregroundStyle(Palette.secondary)
+                    Text("全部任务").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 }
                 Spacer()
-                Text("\(store.graph.roots.count) 个任务").font(.system(size: 13)).foregroundStyle(Palette.secondary)
+                Text("\(store.graph.roots.count) 个任务").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
             }.padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 12)
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 TextField("搜索任务名称或项目", text: $search).textFieldStyle(.plain)
                     .accessibilityLabel("搜索任务名称或项目")
                 if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
-            }.font(.system(size: 14)).padding(.horizontal, 12).frame(height: 38)
-                .background(Palette.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline, lineWidth: 0.7)).padding(.horizontal, 22)
+            }.font(.system(size: 16)).padding(.horizontal, 12).frame(height: 38)
+                .background(Palette.primary(store.theme.colorScheme).opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline(store.theme.colorScheme), lineWidth: 0.7)).padding(.horizontal, 22)
             HStack(spacing: 9) {
                 ForEach(["全部", "运行中", "待处理", "已结束"], id: \.self) { item in
                     Button { filter = item } label: {
-                        Text(item).font(.system(size: 13, weight: filter == item ? .medium : .regular)).foregroundStyle(filter == item ? .white : Palette.primary).frame(maxWidth: .infinity).frame(height: 32)
-                            .background(filter == item ? Palette.accent : Palette.primary.opacity(0.045), in: Capsule())
+                        Text(item).font(.system(size: 14, weight: filter == item ? .medium : .regular)).foregroundStyle(filter == item ? .white : Palette.primary(store.theme.colorScheme)).frame(maxWidth: .infinity).frame(height: 32)
+                            .background(filter == item ? Palette.accent : Palette.primary(store.theme.colorScheme).opacity(0.045), in: Capsule())
                     }.buttonStyle(.plain).accessibilityLabel(item).accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
             }.padding(.horizontal, 22).padding(.vertical, 10)
-            Rectangle().fill(Palette.hairline).frame(height: 0.5).padding(.horizontal, 26)
+            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 26)
             HStack {
                 Button {
                     MonitoringPolicy.selectVisible(Set(filtered.map(\.id)), selected: &draft)
@@ -87,42 +88,43 @@ struct TaskPickerView: View {
                     Image(systemName: !ids.isEmpty && ids.isSubset(of: draft) ? "checkmark.square.fill" : !ids.isDisjoint(with: draft) ? "minus.square.fill" : "square").font(.system(size: 22)).foregroundStyle(Palette.accent)
                     Text("全选当前结果")
                 }.buttonStyle(.plain).disabled(filtered.isEmpty)
-                Spacer(); Text("\(filtered.count) 项").foregroundStyle(Palette.secondary)
-            }.font(.system(size: 14)).padding(.horizontal, 28).frame(height: 46)
-            Rectangle().fill(Palette.hairline).frame(height: 0.5).padding(.horizontal, 26)
+                Spacer(); Text("\(filtered.count) 项").foregroundStyle(Palette.secondary(store.theme.colorScheme))
+            }.font(.system(size: 15)).padding(.horizontal, 28).frame(height: 46)
+            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 26)
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(filtered) { task in
                         Toggle(isOn: Binding(get: { draft.contains(task.id) }, set: { if $0 { draft.insert(task.id) } else { draft.remove(task.id) } })) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title).font(PanelFonts.task).lineLimit(1)
-                                    Text(task.project).font(PanelFonts.detail).foregroundStyle(Palette.secondary).lineLimit(1)
+                                    Text(task.title).font(PanelFonts.task).lineLimit(1).truncationMode(.tail)
+                                    Text(task.project).font(PanelFonts.detail).foregroundStyle(Palette.secondary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                                 }
                                 Spacer()
                                 let phase = store.graph.activity(for: task).phase
                                 HStack(spacing: 6) {
-                                    Circle().fill(phase.tint).frame(width: 9, height: 9)
-                                    Text(phase.label).font(.system(size: 13)).foregroundStyle(phase.tint)
-                                }
+                                    Circle().fill(phase.tint(store.theme.colorScheme)).frame(width: 9, height: 9)
+                                    Text(phase.label).font(.system(size: 14)).foregroundStyle(phase.tint(store.theme.colorScheme)).lineLimit(1)
+                                }.fixedSize(horizontal: true, vertical: false)
                             }
                         }.toggleStyle(.checkbox).controlSize(.large).padding(.horizontal, 24).frame(height: 54)
-                        Rectangle().fill(Palette.hairline).frame(height: 0.5).padding(.horizontal, 26)
+                        Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 26)
                     }
                     if filtered.isEmpty {
                         ContentUnavailableView(search.isEmpty ? "没有符合条件的任务" : "没有搜索结果", systemImage: "magnifyingglass", description: Text("尝试其他任务名、项目名或筛选条件"))
                     }
                 }
             }
-            Rectangle().fill(Palette.hairline).frame(height: 0.5)
+            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5)
             HStack {
-                Text("已选择 \(draft.count) 项").foregroundStyle(Palette.primary)
+                Text("已选择 \(draft.count) 项").foregroundStyle(Palette.primary(store.theme.colorScheme))
                 Spacer()
                 Button("取消", action: close).keyboardShortcut(.cancelAction).controlSize(.large)
                 Button("确认选择") { store.applySelection(draft, original: original); close() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).controlSize(.large)
-            }.font(.system(size: 14)).padding(.horizontal, 26).frame(height: 66)
+            }.font(.system(size: 15)).padding(.horizontal, 26).frame(height: 66)
         }.tint(Palette.accent)
         }.environment(\.colorScheme, store.theme == .light ? .light : .dark)
+            .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
         }
     }
 }
@@ -195,7 +197,7 @@ struct SettingsView: View {
                         Text("已断开的显示器 · 暂用主屏").tag(saved)
                     }
                 }
-                Text("顶部和圆环悬停展开；常驻浮窗移开鼠标也不隐藏。拖动浮窗左上角手柄或圆环，靠近屏幕顶部松手收进状态栏。").font(.caption).foregroundStyle(.secondary)
+                Text("顶部悬停展开。圆环点击展开，移开保持，点外或按 Esc 缩回；拖至顶部仍留桌面，右键菜单可选仅状态栏。常驻浮窗仍可拖至顶部吸附。").font(.caption).foregroundStyle(.secondary)
                 Button("找回窗口", action: recoverWindows)
             }
             Section("数据与启动") {
