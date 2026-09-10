@@ -66,4 +66,38 @@ final class GeometryTests: XCTestCase {
         }
     }
 
+    func testScreenChangeKeepsAReachableUtilityWindowOnItsOtherDisplay() {
+        let main = CGRect(x: 0, y: 40, width: 1280, height: 720)
+        let external = CGRect(x: -1600, y: 40, width: 1600, height: 900)
+        let frame = CGRect(x: -1300, y: 120, width: 500, height: 610)
+        XCTAssertEqual(WindowGeometry.recoverUtilityWindow(frame, visibleFrames: [main, external], preferredVisible: main), frame)
+    }
+
+    func testPartlyOffscreenUtilityWindowUsesItsLargestVisibleIntersection() {
+        let main = CGRect(x: 0, y: 40, width: 1280, height: 720)
+        let external = CGRect(x: -1600, y: 40, width: 1600, height: 900)
+        let frame = CGRect(x: -300, y: 700, width: 500, height: 610)
+        let restored = WindowGeometry.recoverUtilityWindow(frame, visibleFrames: [main, external], preferredVisible: main)
+        XCTAssertTrue(external.contains(restored))
+        XCTAssertEqual(restored.size, frame.size)
+        XCTAssertFalse(main.intersects(restored))
+    }
+
+    func testDisconnectedUtilityWindowFallsBackToChosenDisplay() {
+        let main = CGRect(x: 0, y: 40, width: 1280, height: 720)
+        let frame = CGRect(x: 3000, y: 2000, width: 500, height: 610)
+        let restored = WindowGeometry.recoverUtilityWindow(frame, visibleFrames: [main], preferredVisible: main)
+        XCTAssertTrue(main.contains(restored))
+        XCTAssertEqual(restored.size, frame.size)
+    }
+
+    func testExplicitRecoveryBringsAnOtherwiseVisibleUtilityWindowToChosenDisplay() {
+        let main = CGRect(x: 0, y: 40, width: 1280, height: 720)
+        let external = CGRect(x: -1600, y: 40, width: 1600, height: 900)
+        let frame = CGRect(x: -1300, y: 120, width: 500, height: 610)
+        let restored = WindowGeometry.recoverUtilityWindow(frame, visibleFrames: [main, external], preferredVisible: main, forcePreferred: true)
+        XCTAssertTrue(main.contains(restored))
+        XCTAssertEqual(restored.size, frame.size)
+    }
+
 }

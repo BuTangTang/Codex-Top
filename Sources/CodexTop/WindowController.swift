@@ -135,7 +135,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         applyAppearance()
         applyMode()
     }
-    func layout(recoverFloating: Bool) {
+    func layout(recoverFloating: Bool, bringAuxiliaryToChosen: Bool = false) {
         cancelHoverTransitions()
         displays = DisplayChoice.available()
         guard let chosen else { return }
@@ -154,10 +154,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
         if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() })) }
         for window in [picker, settings].compactMap({ $0 }) {
-            // An open settings/selection window must also survive a disconnected display.
-            if !displays.contains(where: { $0.screen.visibleFrame.intersects(window.frame) }) {
-                window.setFrame(WindowGeometry.clamp(window.frame, to: chosen.screen.visibleFrame), display: true)
-            }
+            let frame = WindowGeometry.recoverUtilityWindow(window.frame, visibleFrames: displays.map { $0.screen.visibleFrame },
+                                                            preferredVisible: chosen.screen.visibleFrame, forcePreferred: bringAuxiliaryToChosen)
+            setFrame(frame, for: window, animated: false)
         }
     }
     private func panelHeight(compact: Bool) -> CGFloat {
@@ -205,9 +204,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
         if let picker {
             let size = CGSize(width: 450 * store.uiScale, height: 635 * store.uiScale)
-            let display = displays.first { $0.screen.frame.contains(CGPoint(x: picker.frame.midX, y: picker.frame.midY)) } ?? chosen
             let frame = CGRect(x: picker.frame.minX, y: picker.frame.maxY - size.height, width: size.width, height: size.height)
-            setFrame(WindowGeometry.clamp(frame, to: display.screen.visibleFrame), for: picker, animated: animated)
+            let recovered = WindowGeometry.recoverUtilityWindow(frame, visibleFrames: displays.map { $0.screen.visibleFrame },
+                                                                preferredVisible: chosen.screen.visibleFrame)
+            setFrame(recovered, for: picker, animated: animated)
         }
     }
     private func setOrbExpanded(_ value: Bool) {
@@ -534,7 +534,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     func recoverWindows() {
         if let chosen { store.saveFloatingPosition(display: chosen.id, x: 0.7, y: 0.7) }
-        layout(recoverFloating: true)
+        layout(recoverFloating: true, bringAuxiliaryToChosen: true)
         if [.floating, .orb].contains(store.placement) { floatingDismissTask?.cancel(); floatingPresentation.visible = true; floating.orderFrontRegardless() } else { revealExpanded() }
     }
     func windowDidMove(_ notification: Notification) {

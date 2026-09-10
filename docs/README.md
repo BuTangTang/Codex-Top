@@ -8,6 +8,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [M2 实机验收及待检查项](validation/M2.md)
 - [圆环原位变形与状态动画](validation/M2-circle.md)
 - [M3 打包与真实接入验收](validation/M3.md)
+- [R01–R18 验收证据与缺项](validation/acceptance-matrix.md)
 
 - [需求与验收标准](REQ-001-任务监控/requirement.md)
 - [详细设计](REQ-001-任务监控/detailed-design.md)

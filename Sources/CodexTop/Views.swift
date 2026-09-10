@@ -131,8 +131,24 @@ struct SettingsView: View {
     @ObservedObject var store: TaskStore
     var displays: [DisplayChoice]
     var recoverWindows: () -> Void
-    @State private var loginEnabled = SMAppService.mainApp.status == .enabled
+    @State private var loginStatus: SMAppService.Status = .notRegistered
     @State private var loginError: String?
+    private func refreshLoginStatus() {
+        let current: SMAppService.Status = store.demo ? .notRegistered : SMAppService.mainApp.status
+        if current != loginStatus { loginError = nil }
+        loginStatus = current
+    }
+    private func setLoginEnabled(_ enabled: Bool) {
+        guard !store.demo else { return }
+        loginError = nil
+        do {
+            if enabled { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+        } catch {
+            loginError = "无法修改登录项。请将应用放入 Applications 后重试。"
+        }
+        refreshLoginStatus()
+    }
     var body: some View {
         Form {
             Section("外观") {
@@ -187,13 +203,14 @@ struct SettingsView: View {
                     Text("Codex 数据目录"); Spacer(); Button("选择…") { store.chooseRoot() }.disabled(store.demo)
                 }
                 Text(store.demo ? "演示模式：不读取本机任务" : store.rootURL.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                Toggle("登录 Mac 时启动", isOn: Binding(get: { loginEnabled }, set: { enabled in
-                    do {
-                        if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-                        loginEnabled = SMAppService.mainApp.status == .enabled
-                        if SMAppService.mainApp.status == .requiresApproval { loginError = "请在系统设置的登录项中允许 Codex Top。"; SMAppService.openSystemSettingsLoginItems() }
-                    } catch { loginError = "无法修改登录项。请将应用放入 Applications 后重试。" }
-                })).disabled(store.demo)
+                Toggle("登录 Mac 时启动", isOn: Binding(
+                    get: { loginStatus == .enabled || loginStatus == .requiresApproval },
+                    set: { enabled in setLoginEnabled(enabled) }
+                )).disabled(store.demo)
+                if !store.demo && loginStatus == .requiresApproval {
+                    Text("已登记，等待系统允许。请在系统设置的登录项中允许 Codex Top。").font(.caption).foregroundStyle(.orange)
+                    Button("打开系统登录项设置") { SMAppService.openSystemSettingsLoginItems() }
+                }
                 if let loginError { Text(loginError).font(.caption).foregroundStyle(.orange) }
             }
             Section {
@@ -202,5 +219,7 @@ struct SettingsView: View {
                 Button("备份并恢复默认设置") { store.restorePreferences() }
             }
         }.formStyle(.grouped).environment(\.colorScheme, store.theme == .light ? .light : .dark)
+            .onAppear { refreshLoginStatus() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 }

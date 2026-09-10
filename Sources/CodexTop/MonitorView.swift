@@ -44,7 +44,7 @@ struct MonitorView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "rectangle.stack").font(.system(size: 26, weight: .light)).foregroundStyle(Palette.secondary)
                         Text("选择你想关注的任务").font(.system(size: 16, weight: .medium))
-                        Text("新建并运行的任务会自动加入").font(.system(size: 13)).foregroundStyle(Palette.secondary)
+                        Text(store.preferences.autoMonitor ? "新建并运行的任务会自动加入" : "自动监控已关闭，可手动选择任务").font(.system(size: 13)).foregroundStyle(Palette.secondary)
                         Button("选择任务", action: pickTasks).controlSize(.large)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

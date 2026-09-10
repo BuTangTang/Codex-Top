@@ -8,6 +8,20 @@ public enum WindowGeometry {
         return CGRect(x: min(max(frame.minX, area.minX), area.maxX - width),
                       y: min(max(frame.minY, area.minY), area.maxY - height), width: width, height: height)
     }
+    /// Screen changes preserve reachable utility windows; explicit recovery uses the chosen display.
+    public static func recoverUtilityWindow(_ frame: CGRect, visibleFrames: [CGRect], preferredVisible: CGRect, forcePreferred: Bool = false) -> CGRect {
+        if !forcePreferred, visibleFrames.contains(where: { $0.contains(frame) }) { return frame }
+        var target = preferredVisible
+        if !forcePreferred {
+            var largestIntersection: CGFloat = 0
+            for visible in visibleFrames {
+                let intersection = frame.intersection(visible)
+                let area = intersection.isNull ? 0 : intersection.width * intersection.height
+                if area > largestIntersection { largestIntersection = area; target = visible }
+            }
+        }
+        return clamp(frame, to: target)
+    }
     public static func compact(screen: CGRect, visible: CGRect, notchWidth: CGFloat, notchHeight: CGFloat) -> CGRect {
         if notchWidth > 0 && notchHeight > 0 {
             let width = min(screen.width, notchWidth + 196)
