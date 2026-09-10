@@ -23,3 +23,7 @@ bash scripts/package.sh --universal
 核心测试使用合成数据库/日志，覆盖有界增量读取、乱序/半行、生命周期、未知、配额、父子任务、选择规则、旧设置、缩放和多屏几何。它们不代替打包应用的拖动、悬停、真实跳转和硬件验收。
 
 开发顺序与未完成事项见 [STATUS](STATUS.md) 和 [M2 实测](validation/M2.md)。提交前运行测试、release 构建与本阶段实际检查，更新文档；不要用旧截图或概念图代替当前产物。
+
+## GitHub Actions
+
+当前只提供 `docs/ci/macos-build.yml.example` 模板，尚未启用（当前登录缺少 workflow scope）。启用后代码 push 到 main 或提出 PR 时，工作流执行测试与 universal 打包，保存 ZIP、校验值以及对应提交的源码 ZIP。文档改动不触发构建。手动也可从 Actions 运行。当前远程验证结果见 [M3](validation/M3.md)。产物保留 14 天，属于构建检查产物，不自动发布正式版本。

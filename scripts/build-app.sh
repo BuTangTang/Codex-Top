@@ -24,6 +24,7 @@ bin_path="$(swift build "${build_args[@]}" --show-bin-path)"
 app_path="$repo_root/dist/$app_name.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 install -m 755 "$bin_path/CodexTop" "$app_path/Contents/MacOS/CodexTop"
+install -m 644 LICENSE "$app_path/Contents/Resources/LICENSE"
 cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

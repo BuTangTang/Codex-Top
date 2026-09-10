@@ -1,0 +1,44 @@
+name: macOS build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md']
+  pull_request:
+    paths-ignore: ['docs/**', '**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: swift --version
+      - name: Test and package universal app
+        run: bash scripts/package.sh --universal
+      - name: Inspect architectures and signature
+        run: |
+          lipo -archs 'dist/Codex Top.app/Contents/MacOS/CodexTop'
+          codesign --verify --strict 'dist/Codex Top.app'
+          shasum -a 256 -c dist/*.sha256
+      - name: Archive matching source
+        run: git archive --format=zip --prefix=Codex-Top/ --output=dist/Codex-Top-source.zip HEAD
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-top-macOS-universal
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
