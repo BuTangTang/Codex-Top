@@ -7,6 +7,19 @@ import CodexTopCore
         let root: URL
         if let index = arguments.firstIndex(of: "--root"), index + 1 < arguments.count { root = URL(fileURLWithPath: arguments[index + 1]) }
         else { root = LocalCodexSource.defaultRoot }
+        if arguments.contains("--account-usage") {
+            do {
+                let start = Date()
+                let quota = try await AccountUsageClient(root: root).snapshot()
+                let output: [String: Any] = ["origin": quota.origin.rawValue,
+                                           "observedAt": ISO8601DateFormatter().string(from: quota.observedAt),
+                                           "windowMinutes": quota.windows.map(\.minutes),
+                                           "elapsedSeconds": Date().timeIntervalSince(start)]
+                let data = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+                print(String(decoding: data, as: UTF8.self))
+            } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+            return
+        }
         let source = LocalCodexSource(root: root)
         do {
             let start = Date(); let first = try await source.snapshot()

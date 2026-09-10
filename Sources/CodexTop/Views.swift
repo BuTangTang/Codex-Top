@@ -8,27 +8,40 @@ struct CompactView: View {
     var drawsSurface = true
     var open: () -> Void
     var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Circle().fill(store.paused ? Color.gray : TaskPhase.running.tint(.dark)).frame(width: 6, height: 6)
-                Text(store.paused ? "已暂停" : "\(store.runningCount) 运行中").font(.system(size: 13, weight: .medium))
-            }.frame(maxWidth: .infinity)
-            if notchWidth > 0 { Color.black.frame(width: notchWidth) }
-            else { Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 12) }
-            HStack(spacing: 6) {
-                Circle().fill(store.attentionCount > 0 ? TaskPhase.waiting.tint(.dark) : .gray).frame(width: 6, height: 6)
-                Text(store.attentionCount > 0 ? "\(store.attentionCount) 待处理" : store.demo ? "演示模式" : "Codex Top").font(.system(size: 13, weight: .medium))
-            }.frame(maxWidth: .infinity)
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let summary = CompactMonitorSummary(status: store.statusSummary, paused: store.paused, quota: store.quota, now: context.date)
+            HStack(spacing: 0) {
+                HStack(spacing: 5) {
+                    Circle().fill(summary.leftPhase.tint(store.theme.colorScheme)).frame(width: 5, height: 5)
+                    Text(summary.leftText).font(.system(size: 13, weight: .regular))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }.padding(.horizontal, 6).frame(maxWidth: .infinity)
+                if notchWidth > 0 { Color.clear.frame(width: notchWidth) }
+                else { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(width: 1, height: 12) }
+                HStack(spacing: 4) {
+                    if summary.isQuotaStale || store.quotaWarning != nil {
+                        Image(systemName: "clock").font(.system(size: 9)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(summary.quotaLines.indices, id: \.self) { index in
+                            Text(summary.quotaLines[index])
+                                .font(.system(size: summary.quotaLines.count > 1 ? 11 : 13, weight: .regular))
+                                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                    }
+                }.padding(.horizontal, 6).frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(Palette.primary(store.theme.colorScheme))
+            .frame(maxHeight: .infinity)
+            .background { if drawsSurface { GlassFill() } }
+            .clipShape(RoundedRectangle(cornerRadius: notchWidth > 0 ? 10 : 14))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: open)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("刘海模式，\(summary.leftText)，剩余额度：\(summary.quotaLines.joined(separator: "，"))")
+            .accessibilityAddTraits(.isButton)
+            .help("\(store.runningCount) 个运行中 · \(store.attentionCount) 个待处理\n" + (store.quota.map { UsageText.details($0, at: context.date) } ?? "额度暂无数据") + "\n移入或点击展开任务，面板额度入口可打开用量网页。")
         }
-        .foregroundStyle(.white.opacity(0.92))
-        .frame(maxHeight: .infinity)
-        .background(drawsSurface ? .black : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: notchWidth > 0 ? 10 : 14))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: open)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Codex Top，\(store.runningCount) 个任务运行中，\(store.attentionCount) 个待处理")
-        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -158,7 +171,7 @@ struct SettingsView: View {
                     Text("深色").tag(PanelTheme.dark)
                     Text("浅色玻璃").tag(PanelTheme.light)
                 }.pickerStyle(.segmented)
-                Text("顶部刘海保持黑色；展开面板与浮窗同步换色。").font(.caption).foregroundStyle(.secondary)
+                Text("刘海、展开面板与浮窗使用同一主题。").font(.caption).foregroundStyle(.secondary)
                 Picker("显示比例", selection: Binding(get: { store.preferences.resolvedScale }, set: { store.setScale($0) })) {
                     Text("80%").tag(0.8)
                     Text("90%").tag(0.9)
@@ -180,25 +193,25 @@ struct SettingsView: View {
             Section("任务") {
                 Toggle("自动监控新任务", isOn: Binding(get: { store.preferences.autoMonitor }, set: { store.setAutoMonitor($0) }))
                 Text("新建并开始执行后加入列表。手动取消关注的任务不会再次自动加入。").font(.caption).foregroundStyle(.secondary)
-                Toggle("暂停刷新", isOn: $store.paused)
+                Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
             Section("账户额度") { UsageSettingsContent(store: store) }
             Section("显示位置") {
                 Picker("显示方式", selection: Binding(get: { store.placement }, set: { store.setPlacement($0) })) {
-                    Text("顶部").tag(PanelPlacement.top)
+                    Text("刘海模式").tag(PanelPlacement.top)
                     Text("常驻浮窗").tag(PanelPlacement.floating)
                     Text("圆环").tag(PanelPlacement.orb)
                     Text("仅状态栏").tag(PanelPlacement.menuBar)
                 }.pickerStyle(.segmented)
-                Picker("顶部显示器", selection: Binding(get: { store.preferences.preferredDisplay ?? "" }, set: { store.setDisplay($0) })) {
+                Picker("刘海显示器", selection: Binding(get: { store.preferences.preferredDisplay ?? "" }, set: { store.setDisplay($0) })) {
                     Text("自动 · 系统主显示器").tag("")
                     ForEach(displays) { display in Text(display.name).tag(display.id) }
                     if let saved = store.preferences.preferredDisplay, !displays.contains(where: { $0.id == saved }) {
                         Text("已断开的显示器 · 暂用主屏").tag(saved)
                     }
                 }
-                Text("顶部悬停展开。圆环点击展开，移开保持，点外或按 Esc 缩回；拖至顶部仍留桌面，右键菜单可选仅状态栏。常驻浮窗仍可拖至顶部吸附。").font(.caption).foregroundStyle(.secondary)
+                Text("刘海模式悬停展开；无刘海的外接屏显示在屏幕上沿。圆环点击展开、点外或按 Esc 缩回，拖至上沿仍留桌面。常驻浮窗可拖至上沿收进状态栏。").font(.caption).foregroundStyle(.secondary)
                 Button("找回窗口", action: recoverWindows)
             }
             Section("数据与启动") {

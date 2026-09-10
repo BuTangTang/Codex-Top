@@ -8,15 +8,20 @@ import CodexTopCore
     private var statusItem: NSStatusItem!
     private var statusMenu: NSMenu!
     private var statusObservation: AnyCancellable?
+    private var shutdownTask: Task<Void, Never>?
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = TaskStore(); windows = WindowController(store: store)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        windows.statusAnchorProvider = { [weak self] in
+            guard let button = self?.statusItem?.button, let window = button.window else { return nil }
+            return window.convertToScreen(button.convert(button.bounds, to: nil))
+        }
         statusItem.button?.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Codex Top")
         statusItem.button?.toolTip = "Codex Top · 任务监控"
         let menu = NSMenu()
         add("显示任务", #selector(showTasks), to: menu)
         add("选择任务…", #selector(pickTasks), to: menu)
-        add("悬浮 / 收回顶部", #selector(toggleFloating), to: menu)
+        add("悬浮 / 收回刘海", #selector(toggleFloating), to: menu)
         add("圆环模式", #selector(showOrb), to: menu)
         add("仅状态栏", #selector(menuBarOnly), to: menu)
         add("找回窗口", #selector(recover), to: menu)
@@ -73,6 +78,17 @@ import CodexTopCore
         button.toolTip = "Codex Top · \(store.runningCount) 个运行中 · \(store.attentionCount) 个待处理"
         button.setAccessibilityLabel(button.toolTip)
     }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let store else { return .terminateNow }
+        if shutdownTask == nil {
+            store.stop()
+            shutdownTask = Task {
+                await store.shutdown()
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        return .terminateLater
+    }
     func applicationWillTerminate(_ notification: Notification) { store?.stop() }
     private func add(_ title: String, _ action: Selector, to menu: NSMenu, key: String = "") {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
@@ -93,10 +109,7 @@ import CodexTopCore
     }
     @objc private func showTasks() {
         if store.placement == .menuBar {
-            let anchor = statusItem.button.flatMap { button in
-                button.window.map { $0.convertToScreen(button.convert(button.bounds, to: nil)) }
-            }
-            windows.toggleStatusPanel(anchor: anchor)
+            windows.toggleStatusPanel()
         }
         else { windows.toggleExpanded() }
     }
@@ -108,7 +121,7 @@ import CodexTopCore
     @objc private func settings() { windows.showSettings() }
     @objc private func refresh() { store.refreshQuota(force: true); Task { await store.refresh() } }
     @objc private func usage() { store.openUsagePage() }
-    @objc private func quit() { store.stop(); NSApp.terminate(nil) }
+    @objc private func quit() { NSApp.terminate(nil) }
 }
 
 let application = NSApplication.shared

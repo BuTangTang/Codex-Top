@@ -27,3 +27,18 @@ bash scripts/package.sh --universal
 ## GitHub Actions
 
 当前只提供 `docs/ci/macos-build.yml.example` 模板，尚未启用（当前登录缺少 workflow scope）。启用后代码 push 到 main 或提出 PR 时，工作流执行测试与 universal 打包，保存 ZIP、校验值以及对应提交的源码 ZIP。文档改动不触发构建。手动也可从 Actions 运行。当前远程验证结果见 [M3](validation/M3.md)。产物保留 14 天，属于构建检查产物，不自动发布正式版本。
+
+### 独立账户读取诊断
+
+`swift run codex-top-inspect --account-usage` 只执行官方账户额度读取，不扫描任务或发送消息；输出来源、观察时间、窗口分钟数和耗时，不输出账户标识、余额原响应或凭据。只有需要真实额度诊断时运行，任务扫描与账户请求有不同周期。
+
+
+## 生成分享 DMG
+
+```sh
+swift test
+VERSION=0.1.0-beta.1 bash scripts/build-app.sh --universal
+bash scripts/build-dmg.sh
+```
+
+DMG 脚本复用现有真实 universal 应用，拒绝 Demo，检查版本、两个架构的最低 macOS 和签名。产物含应用、Applications 链接与安装说明，输出到 `dist/`，另附可移植的 SHA-256 文件；不会包含本地任务、账户或偏好。发布前还需只读挂载检查内容并卸载，实际软件截图须与概念图分开标注。

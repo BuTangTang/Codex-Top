@@ -1,7 +1,7 @@
 import SwiftUI
 import CodexTopCore
 
-private enum UsageText {
+enum UsageText {
     static func window(_ minutes: Int) -> String {
         switch minutes {
         case 300: "5h"
@@ -51,7 +51,9 @@ struct UsageSummaryButton: View {
                         Text(store.demo ? "演示模式 · 查看用量" : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
                     }
                 }
-                .lineLimit(1).minimumScaleFactor(0.85)
+                .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium))
+                .foregroundStyle(Palette.primary(store.theme.colorScheme))
+                .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading).frame(height: 30)
                 .contentShape(Rectangle())
             }
@@ -100,6 +102,17 @@ struct UsageSettingsContent: View {
             }
         }
         if let warning = store.quotaWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+        if !store.demo {
+            Text("每 60 秒独立读取账户额度，无需发送消息。切换所选 Codex 目录的账号后，可点击刷新；暂停任务刷新不影响额度读取。")
+                .font(.caption).foregroundStyle(.secondary)
+            if let historical = store.historicalQuota {
+                DisclosureGroup("历史日志额度（不代表当前账号）") {
+                    Text(UsageText.details(historical, at: .now)).font(.caption).foregroundStyle(.secondary)
+                    Text("任务日志无法确认属于当前登录账号，因此不会覆盖上方账户额度。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
         HStack {
             Button("刷新额度") { store.refreshQuota(force: true) }.disabled(store.demo || store.quotaRefreshing)
             Spacer()

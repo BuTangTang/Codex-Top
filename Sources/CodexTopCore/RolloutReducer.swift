@@ -103,12 +103,19 @@ public struct RolloutReducer: Sendable {
 public struct IncrementalRollout: Sendable {
     public private(set) var reducer = RolloutReducer()
     public private(set) var offset: UInt64 = 0
+    /// The cursor reached the file size sampled by the latest refresh; a partial final line still waits for its newline.
+    public private(set) var isCaughtUp = false
     private var inode: UInt64?
+    private var observedSize: UInt64?
     private var modified: Date?
     private var pending = Data()
     private var skippingLongLine = false
     private let maximumRead: Int
-    public init(maximumRead: Int = 65_536) { self.maximumRead = max(1024, maximumRead) }
+    private let maximumCatchUpRead: Int
+    public init(maximumRead: Int = 65_536, maximumCatchUpRead: Int = 4 * 1_024 * 1_024) {
+        self.maximumRead = max(1024, maximumRead)
+        self.maximumCatchUpRead = max(self.maximumRead, maximumCatchUpRead)
+    }
     /// Returns bytes actually read; unchanged files incur only a metadata check.
     public mutating func refresh(url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -116,24 +123,33 @@ public struct IncrementalRollout: Sendable {
         let newInode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
         let newModified = attributes[.modificationDate] as? Date
         if inode == newInode && size == offset && modified == newModified { return 0 }
-        let reset = inode != newInode || size < offset || (size == offset && modified != newModified)
-        if reset { reducer = RolloutReducer(); offset = 0; pending.removeAll(); skippingLongLine = false }
+        let rewritten = observedSize.map { size < $0 || (size == $0 && modified != newModified) } ?? false
+        let reset = inode != newInode || size < offset || rewritten
+        if reset { reducer = RolloutReducer(); offset = 0; pending.removeAll(); skippingLongLine = false; isCaughtUp = false }
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
-        // Cap cold starts and catch-up after very large output bursts.
-        let start = max(offset, size > UInt64(maximumRead) ? size - UInt64(maximumRead) : 0)
+        // Cold starts remain bounded. Warm reads must not skip events or discard pending questions/turn IDs.
+        let start = reset && size > UInt64(maximumRead) ? size - UInt64(maximumRead) : offset
         let skipped = start > offset
-        if skipped { pending.removeAll(); skippingLongLine = true; reducer = RolloutReducer() }
+        if skipped { pending.removeAll(); skippingLongLine = true }
         try handle.seek(toOffset: start)
-        let data = try handle.read(upToCount: maximumRead) ?? Data()
-        offset = start + UInt64(data.count); inode = newInode; modified = newModified
-        pending.append(data)
-        while let newline = pending.firstIndex(of: 10) {
-            let line = pending[..<newline]
-            if !skippingLongLine && !line.isEmpty { reducer.consume(Data(line)) }
-            skippingLongLine = false
-            pending.removeSubrange(...newline)
+        offset = start; inode = newInode; observedSize = size; modified = newModified
+        let budget = reset ? maximumRead : maximumCatchUpRead
+        var bytesRead = 0
+        while offset < size && bytesRead < budget {
+            let count = min(maximumRead, budget - bytesRead, Int(min(UInt64(maximumRead), size - offset)))
+            let data = try handle.read(upToCount: count) ?? Data()
+            guard !data.isEmpty else { break }
+            offset += UInt64(data.count); bytesRead += data.count
+            pending.append(data)
+            while let newline = pending.firstIndex(of: 10) {
+                let line = pending[..<newline]
+                if !skippingLongLine && !line.isEmpty && line.count <= maximumRead { reducer.consume(Data(line)) }
+                skippingLongLine = false
+                pending.removeSubrange(...newline)
+            }
+            if pending.count > maximumRead { pending.removeAll(); skippingLongLine = true }
         }
-        if pending.count > maximumRead { pending.removeAll(); skippingLongLine = true }
-        return data.count
+        isCaughtUp = offset >= size
+        return bytesRead
     }
 }

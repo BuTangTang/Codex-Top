@@ -102,6 +102,47 @@ final class QuotaTests: XCTestCase, @unchecked Sendable {
         try assertReaped(fixture.root)
     }
 
+    func testNextAutomaticReadUsesNewAccountWithoutAnyTaskMessages() async throws {
+        let fixture = try fixture(afterInitialize: #"cat "$CODEX_HOME/account-response""#)
+        let responseFile = fixture.root.appendingPathComponent("account-response")
+        let accountA = #"{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":90,"windowDurationMins":300}}}}"# + "\n"
+        let accountB = #"{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}}}}"# + "\n"
+        try accountA.write(to: responseFile, atomically: true, encoding: .utf8)
+        let clock = QuotaTestClock()
+        let client = AccountUsageClient(root: fixture.root, executableURL: fixture.executable, timeout: 2, clock: { clock.now })
+        let first = try await client.snapshot()
+        XCTAssertEqual(first.fiveHour?.remainingPercent, 10)
+        try accountB.write(to: responseFile, atomically: true, encoding: .utf8)
+        clock.advance(60)
+        let second = try await client.snapshot()
+        XCTAssertEqual(second.fiveHour?.remainingPercent, 90)
+        XCTAssertEqual(try attempts(fixture.root), 2)
+        let methods = try String(contentsOf: fixture.root.appendingPathComponent("requests"), encoding: .utf8)
+            .split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+            .compactMap { $0["method"] as? String }
+        XCTAssertEqual(methods, Array(repeating: ["initialize", "initialized", "account/rateLimits/read"], count: 2).flatMap { $0 })
+        try assertReaped(fixture.root)
+    }
+
+    func testFailedNewAccountReadDoesNotReturnPreviousAccountSnapshot() async throws {
+        let fixture = try fixture(afterInitialize: #"cat "$CODEX_HOME/account-response""#)
+        let responseFile = fixture.root.appendingPathComponent("account-response")
+        try (#"{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":300}}}}"# + "\n")
+            .write(to: responseFile, atomically: true, encoding: .utf8)
+        let clock = QuotaTestClock()
+        let client = AccountUsageClient(root: fixture.root, executableURL: fixture.executable, timeout: 2, clock: { clock.now })
+        _ = try await client.snapshot()
+        try (#"{"id":2,"error":{"code":-1,"message":"synthetic-signed-out"}}"# + "\n")
+            .write(to: responseFile, atomically: true, encoding: .utf8)
+        clock.advance(5)
+        for _ in 0..<2 {
+            do { _ = try await client.snapshot(force: true); XCTFail("Must not reuse account A after a failed account B read") }
+            catch { XCTAssertEqual(error as? AccountUsageClientError, .unavailable) }
+        }
+        XCTAssertEqual(try attempts(fixture.root), 2)
+        try assertReaped(fixture.root)
+    }
+
     func testTimeoutKillsAndReapsServerThatIgnoresTerminate() async throws {
         let fixture = try fixture(afterInitialize: "trap '' TERM\nwhile :; do :; done")
         let client = AccountUsageClient(root: fixture.root, executableURL: fixture.executable, timeout: 1, clock: { ProcessInfo.processInfo.systemUptime })

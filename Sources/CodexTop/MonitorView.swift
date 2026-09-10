@@ -11,11 +11,13 @@ struct MonitorView: View {
     let compact: Bool
     @Binding var showFinished: Bool
     var drawsSurface = true
+    var animationsActive = true
     var collapse: (() -> Void)? = nil
     var pickTasks: () -> Void
     var settings: () -> Void
     var finishedChanged: () -> Void = {}
-    var dragStarted: () -> Void = {}
+    var draggable = false
+    var dragStarted: (CGSize) -> Void = { _ in }
     var dragMoved: () -> Void = {}
     var dragEnded: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,38 +51,31 @@ struct MonitorView: View {
                         Button("选择任务", action: pickTasks).controlSize(.large)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollViewReader { proxy in
-                        VStack(spacing: 0) {
-                            ScrollView {
-                                LazyVStack(spacing: 0) {
-                                    ForEach(visibleTaskIDs, id: \.self) { taskID in
-                                        VStack(spacing: 0) {
-                                            MonitorTaskRow(store: store, taskID: taskID, compact: compact)
-                                            separator
-                                        }.id(taskID)
-                                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-                                    }
+                    VStack(spacing: 0) {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(visibleTaskIDs, id: \.self) { taskID in
+                                    VStack(spacing: 0) {
+                                        MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
+                                        separator
+                                    }.id(taskID)
+                                        .transition(.opacity)
                                 }
-                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: visibleTaskIDs)
-                            }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
-                            if !store.finished.isEmpty {
-                                Button {
-                                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
-                                    finishedChanged()
-                                    if showFinished, let first = store.finished.first {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { proxy.scrollTo(first.id, anchor: .top) }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 14) {
-                                        Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
-                                            .font(.system(size: 11, weight: .medium)).frame(width: 24)
-                                        Text("已结束 \(store.finished.count)").font(.system(size: 14))
-                                        Spacer()
-                                    }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.disclosure)
-                                }.buttonStyle(QuietRowStyle())
                             }
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: visibleTaskIDs)
+                        }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
+                        if !store.finished.isEmpty {
+                            Button {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
+                                finishedChanged()
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
+                                        .font(.system(size: 11, weight: .medium)).frame(width: 24)
+                                    Text("已结束 \(store.finished.count)").font(PanelFonts.readable(14, scale: store.uiScale))
+                                    Spacer()
+                                }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.disclosure)
+                            }.buttonStyle(QuietRowStyle())
                         }
                     }
                 }
@@ -101,47 +96,50 @@ struct MonitorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if compact {
-                WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded)
-                    .frame(width: 16, height: 30)
-                    .help("拖动浮窗；靠近顶部松手收进状态栏")
-            }
-            Text(store.dockingHint && compact ? "松手收进状态栏" : "监控任务").font(PanelFonts.header)
-            Text(store.dockingHint && compact ? "" : "\(store.selected.count)").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+            Text("监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold))
+            Text("\(store.selected.count)").font(PanelFonts.readable(14, scale: store.uiScale)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 .contentTransition(.numericText()).animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.selected.count)
             if compact && store.demo { Text("演示").font(.system(size: 12)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             Spacer(minLength: 4)
             if compact {
                 Button { store.setTheme(store.theme == .dark ? .light : .dark) } label: {
                     ThemeToggleIcon(theme: store.theme).font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 24, height: 30)
-                }.accessibilityLabel(store.theme == .dark ? "切换浅色玻璃" : "切换深色玻璃")
+                }.headerButtonHitArea().accessibilityLabel(store.theme == .dark ? "切换浅色玻璃" : "切换深色玻璃")
             }
             if !compact {
                 Button(action: pickTasks) {
                     HStack(spacing: 8) {
                         Image(systemName: "plus").font(.system(size: 15, weight: .medium))
-                        Text("选择任务").font(PanelFonts.label)
+                        Text("选择任务").font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium))
                     }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 10).frame(height: 30)
                         .background(Palette.primary(store.theme.colorScheme).opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
-                }.help("搜索和选择监控任务").accessibilityLabel("选择任务")
+                }.headerButtonHitArea().help("搜索和选择监控任务").accessibilityLabel("选择任务")
             }
             Button { store.setFloating(!store.preferences.floating) } label: {
                 Image(systemName: store.preferences.floating ? "pin.fill" : "pin")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(store.preferences.floating ? Palette.accent : Palette.secondary(store.theme.colorScheme)).frame(width: 28, height: 30)
-            }.help(compact ? "收回顶部" : "悬浮置顶").accessibilityLabel(compact ? "收回顶部" : "悬浮置顶")
+            }.headerButtonHitArea().help(compact ? "收回刘海" : "悬浮置顶").accessibilityLabel(compact ? "收回刘海" : "悬浮置顶")
             if let collapse {
                 Button(action: collapse) {
                     Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).frame(width: 24, height: 30)
-                }.accessibilityLabel("收回圆环").help("缩回原来的圆环位置")
+                }.headerButtonHitArea().accessibilityLabel("收回圆环").help("缩回原来的圆环位置")
             }
             if compact {
                 Button { store.setFloating(false) } label: {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 25, height: 30)
-                }.help("关闭浮窗，保留顶部监控").accessibilityLabel("关闭浮窗")
+                }.headerButtonHitArea().help("关闭浮窗，保留刘海监控").accessibilityLabel("关闭浮窗")
             }
         }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 16)
             .frame(height: compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader)
+            .overlayPreferenceValue(HeaderButtonBounds.self) { anchors in
+                if draggable {
+                    GeometryReader { geometry in
+                        WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded,
+                                         excludedFrames: anchors.map { geometry[$0] })
+                    }
+                }
+            }
             .contextMenu { Button("选择任务", action: pickTasks); Button("监控设置", action: settings) }
     }
 
@@ -169,6 +167,7 @@ private struct MonitorTaskRow: View {
     @ObservedObject var store: TaskStore
     let taskID: String
     let compact: Bool
+    let animationsActive: Bool
 
     var body: some View {
         if let task = store.graph.roots.first(where: { $0.id == taskID }) {
@@ -176,14 +175,14 @@ private struct MonitorTaskRow: View {
             let childCount = store.graph.children[taskID]?.count ?? 0
             Button { store.openTask(task) } label: {
                 HStack(spacing: compact ? 11 : 14) {
-                    ActivityIndicator(phase: activity.phase, small: compact)
+                    ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.task).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                         if !compact {
                             HStack(spacing: 5) {
                                 Text(activity.detail).lineLimit(1)
                                 if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                            }.font(PanelFonts.detail).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                            }.font(PanelFonts.readable(14, scale: store.uiScale)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: compact ? 8 : 10) {
@@ -197,9 +196,23 @@ private struct MonitorTaskRow: View {
                             }
                         } else { Text(activity.phase.label).foregroundStyle(activity.phase.tint(store.theme.colorScheme)) }
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                    }.font(.system(size: 13)).fixedSize()
+                    }.font(PanelFonts.readable(13, scale: store.uiScale)).fixedSize()
                 }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help("\(task.title)\n\(activity.detail)\n点击回到 Codex")
         }
+    }
+}
+
+/// Resolve actual button bounds after scaling/layout so every other header point is draggable.
+private struct HeaderButtonBounds: PreferenceKey {
+    static var defaultValue: [Anchor<CGRect>] { [] }
+    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private extension View {
+    func headerButtonHitArea() -> some View {
+        anchorPreference(key: HeaderButtonBounds.self, value: .bounds) { [$0] }
     }
 }

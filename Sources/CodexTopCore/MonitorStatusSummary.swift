@@ -2,6 +2,7 @@ import Foundation
 
 /// Preserve simultaneous running and attention signals in compact presentations.
 public struct MonitorStatusSummary: Equatable, Sendable {
+    public let total: Int
     public let running: Int
     public let waiting: Int
     public let failed: Int
@@ -9,6 +10,7 @@ public struct MonitorStatusSummary: Equatable, Sendable {
     public var attention: Int { waiting + failed }
 
     public init(phases: [TaskPhase]) {
+        total = phases.count
         running = phases.filter { $0 == .running }.count
         waiting = phases.filter { $0 == .waiting }.count
         failed = phases.filter { $0 == .failed }.count

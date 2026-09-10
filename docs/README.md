@@ -5,8 +5,10 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
 - [使用说明](usage.md)
 - [开发与打包](development.md)
+- [v0.1.0-beta.1 预发布说明](releases/0.1.0-beta.1.md)：DMG 安装、版本内容与验收限制。
 - [M2 实机验收及待检查项](validation/M2.md)
 - [圆环原位变形与状态动画](validation/M2-circle.md)
+- [刘海、圆环提醒与轮廓修订](validation/notch-orb-refinement.md)
 - [M3 打包与真实接入验收](validation/M3.md)
 - [R01–R18 验收证据与缺项](validation/acceptance-matrix.md)
 
@@ -17,3 +19,6 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [M2 原生窗口与交互](REQ-001-任务监控/tasks/M2-界面交互.md)
 - [M3 打包与真实验收](REQ-001-任务监控/tasks/M3-交付验收.md)
 - [设计概念](design/README.md)
+
+- [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
+- [独立额度与流量核对](validation/account-refresh-traffic.md)

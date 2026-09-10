@@ -18,13 +18,19 @@ enum PanelFonts {
     static let task = Font.system(size: 16, weight: .medium)
     static let detail = Font.system(size: 14)
     static let label = Font.system(size: 14, weight: .medium)
+
+    // Small window presets should not shrink supporting text below a readable size.
+    static func readable(_ size: CGFloat, minimum: CGFloat = 12, scale: CGFloat,
+                         weight: Font.Weight = .regular) -> Font {
+        .system(size: max(size, minimum / max(0.8, scale)), weight: weight)
+    }
 }
 
 enum Palette {
     static let accent = Color(red: 0.19, green: 0.52, blue: 1)
     // Explicit endpoints can interpolate. Dynamic NSColor providers jump when AppKit changes appearance.
     static func primary(_ scheme: ColorScheme) -> Color { scheme == .dark ? .white : Color(white: 0.12) }
-    static func secondary(_ scheme: ColorScheme) -> Color { Color(white: scheme == .dark ? 0.65 : 0.40) }
+    static func secondary(_ scheme: ColorScheme) -> Color { Color(white: scheme == .dark ? 0.76 : 0.34) }
     static func hairline(_ scheme: ColorScheme) -> Color { (scheme == .dark ? Color.white : .black).opacity(0.10) }
 }
 
@@ -186,39 +192,54 @@ struct ScaledPanel<Content: View>: View {
     }
 }
 
+/// The overlay catches header drags, while holes let buttons receive their own mouse events.
 struct WindowDragHandle: View {
-    var started: () -> Void
+    var started: (CGSize) -> Void
     var moved: () -> Void
     var ended: () -> Void
-    var showsGrip = true
+    var excludedFrames: [CGRect] = []
     @State private var active = false
-    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         Color.clear
-            .overlay {
-                if showsGrip { Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(Palette.secondary(colorScheme)) }
-            }
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !active { active = true; started() }
+            .contentShape(HeaderDragArea(excludedFrames: excludedFrames), eoFill: true)
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
+                    if !active { active = true; started(value.translation) }
                     moved()
                 }
                 .onEnded { _ in active = false; ended() })
+    }
+}
+
+private struct HeaderDragArea: Shape {
+    var excludedFrames: [CGRect]
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        for excluded in excludedFrames {
+            let clipped = excluded.intersection(rect)
+            if !clipped.isNull { path.addRect(clipped) }
         }
+        return path
+    }
 }
 
 struct ActivityIndicator: View {
     let phase: TaskPhase
     var small = false
+    var animationsActive = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visible = false
     var body: some View {
         let tint = phase.tint(colorScheme)
         ZStack {
             if phase == .running {
                 Circle().stroke(tint.opacity(0.25), lineWidth: 3)
-                Circle().trim(from: 0.12, to: 0.83).stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-70))
+                NativeRunningArc(tint: tint, rotating: animationsActive && visible && !reduceMotion, lineWidth: 3, inset: 1.5,
+                                 trimStart: 0.12, trimEnd: 0.83, startDegrees: -70)
+                    // Keep the original circle radius while containing its 3pt stroke.
+                    .padding(-1.5)
+                    .allowsHitTesting(false)
             } else if phase == .waiting {
                 Circle().fill(tint.opacity(0.12))
                 Circle().fill(tint).padding(6)
@@ -227,6 +248,8 @@ struct ActivityIndicator: View {
             }
         }.frame(width: small ? 22 : 24, height: small ? 22 : 24)
             .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
+            .onAppear { visible = true }
+            .onDisappear { visible = false }
             .accessibilityHidden(true)
     }
 }

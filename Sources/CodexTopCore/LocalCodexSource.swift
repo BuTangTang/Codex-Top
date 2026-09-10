@@ -44,6 +44,10 @@ public actor LocalCodexSource {
                 do {
                     bytes += try tail.refresh(url: file)
                     task.activity = tail.reducer.activity.effective(at: now)
+                    if !tail.isCaughtUp {
+                        task.activity.phase = .unknown
+                        task.activity.detail = "正在同步任务活动…"
+                    }
                     if let candidate = tail.reducer.quota, quota == nil || candidate.observedAt > quota!.observedAt { quota = candidate }
                     tails[id] = tail
                 } catch {
@@ -95,4 +99,3 @@ public actor LocalCodexSource {
         return spawn["parent_thread_id"] as? String
     }
 }
-

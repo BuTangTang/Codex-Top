@@ -12,7 +12,6 @@ import CodexTopCore
     @Published private(set) var quotaWarning: String?
     @Published private(set) var sourceWarning: String?
     @Published var notice: String? { didSet { if notice != oldValue { onChange?() } } }
-    @Published var dockingHint = false
     @Published private(set) var lastRefresh: Date?
     @Published var paused = false
     @Published private(set) var refreshing = false
@@ -29,10 +28,12 @@ import CodexTopCore
     private var source: LocalCodexSource
     private var usageClient: AccountUsageClient
     private var accountQuota: QuotaSnapshot?
-    private var logQuota: QuotaSnapshot?
+    @Published private(set) var historicalQuota: QuotaSnapshot?
     private var usageLoop: Task<Void, Never>?
     private var usageRequest: Task<Void, Never>?
+    private var ownedUsageRequests: [UUID: Task<Void, Never>] = [:]
     private var usageRequestID = UUID()
+    private var stopping = false
     private let file: PreferencesFile
     private var persistenceAvailable = true
     private var refreshLoop: Task<Void, Never>?
@@ -69,6 +70,7 @@ import CodexTopCore
     var attentionCount: Int { statusSummary.attention }
     func start() {
         guard refreshLoop == nil else { return }
+        stopping = false
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -79,9 +81,18 @@ import CodexTopCore
         startUsageLoop()
     }
     func stop() {
+        stopping = true
         refreshLoop?.cancel(); refreshLoop = nil
         usageLoop?.cancel(); usageLoop = nil
         cancelUsageRequest()
+        ownedUsageRequests.values.forEach { $0.cancel() }
+    }
+    func shutdown() async {
+        stop()
+        // Requests remain owned while cancellation closes and reaps their CLI,
+        // including an old-directory request that is still finishing cleanup.
+        let requests = Array(ownedUsageRequests.values)
+        for request in requests { await request.value }
     }
     private func startUsageLoop() {
         guard !demo, usageLoop == nil else { return }
@@ -93,26 +104,33 @@ import CodexTopCore
         }
     }
     func refreshQuota(force: Bool = false) {
-        guard !demo, usageRequest == nil, force || !paused else { return }
+        guard !demo, !stopping, usageRequest == nil else { return }
         let generation = sourceGeneration, requestID = UUID(), client = usageClient
         usageRequestID = requestID; quotaRefreshing = true
         usageRequest = Task { [weak self] in
             guard let self else { return }
             defer {
+                self.ownedUsageRequests.removeValue(forKey: requestID)
                 if self.usageRequestID == requestID {
                     self.usageRequest = nil; self.quotaRefreshing = false
                 }
             }
             do {
                 let snapshot = try await client.snapshot(force: force)
-                guard !Task.isCancelled, generation == self.sourceGeneration else { return }
+                guard !Task.isCancelled, !self.stopping, generation == self.sourceGeneration,
+                      self.usageRequestID == requestID else { return }
                 self.accountQuota = snapshot; self.quotaWarning = nil
                 self.updateQuota()
             } catch {
-                guard !Task.isCancelled, generation == self.sourceGeneration else { return }
-                self.quotaWarning = "账户额度暂时无法更新，可打开官方用量页面查看。"
+                guard !Task.isCancelled, !self.stopping, generation == self.sourceGeneration,
+                      self.usageRequestID == requestID else { return }
+                // A failed login after switching accounts must not display the
+                // previous account or an unrelated conversation's quota as current.
+                self.accountQuota = nil; self.updateQuota()
+                self.quotaWarning = "账户额度暂时无法更新，请确认所选 Codex 目录的登录与网络；切换账号后可手动刷新。"
             }
         }
+        ownedUsageRequests[requestID] = usageRequest
     }
     private func cancelUsageRequest() {
         usageRequestID = UUID(); usageRequest?.cancel(); usageRequest = nil; quotaRefreshing = false
@@ -120,23 +138,23 @@ import CodexTopCore
     private func resetUsageSource() {
         cancelUsageRequest()
         usageClient = AccountUsageClient(root: rootURL)
-        accountQuota = nil; logQuota = nil; quota = nil; quotaWarning = nil
+        accountQuota = nil; historicalQuota = nil; quota = nil; quotaWarning = nil
         refreshQuota()
     }
     private func updateQuota() {
-        quota = [accountQuota, logQuota].compactMap { $0 }.max { $0.observedAt < $1.observedAt }
+        quota = demo ? historicalQuota : accountQuota
     }
     func refresh() async {
-        guard !refreshing else { return }
+        guard !stopping, !refreshing else { return }
         refreshing = true
         let generation = sourceGeneration
         defer { refreshing = false; loading = false }
         do {
             let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
             let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot()
-            guard generation == sourceGeneration else { return }
+            guard !stopping, generation == sourceGeneration else { return }
             tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
-            logQuota = snapshot.quota; updateQuota()
+            historicalQuota = snapshot.quota; updateQuota()
             sourceWarning = snapshot.warning; lastRefresh = snapshot.observedAt
             let previous = preferences
             MonitoringPolicy.reconcile(&preferences, tasks: tasks, now: snapshot.observedAt)
@@ -171,11 +189,6 @@ import CodexTopCore
     func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : .top) }
     func setPlacement(_ value: PanelPlacement) {
         preferences.placement = value; preferences.floating = value == .floating
-        save(); onModeChange?()
-    }
-    func dockToMenuBar(display: String) {
-        preferences.preferredDisplay = display
-        preferences.placement = .menuBar; preferences.floating = false
         save(); onModeChange?()
     }
     func setScale(_ value: Double) { preferences.uiScale = min(1, max(0.8, value)); save(); onChange?() }

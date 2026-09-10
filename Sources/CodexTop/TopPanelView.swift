@@ -20,7 +20,7 @@ private struct TopSurfaceOutline: Shape {
         set { progress = newValue }
     }
     func path(in rect: CGRect) -> Path {
-        let bottomRadius = 14 + 8 * progress
+        let bottomRadius = 12 + 10 * progress
         return UnevenRoundedRectangle(
             topLeadingRadius: attached ? 0 : bottomRadius,
             bottomLeadingRadius: bottomRadius,
@@ -55,7 +55,7 @@ struct TopPanelView: View {
     }
 
     private var statusPopover: some View {
-        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished,
+        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, animationsActive: state.progress > 0,
                     pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
             .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
             .scaleEffect(store.uiScale, anchor: .topLeading)
@@ -71,12 +71,17 @@ struct TopPanelView: View {
             let outline = TopSurfaceOutline(progress: state.progress, attached: state.cameraHeight > 0)
             ZStack(alignment: .top) {
                 GlassFill()
-                // The hardware notch always blends into black. Light glass emerges below it.
-                Color.black.opacity(1 - Double(state.progress))
+                // Keep the same glass tint through expansion so the wings and body
+                // read as one continuous surface. The underlying blur stays opaque.
+                Color.white.opacity(store.theme == .light ? 0.24 : 0)
+                    .allowsHitTesting(false)
                 if state.cameraHeight > 0 {
-                    Color.black.frame(height: state.cameraHeight)
+                    UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 9,
+                                           bottomTrailingRadius: 9, topTrailingRadius: 0)
+                        .fill(.black).frame(width: state.cameraWidth, height: state.cameraHeight)
+                        .allowsHitTesting(false)
                 }
-                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false,
+                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false, animationsActive: state.progress > 0,
                             pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                     .frame(width: state.expandedSize.width / store.uiScale, height: max(1, (state.expandedSize.height - state.cameraHeight) / store.uiScale))
                     .scaleEffect(store.uiScale, anchor: .top)
@@ -97,7 +102,7 @@ struct TopPanelView: View {
             .frame(width: state.surfaceSize.width, height: state.surfaceSize.height, alignment: .top)
             .clipShape(outline)
             .overlay {
-                outline.stroke(.white.opacity(store.theme == .light ? 0.65 * Double(state.progress) : 0), lineWidth: 0.6).padding(0.5)
+                outline.stroke(.white.opacity(store.theme == .light ? 0.20 : 0), lineWidth: 0.5).padding(0.5)
                     .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
