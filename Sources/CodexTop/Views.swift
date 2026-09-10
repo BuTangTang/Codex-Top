@@ -147,6 +147,18 @@ struct SettingsView: View {
                     Text("100%").tag(1.0)
                 }.pickerStyle(.segmented)
             }
+            if store.demo {
+                Section("动画预览") {
+                    Text("用示例任务体验圆环状态，不影响真实任务。").font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("运行") { store.previewDemoPhase(.running) }
+                        Button("待回答") { store.previewDemoPhase(.waiting) }
+                        Button("完成") { store.previewDemoPhase(.completed) }
+                        Button("出错") { store.previewDemoPhase(.failed) }
+                    }
+                    Button("恢复示例状态") { store.previewDemoPhase(nil) }
+                }
+            }
             Section("任务") {
                 Toggle("自动监控新任务", isOn: Binding(get: { store.preferences.autoMonitor }, set: { store.setAutoMonitor($0) }))
                 Text("新建并开始执行后加入列表。手动取消关注的任务不会再次自动加入。").font(.caption).foregroundStyle(.secondary)

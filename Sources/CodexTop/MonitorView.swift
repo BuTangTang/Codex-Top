@@ -5,6 +5,7 @@ struct MonitorView: View {
     @ObservedObject var store: TaskStore
     let compact: Bool
     var drawsSurface = true
+    var collapse: (() -> Void)? = nil
     var pickTasks: () -> Void
     var settings: () -> Void
     var finishedChanged: (Bool) -> Void = { _ in }
@@ -122,6 +123,11 @@ struct MonitorView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(store.preferences.floating ? Palette.accent : Palette.secondary).frame(width: 28, height: 30)
             }.help(compact ? "收回顶部" : "悬浮置顶").accessibilityLabel(compact ? "收回顶部" : "悬浮置顶")
+            if let collapse {
+                Button(action: collapse) {
+                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).frame(width: 24, height: 30)
+                }.accessibilityLabel("收回圆环").help("缩回原来的圆环位置")
+            }
             if compact {
                 Button { store.setFloating(false) } label: {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary).frame(width: 25, height: 30)

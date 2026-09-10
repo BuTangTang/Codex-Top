@@ -14,6 +14,8 @@ import CodexTopCore
     @Published var paused = false
     @Published private(set) var refreshing = false
     @Published private(set) var loading = true
+    @Published private(set) var completionSequence = 0
+    @Published private(set) var demoPhase: TaskPhase?
     let demo: Bool
     var onChange: (() -> Void)?
     var onDisplayChange: (() -> Void)?
@@ -50,8 +52,9 @@ import CodexTopCore
     }
     var active: [CodexTask] { selected.filter { !graph.activity(for: $0).phase.isFinished } }
     var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished } }
-    var runningCount: Int { selected.filter { graph.activity(for: $0).phase == .running }.count }
-    var attentionCount: Int { selected.filter { [.waiting, .failed].contains(graph.activity(for: $0).phase) }.count }
+    var statusSummary: MonitorStatusSummary { MonitorStatusSummary(phases: selected.map { graph.activity(for: $0).phase }) }
+    var runningCount: Int { statusSummary.running }
+    var attentionCount: Int { statusSummary.attention }
     func start() {
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
@@ -68,7 +71,8 @@ import CodexTopCore
         let generation = sourceGeneration
         defer { refreshing = false; loading = false }
         do {
-            let snapshot = demo ? DemoTasks.snapshot() : try await source.snapshot()
+            let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
+            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot()
             guard generation == sourceGeneration else { return }
             tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks); quota = snapshot.quota
             sourceWarning = snapshot.warning; lastRefresh = snapshot.observedAt
@@ -76,6 +80,10 @@ import CodexTopCore
             MonitoringPolicy.reconcile(&preferences, tasks: tasks, now: snapshot.observedAt)
             if demo && !previous.initialized { preferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != previous { save() }
+            if selected.contains(where: { task in
+                guard let old = previousPhases[task.id] else { return false }
+                return old != .completed && graph.activity(for: task).phase == .completed
+            }) { completionSequence += 1 }
         } catch {
             guard generation == sourceGeneration else { return }
             sourceWarning = error.localizedDescription
@@ -84,6 +92,12 @@ import CodexTopCore
             graph = TaskGraph(tasks: tasks)
         }
         onChange?()
+    }
+    func previewDemoPhase(_ phase: TaskPhase?) {
+        guard demo else { return }
+        demoPhase = phase
+        if phase != nil { setPlacement(.orb) }
+        Task { await refresh() }
     }
     func applySelection(_ draft: Set<String>, original: Set<String>) {
         MonitoringPolicy.applySelection(draft, original: original, preferences: &preferences); save(); onChange?()
@@ -149,7 +163,7 @@ import CodexTopCore
 
 enum DemoTasks {
     static let started = Date()
-    static func snapshot() -> SourceSnapshot {
+    static func snapshot(phase: TaskPhase? = nil) -> SourceSnapshot {
         let specifications: [(String, String, TaskPhase, String)] = [
             ("审核代码改动", "桌面工具", .waiting, "等待你确认"),
             ("整理项目文件", "文件管理", .running, "正在扫描项目文件"),
@@ -162,7 +176,7 @@ enum DemoTasks {
             var task = CodexTask(id: "00000000-0000-4000-8000-00000000000\(index)", title: spec.0, project: spec.1,
                                  createdAt: started.addingTimeInterval(-600), updatedAt: started.addingTimeInterval(-Double(index)),
                                  rolloutURL: URL(fileURLWithPath: "/demo/rollout.jsonl"))
-            task.activity = TaskActivity(phase: spec.2, detail: spec.3, lastEventAt: .now, startedAt: started.addingTimeInterval(-204 + Double(index * 40)))
+            task.activity = TaskActivity(phase: phase ?? spec.2, detail: phase?.label ?? spec.3, lastEventAt: .now, startedAt: started.addingTimeInterval(-204 + Double(index * 40)))
             return task
         }
         return SourceSnapshot(tasks: tasks)

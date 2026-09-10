@@ -52,4 +52,18 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(expanded.midX, compact.midX)
         XCTAssertTrue(visible.contains(expanded))
     }
+    func testOrbExpansionKeepsOriginalCircleInsideThePanelAtAllScreenEdges() {
+        let visible = CGRect(x: -1920, y: 40, width: 1920, height: 1040)
+        for x in [visible.minX + 8, visible.midX, visible.maxX - 52] {
+            for y in [visible.minY + 8, visible.midY, visible.maxY - 52] {
+                let orb = CGRect(x: x, y: y, width: 44, height: 44)
+                for scale in [CGFloat(0.8), 0.9, 1] {
+                    let expanded = WindowGeometry.expandedOrb(from: orb, size: CGSize(width: 410 * scale, height: 344 * scale), visible: visible)
+                    XCTAssertTrue(visible.contains(expanded))
+                    XCTAssertTrue(expanded.contains(orb))
+                }
+            }
+        }
+    }
+
 }

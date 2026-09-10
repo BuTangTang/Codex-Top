@@ -29,6 +29,10 @@ public enum WindowGeometry {
         return CGRect(x: x, y: compact.maxY - height, width: width, height: height)
     }
 
+    public static func expandedOrb(from orb: CGRect, size: CGSize, visible: CGRect) -> CGRect {
+        clamp(CGRect(x: orb.midX - size.width / 2, y: orb.midY - size.height / 2, width: size.width, height: size.height), to: visible)
+    }
+
     public static func shouldDock(_ frame: CGRect, to visible: CGRect, distance: CGFloat = 24) -> Bool {
         frame.midX >= visible.minX && frame.midX <= visible.maxX && frame.maxY >= visible.maxY - distance && frame.maxY <= visible.maxY + 64
     }
