@@ -11,10 +11,7 @@ private final class ThemeSnapshotView: NSView {
     func configure(image: NSImage, light: Bool) {
         glass = light
         if light {
-            let effect = NSVisualEffectView(frame: bounds)
-            effect.material = .hudWindow; effect.blendingMode = .behindWindow
-            effect.state = .active; effect.appearance = NSAppearance(named: .aqua)
-            effect.alphaValue = 0.72
+            let effect = GlassMaterial.makeBackdrop(frame: bounds)
             addSubview(effect)
         }
         imageView.frame = bounds; imageView.image = image

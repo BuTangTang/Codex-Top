@@ -61,15 +61,23 @@ extension TaskPhase {
     }
 }
 
-struct FrostedBackdrop: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+@MainActor enum GlassMaterial {
+    static func makeBackdrop(frame: CGRect = .zero) -> NSVisualEffectView {
+        let view = NSVisualEffectView(frame: frame)
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
         view.appearance = NSAppearance(named: .aqua)
-        view.alphaValue = 0.72
+        // Fade the tint, never the effect view: a translucent effect layer blends
+        // the sharp window underneath back into the already blurred backdrop.
+        view.alphaValue = 1
         return view
+    }
+}
+
+struct FrostedBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        GlassMaterial.makeBackdrop()
     }
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
