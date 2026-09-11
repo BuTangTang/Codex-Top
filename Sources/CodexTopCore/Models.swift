@@ -33,9 +33,20 @@ public struct TaskActivity: Equatable, Sendable {
     public var detail: String = "尚无可识别的活动记录"
     public var lastEventAt: Date?
     public var startedAt: Date?
+    public var waitingStartedAt: Date?
     public var turnID: String?
-    public init(phase: TaskPhase = .unknown, detail: String = "尚无可识别的活动记录", lastEventAt: Date? = nil, startedAt: Date? = nil) {
+    public init(phase: TaskPhase = .unknown, detail: String = "尚无可识别的活动记录", lastEventAt: Date? = nil, startedAt: Date? = nil, waitingStartedAt: Date? = nil) {
         self.phase = phase; self.detail = detail; self.lastEventAt = lastEventAt; self.startedAt = startedAt
+        self.waitingStartedAt = waitingStartedAt
+    }
+    /// Elapsed wall time from this turn's start to entering the current wait, not CPU time or a live timer.
+    public var waitingElapsedSeconds: Int? {
+        guard phase == .waiting, let startedAt, let waitingStartedAt,
+              startedAt.timeIntervalSinceReferenceDate.isFinite,
+              waitingStartedAt.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        let elapsed = waitingStartedAt.timeIntervalSince(startedAt)
+        guard elapsed.isFinite, elapsed >= 0, elapsed < Double(Int.max) else { return nil }
+        return Int(elapsed)
     }
     public func effective(at now: Date, staleAfter: TimeInterval = 900) -> TaskActivity {
         var copy = self

@@ -279,8 +279,8 @@ final class CoreTests: XCTestCase {
             XCTAssertEqual(restored.resolvedScale, 0.8)
             XCTAssertEqual(restored.selectedIDs, ["kept"])
         }
-        p.uiScale = -5; XCTAssertEqual(p.resolvedScale, 0.8)
-        p.uiScale = 8; XCTAssertEqual(p.resolvedScale, 1)
+        p.uiScale = -5; XCTAssertEqual(p.resolvedScale, 0.6)
+        p.uiScale = 8; XCTAssertEqual(p.resolvedScale, 1.2)
     }
     func testRealSQLiteReadOnlyAdapterFiltersArchivesAndBlocksOutsidePaths() async throws {
         let root = try temporary(), db = root.appendingPathComponent("state_5.sqlite"), log = root.appendingPathComponent("rollout.jsonl")

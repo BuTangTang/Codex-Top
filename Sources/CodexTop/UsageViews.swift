@@ -37,6 +37,7 @@ enum UsageText {
 
 struct UsageSummaryButton: View {
     @ObservedObject var store: TaskStore
+    @Environment(\.compactMonitorTypography) private var compactTypography
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             Button { store.openUsagePage() } label: {
@@ -51,7 +52,7 @@ struct UsageSummaryButton: View {
                         Text(store.demo ? "演示模式 · 查看用量" : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
                     }
                 }
-                .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium))
+                .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography))
                 .foregroundStyle(Palette.primary(store.theme.colorScheme))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading).frame(height: 30)

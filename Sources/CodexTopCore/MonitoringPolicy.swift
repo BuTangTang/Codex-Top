@@ -27,8 +27,7 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var uiScale: Double?
     public var resolvedPlacement: PanelPlacement { placement ?? (floating ? .floating : .top) }
     public var resolvedScale: Double {
-        guard let uiScale, uiScale.isFinite else { return 1 }
-        return min(1, max(0.8, uiScale))
+        MonitorScale.normalized(uiScale ?? 1)
     }
     public init() {}
 }

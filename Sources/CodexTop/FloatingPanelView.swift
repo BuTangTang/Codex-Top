@@ -1,6 +1,7 @@
 import SwiftUI
 import CodexTopCore
 
+
 @MainActor final class OrbMorphState: ObservableObject {
     @Published var expanded = false
     @Published var hovered = false
@@ -63,7 +64,9 @@ private struct OrbPanelView: View {
     var body: some View {
         ZStack(alignment: contentAlignment) {
             GlassFill()
-            attentionTint.opacity(showsAttention ? (store.theme == .light ? 0.12 : 0.16) : 0)
+            Color.white.opacity(store.theme == .light && !state.expanded ? 0.36 : 0)
+                .allowsHitTesting(false)
+            attentionTint.opacity(showsAttention ? (store.theme == .light ? 0.04 : 0.16) : 0)
                 .allowsHitTesting(false)
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
@@ -96,7 +99,7 @@ private struct OrbPanelView: View {
             if showsAttention {
                 Text("!")
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .foregroundStyle(store.theme == .light ? Color.white : Color.black)
+                    .foregroundStyle(store.statusSummary.phase == .failed ? Color.white : Color.black)
                     .frame(width: 11, height: 11)
                     .background(attentionTint, in: Circle())
                     .padding(.top, 5).padding(.trailing, 5)

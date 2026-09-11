@@ -19,10 +19,13 @@ enum PanelFonts {
     static let detail = Font.system(size: 14)
     static let label = Font.system(size: 14, weight: .medium)
 
-    // Small window presets should not shrink supporting text below a readable size.
+    // Desktop monitors and pinned lists use tighter type at every scale. Adjust
+    // both the base and its floor, otherwise the old minimum cancels the reduction.
     static func readable(_ size: CGFloat, minimum: CGFloat = 12, scale: CGFloat,
-                         weight: Font.Weight = .regular) -> Font {
-        .system(size: max(size, minimum / max(0.8, scale)), weight: weight)
+                         weight: Font.Weight = .regular, compact: Bool = false) -> Font {
+        let base = compact ? size - 2 : size
+        let floor = compact ? max(11, minimum - 2) : minimum
+        return .system(size: max(base, floor / max(CGFloat(MonitorScale.minimum), scale)), weight: weight)
     }
 }
 
@@ -48,7 +51,7 @@ extension TaskPhase {
     func tint(_ scheme: ColorScheme) -> Color {
         switch self {
         case .running: scheme == .dark ? Palette.accent : Color(red: 0.12, green: 0.40, blue: 0.86)
-        case .waiting: scheme == .dark ? Color(red: 1, green: 0.75, blue: 0.29) : Color(red: 0.84, green: 0.49, blue: 0.05)
+        case .waiting: scheme == .dark ? Color(red: 1, green: 0.75, blue: 0.29) : Color(red: 0.91, green: 0.43, blue: 0.06)
         case .completed: scheme == .dark ? Color(red: 0.33, green: 0.76, blue: 0.56) : Color(red: 0.10, green: 0.53, blue: 0.30)
         case .failed: scheme == .dark ? Color(red: 1, green: 0.43, blue: 0.43) : Color(red: 0.78, green: 0.18, blue: 0.20)
         default: Palette.secondary(scheme)
@@ -64,6 +67,25 @@ extension TaskPhase {
         case .idle: "circle"
         case .unknown: "questionmark.circle"
         }
+    }
+}
+
+/// Give small amber text a stable local contrast without making the glass opaque.
+struct TaskPhaseLabel: View {
+    let phase: TaskPhase
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Text(phase.label)
+            .foregroundStyle(phase == .waiting && scheme == .light ? Color.black.opacity(0.82) : phase.tint(scheme))
+            .fontWeight(phase == .waiting ? .medium : nil)
+            .padding(.horizontal, phase == .waiting ? 5 : 0)
+            .padding(.vertical, phase == .waiting ? 2 : 0)
+            .background {
+                if phase == .waiting {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(phase.tint(scheme).opacity(0.12))
+                }
+            }
     }
 }
 

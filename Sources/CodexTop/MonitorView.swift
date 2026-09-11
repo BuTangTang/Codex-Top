@@ -21,6 +21,8 @@ struct MonitorView: View {
     var dragMoved: () -> Void = {}
     var dragEnded: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.compactMonitorTypography) private var externalTypography
+    private var compactTypography: Bool { compact || externalTypography }
 
     private var visibleTaskIDs: [String] {
         (store.active + (showFinished ? store.finished : [])).map(\.id)
@@ -46,8 +48,8 @@ struct MonitorView: View {
                 } else if store.selected.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "rectangle.stack").font(.system(size: 26, weight: .light)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                        Text("选择你想关注的任务").font(.system(size: 16, weight: .medium))
-                        Text(store.preferences.autoMonitor ? "新建并运行的任务会自动加入" : "自动监控已关闭，可手动选择任务").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        Text("选择你想关注的任务").font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography))
+                        Text(store.preferences.autoMonitor ? "新建并运行的任务会自动加入" : "自动监控已关闭，可手动选择任务").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         Button("选择任务", action: pickTasks).controlSize(.large)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -72,7 +74,7 @@ struct MonitorView: View {
                                 HStack(spacing: 14) {
                                     Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
                                         .font(.system(size: 11, weight: .medium)).frame(width: 24)
-                                    Text("已结束 \(store.finished.count)").font(PanelFonts.readable(14, scale: store.uiScale))
+                                    Text("已结束 \(store.finished.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography))
                                     Spacer()
                                 }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.disclosure)
                             }.buttonStyle(QuietRowStyle())
@@ -80,12 +82,12 @@ struct MonitorView: View {
                     }
                 }
                 if let warning = store.sourceWarning {
-                    Label(warning, systemImage: "exclamationmark.circle").font(.system(size: 14)).foregroundStyle(TaskPhase.waiting.tint(store.theme.colorScheme))
+                    Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
                         .lineLimit(3).padding(.horizontal, 20).padding(.vertical, 10)
                 }
                 if let notice = store.notice {
                     HStack(alignment: .top, spacing: 10) {
-                        Text(notice).font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        Text(notice).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         Spacer(minLength: 0)
                         Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 12)).frame(width: 22, height: 22) }.buttonStyle(QuietButtonStyle())
                     }.padding(.horizontal, 20).padding(.vertical, 10)
@@ -96,8 +98,8 @@ struct MonitorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold))
-            Text("\(store.selected.count)").font(PanelFonts.readable(14, scale: store.uiScale)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+            Text("监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold, compact: compactTypography)).lineLimit(1)
+            Text("\(store.selected.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 .contentTransition(.numericText()).animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.selected.count)
             if compact && store.demo { Text("演示").font(.system(size: 12)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             Spacer(minLength: 4)
@@ -110,7 +112,9 @@ struct MonitorView: View {
                 Button(action: pickTasks) {
                     HStack(spacing: 8) {
                         Image(systemName: "plus").font(.system(size: 15, weight: .medium))
-                        Text("选择任务").font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium))
+                        if store.uiScale > 0.75 {
+                            Text("选择任务").font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography)).lineLimit(1)
+                        }
                     }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 10).frame(height: 30)
                         .background(Palette.primary(store.theme.colorScheme).opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
                 }.headerButtonHitArea().help("搜索和选择监控任务").accessibilityLabel("选择任务")
@@ -168,6 +172,8 @@ private struct MonitorTaskRow: View {
     let taskID: String
     let compact: Bool
     let animationsActive: Bool
+    @Environment(\.compactMonitorTypography) private var externalTypography
+    private var compactTypography: Bool { compact || externalTypography }
 
     var body: some View {
         if let task = store.graph.roots.first(where: { $0.id == taskID }) {
@@ -177,12 +183,12 @@ private struct MonitorTaskRow: View {
                 HStack(spacing: compact ? 11 : 14) {
                     ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                         if !compact {
                             HStack(spacing: 5) {
                                 Text(activity.detail).lineLimit(1)
                                 if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                            }.font(PanelFonts.readable(14, scale: store.uiScale)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                            }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: compact ? 8 : 10) {
@@ -194,9 +200,16 @@ private struct MonitorTaskRow: View {
                                     Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
                                 }.foregroundStyle(Palette.secondary(store.theme.colorScheme))
                             }
-                        } else { Text(activity.phase.label).foregroundStyle(activity.phase.tint(store.theme.colorScheme)) }
+                        } else {
+                            TaskPhaseLabel(phase: activity.phase)
+                            if let elapsed = activity.waitingElapsedSeconds {
+                                Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60))
+                                    .monospacedDigit().foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                                    .help("本轮开始到进入待处理的时长，等待回答时暂停计时")
+                            }
+                        }
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                    }.font(PanelFonts.readable(13, scale: store.uiScale)).fixedSize()
+                    }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
                 }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help("\(task.title)\n\(activity.detail)\n点击回到 Codex")
         }

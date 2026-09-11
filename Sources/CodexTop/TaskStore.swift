@@ -191,7 +191,7 @@ import CodexTopCore
         preferences.placement = value; preferences.floating = value == .floating
         save(); onModeChange?()
     }
-    func setScale(_ value: Double) { preferences.uiScale = min(1, max(0.8, value)); save(); onChange?() }
+    func setScale(_ value: Double) { preferences.uiScale = MonitorScale.normalized(value); save(); onChange?() }
     func setTheme(_ theme: PanelTheme) {
         guard self.theme != theme else { return }
         if onAppearanceWillChange?() == true {
@@ -285,7 +285,10 @@ enum DemoTasks {
             var task = CodexTask(id: "00000000-0000-4000-8000-00000000000\(index)", title: spec.0, project: spec.1,
                                  createdAt: started.addingTimeInterval(-600), updatedAt: started.addingTimeInterval(-Double(index)),
                                  rolloutURL: URL(fileURLWithPath: "/demo/rollout.jsonl"))
-            task.activity = TaskActivity(phase: phase ?? spec.2, detail: phase?.label ?? spec.3, lastEventAt: .now, startedAt: started.addingTimeInterval(-204 + Double(index * 40)))
+            let resolvedPhase = phase ?? spec.2
+            task.activity = TaskActivity(phase: resolvedPhase, detail: phase?.label ?? spec.3, lastEventAt: .now,
+                                         startedAt: started.addingTimeInterval(-204 + Double(index * 40)),
+                                         waitingStartedAt: resolvedPhase == .waiting ? started : nil)
             return task
         }
         return SourceSnapshot(tasks: tasks)

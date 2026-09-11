@@ -35,15 +35,20 @@ public struct RolloutReducer: Sendable {
                 waitingCallIDs.removeAll()
                 asynchronousQuestion = false
             case "task_complete", "turn_complete":
-                activity.phase = asynchronousQuestion ? .waiting : .completed
-                activity.detail = asynchronousQuestion ? "等待你的回答" : "本轮执行已结束"
+                if asynchronousQuestion { waiting(at, detail: "等待你的回答") }
+                else {
+                    activity.phase = .completed; activity.detail = "本轮执行已结束"
+                    activity.waitingStartedAt = nil
+                }
                 waitingCallIDs.removeAll()
             case "turn_aborted", "task_cancelled", "turn_cancelled":
                 activity.phase = .stopped; activity.detail = "本轮执行已停止"; waitingCallIDs.removeAll()
+                activity.waitingStartedAt = nil; asynchronousQuestion = false
             case "task_failed", "turn_failed":
                 activity.phase = .failed; activity.detail = "执行遇到问题，请回到 Codex 查看"; waitingCallIDs.removeAll()
+                activity.waitingStartedAt = nil; asynchronousQuestion = false
             case "request_user_input", "user_input_requested", "exec_approval_request", "apply_patch_approval_request":
-                activity.phase = .waiting; activity.detail = "等待你的输入或确认"
+                waiting(at, detail: "等待你的输入或确认")
             case "user_message", "user_input", "approval_resolved":
                 active(at, detail: "收到输入，正在继续"); waitingCallIDs.removeAll(); asynchronousQuestion = false
             case "agent_message", "agent_reasoning":
@@ -65,13 +70,13 @@ public struct RolloutReducer: Sendable {
             if type == "function_call" || type == "custom_tool_call" {
                 let name = payload["name"] as? String ?? ""
                 if name == "request_user_input" || name == "request_user_input_async" || name.hasSuffix("__request_user_input") {
-                    activity.phase = .waiting; activity.detail = "等待你的回答"
+                    waiting(at, detail: "等待你的回答")
                     if name == "request_user_input_async" { asynchronousQuestion = true }
                     else if let id = payload["call_id"] as? String { waitingCallIDs.insert(id) }
                 } else if activity.phase != .waiting { active(at, detail: "正在执行任务") }
                 if let at { activity.lastEventAt = at }
             } else if type == "function_call_output" || type == "custom_tool_call_output" {
-                if let id = payload["call_id"] as? String, waitingCallIDs.remove(id) != nil, waitingCallIDs.isEmpty {
+                if let id = payload["call_id"] as? String, waitingCallIDs.remove(id) != nil, waitingCallIDs.isEmpty, !asynchronousQuestion {
                     active(at, detail: "已收到回答，正在继续")
                 }
                 if let at { activity.lastEventAt = at }
@@ -81,6 +86,16 @@ public struct RolloutReducer: Sendable {
     private mutating func active(_ at: Date?, detail: String) {
         if activity.phase.isFinished || activity.phase == .failed { activity.startedAt = at; activity.turnID = nil }
         activity.phase = .running; activity.detail = detail
+        activity.waitingStartedAt = nil
+    }
+    private mutating func waiting(_ at: Date?, detail: String) {
+        if activity.phase != .waiting {
+            // A terminal turn cannot supply a start for a new wait with no observed start event.
+            if activity.phase.isFinished { activity.startedAt = nil; activity.turnID = nil }
+            activity.waitingStartedAt = at
+        }
+        // A missing first timestamp stays unknown; a repeated wait must not invent a later anchor.
+        activity.phase = .waiting; activity.detail = detail
     }
     private mutating func updateQuota(_ limits: [String: Any], at: Date) {
         if let id = limits["limit_id"] as? String, id != "codex" { return }

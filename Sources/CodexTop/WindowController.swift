@@ -123,7 +123,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             store: store, state: topState, monitorState: monitorState, open: { [weak self] in self?.toggleExpanded() },
             pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, finishedChanged: { [weak self] in
                 self?.updateContentSize(animated: true)
-            }))
+            }).windowTypography())
         topView.sizingOptions = []
         topView.hoverChanged = { [weak self] value in self?.hoverTop(value) }
         top.contentView = topView
@@ -131,7 +131,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             store: store, presentation: floatingPresentation, orbState: orbState, monitorState: monitorState,
             pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, openTasks: { [weak self] in self?.toggleExpanded() }, closeTasks: { [weak self] in self?.dismissExpanded() }, finishedChanged: { [weak self] in
                 self?.updateContentSize(animated: true)
-            }, dragStarted: { [weak self] translation in self?.beginDrag(initialTranslation: translation) }, dragMoved: { [weak self] in self?.moveDrag() }, dragEnded: { [weak self] in self?.endDrag() }))
+            }, dragStarted: { [weak self] translation in self?.beginDrag(initialTranslation: translation) }, dragMoved: { [weak self] in self?.moveDrag() }, dragEnded: { [weak self] in self?.endDrag() }).windowTypography())
         floatingView.sizingOptions = []
         floatingView.hoverChanged = { [weak self] value in self?.hoverFloating(value) }
         floatingView.contextMenuProvider = { [weak self] in
@@ -173,7 +173,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
             floating.setFrame(WindowGeometry.floating(size: floatingSize, visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), display: true)
         }
-        if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() })) }
+        if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography()) }
         for window in [picker, settings].compactMap({ $0 }) {
             let frame = WindowGeometry.recoverUtilityWindow(window.frame, visibleFrames: displays.map { $0.screen.visibleFrame },
                                                             preferredVisible: chosen.screen.visibleFrame, forcePreferred: bringAuxiliaryToChosen)
@@ -186,7 +186,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
         let body = store.selected.isEmpty ? 195 : CGFloat(rows) * (compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow) + (store.finished.isEmpty ? 0 : PanelMetrics.disclosure)
         let height = header + body + (compact ? 4 : PanelMetrics.footer + 2)
-        return height + (store.sourceWarning == nil ? 0 : 62) + (store.notice == nil ? 0 : 52)
+        let messageScale = max(0.8, store.uiScale) / store.uiScale
+        return height + (store.sourceWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
     }
     private var floatingSize: CGSize {
         if store.placement == .orb { return CGSize(width: 44, height: 44) }
@@ -697,7 +698,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if let picker, picker.isVisible { picker.makeKeyAndOrderFront(nil); return }
         dismissExpanded()
         let window = makeWindow(title: "选择监控任务", size: CGSize(width: 450 * store.uiScale, height: 635 * store.uiScale), popover: true)
-        window.contentView = NSHostingView(rootView: TaskPickerView(store: store, close: { [weak self] in self?.picker?.close(); self?.picker = nil }))
+        window.contentView = NSHostingView(rootView: TaskPickerView(store: store, close: { [weak self] in self?.picker?.close(); self?.picker = nil }).windowTypography())
         picker = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
     func showSettings() {
@@ -705,7 +706,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if let settings, settings.isVisible { settings.makeKeyAndOrderFront(nil); return }
         dismissExpanded()
         let window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610))
-        window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }))
+        window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
         settings = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
     private func makeWindow(title: String, size: CGSize, popover: Bool = false) -> NSWindow {

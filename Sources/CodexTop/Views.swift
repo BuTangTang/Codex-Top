@@ -4,6 +4,7 @@ import CodexTopCore
 
 struct CompactView: View {
     @ObservedObject var store: TaskStore
+    @Environment(\.compactMonitorTypography) private var compactTypography
     let notchWidth: CGFloat
     var drawsSurface = true
     var open: () -> Void
@@ -13,7 +14,7 @@ struct CompactView: View {
             HStack(spacing: 0) {
                 HStack(spacing: 5) {
                     Circle().fill(summary.leftPhase.tint(store.theme.colorScheme)).frame(width: 5, height: 5)
-                    Text(summary.leftText).font(.system(size: 13, weight: .regular))
+                    Text(summary.leftText).font(.system(size: compactTypography ? 12 : 13, weight: .regular))
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }.padding(.horizontal, 6).frame(maxWidth: .infinity)
                 if notchWidth > 0 { Color.clear.frame(width: notchWidth) }
@@ -25,7 +26,7 @@ struct CompactView: View {
                     VStack(spacing: 0) {
                         ForEach(summary.quotaLines.indices, id: \.self) { index in
                             Text(summary.quotaLines[index])
-                                .font(.system(size: summary.quotaLines.count > 1 ? 11 : 13, weight: .regular))
+                                .font(.system(size: summary.quotaLines.count > 1 ? 11 : compactTypography ? 12 : 13, weight: .regular))
                                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                         }
                     }
@@ -47,6 +48,7 @@ struct CompactView: View {
 
 struct TaskPickerView: View {
     @ObservedObject var store: TaskStore
+    @Environment(\.compactMonitorTypography) private var compactTypography
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var close: () -> Void
     @State private var search = ""
@@ -70,24 +72,24 @@ struct TaskPickerView: View {
         VStack(spacing: 0) {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("选择监控任务").font(PanelFonts.header)
-                    Text("全部任务").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    Text("选择监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold, compact: compactTypography))
+                    Text("全部任务").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 }
                 Spacer()
-                Text("\(store.graph.roots.count) 个任务").font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                Text("\(store.graph.roots.count) 个任务").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
             }.padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 12)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 TextField("搜索任务名称或项目", text: $search).textFieldStyle(.plain)
                     .accessibilityLabel("搜索任务名称或项目")
                 if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
-            }.font(.system(size: 16)).padding(.horizontal, 12).frame(height: 38)
+            }.font(PanelFonts.readable(16, scale: store.uiScale, compact: compactTypography)).padding(.horizontal, 12).frame(height: 38)
                 .background(Palette.primary(store.theme.colorScheme).opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline(store.theme.colorScheme), lineWidth: 0.7)).padding(.horizontal, 22)
             HStack(spacing: 9) {
                 ForEach(["全部", "运行中", "待处理", "已结束"], id: \.self) { item in
                     Button { filter = item } label: {
-                        Text(item).font(.system(size: 14, weight: filter == item ? .medium : .regular)).foregroundStyle(filter == item ? .white : Palette.primary(store.theme.colorScheme)).frame(maxWidth: .infinity).frame(height: 32)
+                        Text(item).font(PanelFonts.readable(14, scale: store.uiScale, weight: filter == item ? .medium : .regular, compact: compactTypography)).foregroundStyle(filter == item ? .white : Palette.primary(store.theme.colorScheme)).frame(maxWidth: .infinity).frame(height: 32)
                             .background(filter == item ? Palette.accent : Palette.primary(store.theme.colorScheme).opacity(0.045), in: Capsule())
                     }.buttonStyle(.plain).accessibilityLabel(item).accessibilityAddTraits(filter == item ? .isSelected : [])
                 }
@@ -102,7 +104,7 @@ struct TaskPickerView: View {
                     Text("全选当前结果")
                 }.buttonStyle(.plain).disabled(filtered.isEmpty)
                 Spacer(); Text("\(filtered.count) 项").foregroundStyle(Palette.secondary(store.theme.colorScheme))
-            }.font(.system(size: 15)).padding(.horizontal, 28).frame(height: 46)
+            }.font(PanelFonts.readable(15, scale: store.uiScale, compact: compactTypography)).padding(.horizontal, 28).frame(height: 46)
             Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 26)
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -110,14 +112,14 @@ struct TaskPickerView: View {
                         Toggle(isOn: Binding(get: { draft.contains(task.id) }, set: { if $0 { draft.insert(task.id) } else { draft.remove(task.id) } })) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title).font(PanelFonts.task).lineLimit(1).truncationMode(.tail)
-                                    Text(task.project).font(PanelFonts.detail).foregroundStyle(Palette.secondary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                                    Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).lineLimit(1).truncationMode(.tail)
+                                    Text(task.project).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                                 }
                                 Spacer()
                                 let phase = store.graph.activity(for: task).phase
                                 HStack(spacing: 6) {
                                     Circle().fill(phase.tint(store.theme.colorScheme)).frame(width: 9, height: 9)
-                                    Text(phase.label).font(.system(size: 14)).foregroundStyle(phase.tint(store.theme.colorScheme)).lineLimit(1)
+                                    TaskPhaseLabel(phase: phase).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).lineLimit(1)
                                 }.fixedSize(horizontal: true, vertical: false)
                             }
                         }.toggleStyle(.checkbox).controlSize(.large).padding(.horizontal, 24).frame(height: 54)
@@ -134,7 +136,7 @@ struct TaskPickerView: View {
                 Spacer()
                 Button("取消", action: close).keyboardShortcut(.cancelAction).controlSize(.large)
                 Button("确认选择") { store.applySelection(draft, original: original); close() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).controlSize(.large)
-            }.font(.system(size: 15)).padding(.horizontal, 26).frame(height: 66)
+            }.font(PanelFonts.readable(15, scale: store.uiScale, compact: compactTypography)).padding(.horizontal, 26).frame(height: 66)
         }.tint(Palette.accent)
         }.environment(\.colorScheme, store.theme == .light ? .light : .dark)
             .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
@@ -172,11 +174,24 @@ struct SettingsView: View {
                     Text("浅色玻璃").tag(PanelTheme.light)
                 }.pickerStyle(.segmented)
                 Text("刘海、展开面板与浮窗使用同一主题。").font(.caption).foregroundStyle(.secondary)
-                Picker("显示比例", selection: Binding(get: { store.preferences.resolvedScale }, set: { store.setScale($0) })) {
-                    Text("80%").tag(0.8)
-                    Text("90%").tag(0.9)
-                    Text("100%").tag(1.0)
-                }.pickerStyle(.segmented)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("显示比例")
+                        Spacer()
+                        Text("\(Int((store.preferences.resolvedScale * 100).rounded()))%")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                        Button("100%") { store.setScale(1) }
+                            .accessibilityLabel("恢复显示比例为100%")
+                    }
+                    HStack(spacing: 10) {
+                        Text("60%").font(.caption).foregroundStyle(.secondary)
+                        MonitorScaleSlider(percentage: Binding(get: { (store.preferences.resolvedScale * 100).rounded() }, set: { store.setScale($0 / 100) }))
+                            .frame(maxWidth: .infinity).frame(height: 22)
+                        Text("120%").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("拖动调整，每 5% 一档；圆环保持 44pt。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if store.demo {
                 Section("动画预览") {
@@ -211,7 +226,7 @@ struct SettingsView: View {
                         Text("已断开的显示器 · 暂用主屏").tag(saved)
                     }
                 }
-                Text("刘海模式悬停展开；无刘海的外接屏显示在屏幕上沿。圆环点击展开、点外或按 Esc 缩回，拖至上沿仍留桌面。常驻浮窗可拖至上沿收进状态栏。").font(.caption).foregroundStyle(.secondary)
+                Text("刘海模式悬停展开；无刘海的外接屏显示在屏幕上沿。圆环点击展开、点外或按 Esc 缩回，拖至上沿仍留桌面。常驻浮窗与圆环拖放均保持当前模式，仅状态栏需从菜单手动选择。").font(.caption).foregroundStyle(.secondary)
                 Button("找回窗口", action: recoverWindows)
             }
             Section("数据与启动") {
