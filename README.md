@@ -4,17 +4,17 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-目前为 **Beta 预览版**。本轮 beta.5 增加回答后的状态刷新、缺失开始时间回查、应用内缩放快捷键、单浮窗常驻和更清楚的运行提示，正在最终收口；发布状态、校验值与验收范围以[版本说明](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.5)为准。
+当前版本为 **v0.1.0**，包含回答后的状态刷新、缺失开始时间回查、应用内缩放快捷键、单浮窗常驻和更清楚的运行提示。下载、校验值与验收范围见[版本说明](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)。
 
 ## 安装
 
 要求 **macOS 14+**，提供 **Apple Silicon / Intel 通用 DMG**。真实任务需要本机 Codex 及已落盘的任务记录；账户额度需要官方 Codex CLI 已登录，无需在本工具中填写 API Key。
 
-1. 从 [v0.1.0-beta.5 下载页](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.5)下载 DMG。
+1. 从 [v0.1.0 下载页](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)下载 DMG。
 2. 打开 DMG，把 `Codex Top.app` 拖到“应用程序”。
 3. 启动应用，左键点击状态栏图标查看任务；右键打开菜单，选择任务、显示方式或设置。
 
-测试包使用 ad-hoc 签名，尚无 Developer ID 签名或 Apple 公证。若 macOS 阻止打开，请核实下载来源后按 [Apple 的说明](https://support.apple.com/zh-cn/102445)操作，不要关闭系统全局保护。
+应用使用 ad-hoc 签名，尚无 Developer ID 签名或 Apple 公证。若 macOS 阻止打开，请核实下载来源后按 [Apple 的说明](https://support.apple.com/zh-cn/102445)操作，不要关闭系统全局保护。
 
 ## 实际截图
 

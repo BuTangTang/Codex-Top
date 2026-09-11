@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 configuration="${CONFIGURATION:-release}"
-version="${VERSION:-0.1.0-dev}"
+version="${VERSION:-0.1.0}"
 app_name="Codex Top"
 bundle_id="dev.butang.codextop"
 demo=false

@@ -6,7 +6,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
 - [使用说明](usage.md)
 - [开发与打包](development.md)
-- [v0.1.0-beta.5 修订说明](releases/0.1.0-beta.5.md)：回复刷新、计时回查、缩放快捷键、单浮窗与运行提示；最终测试和包校验完成，发布回执收尾中。
+- [v0.1.0 版本说明与下载](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)：回复刷新、计时回查、缩放快捷键、单浮窗与运行提示。
 - [v0.1.0-beta.4 预发布说明](releases/0.1.0-beta.4.md)：设置在鼠标所在屏幕打开。
 - [v0.1.0-beta.3 预发布说明](releases/0.1.0-beta.3.md)：主题轮廓修复、双语说明与实际刘海截图。
 - [v0.1.0-beta.1 预发布说明](releases/0.1.0-beta.1.md)：DMG 安装、版本内容与验收限制。
@@ -28,7 +28,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-beta.5 最终 110 项测试、通用构建、严格签名和 DMG 只读挂载完成，实际计时恢复、文字与运行弧离散帧已核对；提交与发布回执收尾中。beta.4 及更早预发布保留各自证据，README 的实际截图仍来自明确标注的 beta.2/beta.3，不用真实私人任务截图替换。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
+当前版本为 v0.1.0，功能范围保持 D-54–D-59；当前构建、验收和发布记录见 [STATUS](STATUS.md)。此前测试版及 beta.5 候选保留各自证据，README 的实际截图仍来自明确标注的 beta.2/beta.3，不用真实私人任务截图替换。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
@@ -36,4 +36,4 @@ beta.5 最终 110 项测试、通用构建、严格签名和 DMG 只读挂载完
 
 - [beta.4 设置定位与实际核对](validation/beta4.md)
 
-- [beta.5 候选与最终验收范围](validation/beta5.md)
+- [beta.5 候选阶段验收记录](validation/beta5.md)

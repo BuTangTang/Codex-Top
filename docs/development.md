@@ -18,9 +18,9 @@ bash scripts/package.sh
 bash scripts/package.sh --universal
 ```
 
-可设置 `VERSION=0.1.0-dev`、`CONFIGURATION=release`。`SIGN_IDENTITY` 可指定本机已有签名身份；默认 `-` 是 ad-hoc 签名，不能等同 Developer ID 分发或 Apple 公证。签名身份、证书和本机设置不得提交。脚本不发布 GitHub Release，也不申请证书或公证。
+可设置 `VERSION=0.1.0`、`CONFIGURATION=release`。`SIGN_IDENTITY` 可指定本机已有签名身份；默认 `-` 是 ad-hoc 签名，不能等同 Developer ID 分发或 Apple 公证。签名身份、证书和本机设置不得提交。脚本不发布 GitHub Release，也不申请证书或公证。
 
-核心测试使用合成数据库/日志，覆盖有界增量读取、乱序/半行、生命周期、未知、配额、父子任务、选择规则、旧设置、缩放和多屏几何。beta.5 还包含本地监听生命周期、用户回复恢复及关注任务开始时间回查；计时只从兼容的明确事件补齐，不用文件时间估算。它们不代替打包应用的拖动、悬停、真实跳转和硬件验收。
+核心测试使用合成数据库/日志，覆盖有界增量读取、乱序/半行、生命周期、未知、配额、父子任务、选择规则、旧设置、缩放和多屏几何。v0.1.0 还包含本地监听生命周期、用户回复恢复及关注任务开始时间回查；计时只从兼容的明确事件补齐，不用文件时间估算。它们不代替打包应用的拖动、悬停、真实跳转和硬件验收。
 
 开发顺序与未完成事项见 [STATUS](STATUS.md) 和 [M2 实测](validation/M2.md)。提交前运行测试、release 构建与本阶段实际检查，更新文档；不要用旧截图或概念图代替当前产物。
 
@@ -37,7 +37,7 @@ bash scripts/package.sh --universal
 
 ```sh
 swift test
-VERSION=0.1.0-beta.5 bash scripts/build-app.sh --universal
+VERSION=0.1.0 bash scripts/build-app.sh --universal
 bash scripts/build-dmg.sh
 ```
 

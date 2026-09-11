@@ -4,7 +4,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 swift test
 bash scripts/build-app.sh "$@"
-version="${VERSION:-0.1.0-dev}"
+version="${VERSION:-0.1.0}"
 app_name="Codex Top"
 for option in "$@"; do if [ "$option" = "--demo" ]; then app_name="Codex Top Demo"; fi; done
 archive="dist/${app_name// /-}-$version-macOS.zip"

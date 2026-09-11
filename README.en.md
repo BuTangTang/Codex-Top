@@ -4,17 +4,17 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-This is a **Beta preview**. Beta.5 adds faster updates after replies, recovery of missing start times, in-app scale shortcuts, a single pinned floating list, and clearer running indicators. Final validation is in progress. Check the [release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.5) for publication status, checksums, and validation scope.
+The current version is **v0.1.0**, with faster updates after replies, recovery of missing start times, in-app scale shortcuts, a single pinned floating list, and clearer running indicators. See the [release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0) for downloads, checksums, and validation scope.
 
 ## Install
 
 Requires **macOS 14+**. The DMG is **universal for Apple Silicon and Intel**. Real tasks require a local Codex installation and task records saved to disk; account usage requires the official Codex CLI to be signed in. No API key needs to be entered in this app.
 
-1. Download the DMG from the [v0.1.0-beta.5 release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.5).
+1. Download the DMG from the [v0.1.0 release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0).
 2. Open the DMG and drag `Codex Top.app` to Applications.
 3. Launch the app. Left-click its menu bar item to view tasks; right-click for task selection, display modes, and settings.
 
-Preview builds are ad-hoc signed, without Developer ID signing or Apple notarization. If macOS blocks the app, verify the download source and follow [Apple's instructions](https://support.apple.com/en-us/102445). Do not disable system-wide protection.
+The app is ad-hoc signed, without Developer ID signing or Apple notarization. If macOS blocks the app, verify the download source and follow [Apple's instructions](https://support.apple.com/en-us/102445). Do not disable system-wide protection.
 
 ## Screenshots
 
