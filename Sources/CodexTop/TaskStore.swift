@@ -13,7 +13,14 @@ import CodexTopCore
     @Published private(set) var sourceWarning: String?
     @Published var notice: String? { didSet { if notice != oldValue { onChange?() } } }
     @Published private(set) var lastRefresh: Date?
-    @Published var paused = false
+    @Published var paused = false {
+        didSet {
+            guard paused != oldValue else { return }
+            if paused { cancelFastRefresh() }
+            updateRolloutWatches()
+            if !paused { requestFastRefresh() }
+        }
+    }
     @Published private(set) var refreshing = false
     @Published private(set) var loading = true
     @Published private(set) var completionSequence = 0
@@ -38,6 +45,10 @@ import CodexTopCore
     private var persistenceAvailable = true
     private var refreshLoop: Task<Void, Never>?
     private var sourceGeneration = 0
+    private var rolloutChanges: RolloutChangeMonitor?
+    private var fastRefreshTask: Task<Void, Never>?
+    private var fastRefreshID: UUID?
+    private var fastRefreshNeeded = false
 
     init() {
         demo = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CodexTopDemo") as? Bool == true
@@ -71,6 +82,8 @@ import CodexTopCore
     func start() {
         guard refreshLoop == nil else { return }
         stopping = false
+        rolloutChanges = RolloutChangeMonitor { [weak self] in self?.requestFastRefresh() }
+        updateRolloutWatches()
         refreshLoop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -82,6 +95,8 @@ import CodexTopCore
     }
     func stop() {
         stopping = true
+        cancelFastRefresh()
+        rolloutChanges?.stop(); rolloutChanges = nil
         refreshLoop?.cancel(); refreshLoop = nil
         usageLoop?.cancel(); usageLoop = nil
         cancelUsageRequest()
@@ -144,14 +159,54 @@ import CodexTopCore
     private func updateQuota() {
         quota = demo ? historicalQuota : accountQuota
     }
+    private func updateRolloutWatches() {
+        guard !demo, !paused, !stopping else { rolloutChanges?.stop(); return }
+        // Watch the waiting activity itself, including a child represented by a
+        // selected root. No conversation text is read by the filesystem watcher.
+        let urls = Set(tasks.filter {
+            $0.activity.phase == .waiting && preferences.selectedIDs.contains(graph.rootIDs[$0.id] ?? $0.id)
+        }.map(\.rolloutURL))
+        rolloutChanges?.update(urls: urls)
+    }
+    private func requestFastRefresh() {
+        guard !demo, !paused, !stopping else { return }
+        fastRefreshNeeded = true
+        scheduleFastRefresh()
+    }
+    private func scheduleFastRefresh() {
+        guard fastRefreshNeeded, fastRefreshTask == nil, !refreshing, !paused, !stopping else { return }
+        let id = UUID(), generation = sourceGeneration
+        fastRefreshID = id
+        fastRefreshTask = Task { [weak self] in
+            // Coalesce the user message and its adjacent event records into one
+            // snapshot; leave the independent account usage cadence unchanged.
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            guard let self, self.fastRefreshID == id else { return }
+            self.fastRefreshTask = nil; self.fastRefreshID = nil
+            guard generation == self.sourceGeneration, !self.paused, !self.stopping else { return }
+            // A write during another scan remains pending. Its defer schedules
+            // a follow-up instead of losing the reply behind the busy guard.
+            guard !self.refreshing else { return }
+            self.fastRefreshNeeded = false
+            await self.refresh()
+        }
+    }
+    private func cancelFastRefresh() {
+        fastRefreshTask?.cancel(); fastRefreshTask = nil; fastRefreshID = nil
+        fastRefreshNeeded = false
+    }
     func refresh() async {
         guard !stopping, !refreshing else { return }
         refreshing = true
         let generation = sourceGeneration
-        defer { refreshing = false; loading = false }
+        defer {
+            refreshing = false; loading = false
+            updateRolloutWatches()
+            scheduleFastRefresh()
+        }
         do {
             let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
-            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot()
+            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs)
             guard !stopping, generation == sourceGeneration else { return }
             tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
             historicalQuota = snapshot.quota; updateQuota()
@@ -165,7 +220,7 @@ import CodexTopCore
                 return old != .completed && graph.activity(for: task).phase == .completed
             }) { completionSequence += 1 }
         } catch {
-            guard generation == sourceGeneration else { return }
+            guard !stopping, generation == sourceGeneration else { return }
             sourceWarning = error.localizedDescription
             // Do not leave the previous snapshot claiming active/completed after source loss.
             tasks = tasks.map { task in var copy = task; copy.activity = TaskActivity(detail: "数据源不可用，无法确认当前状态"); return copy }
@@ -181,10 +236,11 @@ import CodexTopCore
     }
     func applySelection(_ draft: Set<String>, original: Set<String>) {
         MonitoringPolicy.applySelection(draft, original: original, preferences: &preferences); save(); onChange?()
+        updateRolloutWatches()
     }
     func setAutoMonitor(_ enabled: Bool) {
         MonitoringPolicy.setAutoMonitor(enabled, preferences: &preferences, tasks: tasks, now: .now)
-        save()
+        save(); updateRolloutWatches()
     }
     func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : .top) }
     func setPlacement(_ value: PanelPlacement) {
@@ -214,6 +270,7 @@ import CodexTopCore
         picker.message = "选择 Codex 数据目录（通常是用户目录下的 .codex）"
         if picker.runModal() == .OK, let url = picker.url {
             sourceGeneration += 1
+            cancelFastRefresh(); rolloutChanges?.stop()
             preferences.codexHome = url.path; preferences.initialized = false
             preferences.selectedIDs.removeAll(); preferences.excludedIDs.removeAll()
             source = LocalCodexSource(root: url); tasks = []; graph = TaskGraph(tasks: []); quota = nil
@@ -259,6 +316,7 @@ import CodexTopCore
             }
             preferences = MonitorPreferences(); persistenceAvailable = true; notice = nil; save()
             sourceGeneration += 1; tasks = []; graph = TaskGraph(tasks: []); quota = nil; sourceWarning = nil; loading = true
+            cancelFastRefresh(); rolloutChanges?.stop()
             source = LocalCodexSource(root: LocalCodexSource.defaultRoot); onDisplayChange?(); onModeChange?(); onAppearanceChange?()
             resetUsageSource()
             Task { await refresh() }

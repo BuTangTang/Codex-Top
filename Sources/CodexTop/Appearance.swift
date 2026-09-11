@@ -70,13 +70,18 @@ extension TaskPhase {
     }
 }
 
-/// Give small amber text a stable local contrast without making the glass opaque.
+/// Keep small state labels readable without changing their status indicators.
 struct TaskPhaseLabel: View {
     let phase: TaskPhase
     @Environment(\.colorScheme) private var scheme
+    private var textColor: Color {
+        if phase == .running { return Palette.primary(scheme) }
+        if phase == .waiting && scheme == .light { return Color.black.opacity(0.82) }
+        return phase.tint(scheme)
+    }
     var body: some View {
         Text(phase.label)
-            .foregroundStyle(phase == .waiting && scheme == .light ? Color.black.opacity(0.82) : phase.tint(scheme))
+            .foregroundStyle(textColor)
             .fontWeight(phase == .waiting ? .medium : nil)
             .padding(.horizontal, phase == .waiting ? 5 : 0)
             .padding(.vertical, phase == .waiting ? 2 : 0)

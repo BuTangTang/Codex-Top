@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Consumes only event metadata. Message bodies and tool arguments are never retained.
 public struct RolloutReducer: Sendable {
@@ -19,7 +20,8 @@ public struct RolloutReducer: Sendable {
         if kind == "event_msg", ["task_complete", "turn_complete", "turn_aborted", "task_cancelled", "turn_cancelled", "task_failed", "turn_failed"].contains(type),
            let turn = payload["turn_id"] as? String, let current = activity.turnID, turn != current { return }
         let userItem = type == "item_completed" && ((payload["item"] as? [String: Any])?["type"] as? String)?.lowercased() == "usermessage"
-        let explicitContinuation = kind == "event_msg" && (["task_started", "turn_started", "user_message", "user_input", "approval_resolved"].contains(type) || userItem)
+        let responseUserMessage = kind == "response_item" && type == "message" && (payload["role"] as? String) == "user"
+        let explicitContinuation = responseUserMessage || (kind == "event_msg" && (["task_started", "turn_started", "user_message", "user_input", "approval_resolved"].contains(type) || userItem))
         // A trailing explanation or tool result does not prove a failed turn resumed.
         if activity.phase == .failed && !explicitContinuation {
             if kind == "event_msg", type == "token_count", let limits = payload["rate_limits"] as? [String: Any], let at {
@@ -67,7 +69,12 @@ public struct RolloutReducer: Sendable {
             }
             if let at { activity.lastEventAt = at }
         } else if kind == "response_item" {
-            if type == "function_call" || type == "custom_tool_call" {
+            if responseUserMessage {
+                // The response record can precede the corresponding UserMessage event.
+                active(at, detail: "收到输入，正在继续")
+                waitingCallIDs.removeAll(); asynchronousQuestion = false
+                if let at { activity.lastEventAt = at }
+            } else if type == "function_call" || type == "custom_tool_call" {
                 let name = payload["name"] as? String ?? ""
                 if name == "request_user_input" || name == "request_user_input_async" || name.hasSuffix("__request_user_input") {
                     waiting(at, detail: "等待你的回答")
@@ -97,6 +104,16 @@ public struct RolloutReducer: Sendable {
         // A missing first timestamp stays unknown; a repeated wait must not invent a later anchor.
         activity.phase = .waiting; activity.detail = detail
     }
+    fileprivate mutating func recoverTiming(from recovered: TaskActivity) {
+        guard activity.startedAt == nil, activity.phase == .running || activity.phase == .waiting,
+              recovered.phase == activity.phase, let last = activity.lastEventAt,
+              recovered.lastEventAt == last, let start = recovered.startedAt,
+              start.timeIntervalSinceReferenceDate.isFinite, start <= last,
+              activity.turnID == nil || recovered.turnID == activity.turnID,
+              activity.waitingStartedAt.map({ start <= $0 }) ?? true else { return }
+        activity.startedAt = start
+        if activity.turnID == nil { activity.turnID = recovered.turnID }
+    }
     private mutating func updateQuota(_ limits: [String: Any], at: Date) {
         if let id = limits["limit_id"] as? String, id != "codex" { return }
         var windows: [QuotaWindow] = []
@@ -125,6 +142,7 @@ public struct IncrementalRollout: Sendable {
     private var modified: Date?
     private var pending = Data()
     private var skippingLongLine = false
+    private var timingRecovery: RolloutTimingRecovery?
     private let maximumRead: Int
     private let maximumCatchUpRead: Int
     public init(maximumRead: Int = 65_536, maximumCatchUpRead: Int = 4 * 1_024 * 1_024) {
@@ -140,7 +158,7 @@ public struct IncrementalRollout: Sendable {
         if inode == newInode && size == offset && modified == newModified { return 0 }
         let rewritten = observedSize.map { size < $0 || (size == $0 && modified != newModified) } ?? false
         let reset = inode != newInode || size < offset || rewritten
-        if reset { reducer = RolloutReducer(); offset = 0; pending.removeAll(); skippingLongLine = false; isCaughtUp = false }
+        if reset { reducer = RolloutReducer(); offset = 0; pending.removeAll(); skippingLongLine = false; isCaughtUp = false; timingRecovery = nil }
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         // Cold starts remain bounded. Warm reads must not skip events or discard pending questions/turn IDs.
         let start = reset && size > UInt64(maximumRead) ? size - UInt64(maximumRead) : offset
@@ -165,6 +183,44 @@ public struct IncrementalRollout: Sendable {
             if pending.count > maximumRead { pending.removeAll(); skippingLongLine = true }
         }
         isCaughtUp = offset >= size
+        if reducer.activity.startedAt != nil { timingRecovery = nil }
         return bytesRead
+    }
+
+    /// Optional work for selected tasks only. Progress and a failed search are
+    /// retained across unchanged/appended files; replacement or rewrite resets them.
+    public mutating func recoverTiming(url: URL, maximumBytes: Int = 4 * 1_024 * 1_024) throws -> Int {
+        guard reducer.activity.startedAt == nil else { timingRecovery = nil; return 0 }
+        guard isCaughtUp, reducer.activity.phase == .running || reducer.activity.phase == .waiting,
+              timingRecovery?.isFinished != true else { return 0 }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+        let currentInode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+        let currentModified = attributes[.modificationDate] as? Date
+        guard currentInode == inode, size >= offset,
+              !(size == observedSize && currentModified != modified) else { return 0 }
+        let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
+        var before = stat()
+        guard fstat(handle.fileDescriptor, &before) == 0,
+              UInt64(before.st_ino) == inode, before.st_size >= 0,
+              UInt64(before.st_size) >= offset else { return 0 }
+        var recovery = timingRecovery ?? RolloutTimingRecovery(end: offset)
+        let bytes = recovery.advance(handle: handle, through: offset, blockSize: maximumRead, budget: max(1_024, maximumBytes))
+        var after = stat()
+        let currentPath = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let pathInode = (currentPath?[.systemFileNumber] as? NSNumber)?.uint64Value
+        let pathSize = (currentPath?[.size] as? NSNumber)?.uint64Value
+        let pathModified = currentPath?[.modificationDate] as? Date
+        guard fstat(handle.fileDescriptor, &after) == 0,
+              before.st_ino == after.st_ino, after.st_size >= before.st_size,
+              !(after.st_size == before.st_size && (after.st_mtimespec.tv_sec != before.st_mtimespec.tv_sec || after.st_mtimespec.tv_nsec != before.st_mtimespec.tv_nsec)),
+              pathInode == inode, let pathSize, pathSize >= offset,
+              !(pathSize == size && pathModified != currentModified) else {
+            timingRecovery = nil
+            return bytes
+        }
+        timingRecovery = recovery
+        if let recovered = recovery.recovered { reducer.recoverTiming(from: recovered) }
+        return bytes
     }
 }

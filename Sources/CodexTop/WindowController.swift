@@ -34,6 +34,11 @@ final class UtilityPanel: NSPanel {
     override func animationResizeTime(_ newFrame: NSRect) -> TimeInterval { 0.24 }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.keyCode == 53, let escapeAction { escapeAction(); return true }
+        // A nonactivating panel can own keyboard focus while another app stays active.
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option])
+        if isKeyWindow, modifiers == .command,
+           let key = event.charactersIgnoringModifiers, ["+", "=", "-"].contains(key),
+           NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
         return super.performKeyEquivalent(with: event)
     }
 }
@@ -168,7 +173,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             restoreCollapsedOrb(to: anchor)
         }
         updateContentSize()
-        if store.placement == .top || store.placement == .floating { top.orderFrontRegardless() }
+        if store.placement == .top { top.orderFrontRegardless() }
         if recoverFloating && store.placement != .orb {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
             floating.setFrame(WindowGeometry.floating(size: floatingSize, visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), display: true)
@@ -194,6 +199,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         return CGSize(width: PanelMetrics.floatingWidth * store.uiScale, height: panelHeight(compact: true) * store.uiScale)
     }
     private func updateContentSize(animated: Bool = false) {
+        // Pinning uses only the floating window, including refresh/recovery paths.
+        if store.placement == .floating { hideTopPanel() }
         guard let chosen else { return }
         let previousPositioning = positioning; positioning = true; defer { positioning = previousPositioning }
         let isPopover = store.placement == .menuBar
@@ -444,7 +451,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             self.top.setFrame(target, display: true)
             self.topMotion = nil
             if !self.topExpanded { self.top.resignKey() }
-            if !self.topExpanded && [.orb, .menuBar].contains(self.store.placement) { self.top.orderOut(nil) }
+            if !self.topExpanded && self.store.placement != .top { self.top.orderOut(nil) }
         }
     }
     private func animateStatusPopover(to target: CGRect, progress targetProgress: CGFloat, animated: Bool) {
@@ -478,6 +485,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         cancelHoverTransitions()
         topMotion?.cancel(); topMotion = nil
         stopOrbClickMonitoring()
+        let unpinningToTop = previousPlacement == .floating && store.placement == .top
         let wasPositioning = positioning; positioning = true
         cancelOrbMotion(); orbCanvas = nil
         if previousPlacement == .orb && orbAnchor.width > 0 { restoreCollapsedOrb(to: orbAnchor) }
@@ -504,15 +512,28 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         } else {
             floatingPresentation.visible = false
             floatingDismissTask?.cancel()
-            floatingDismissTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(240))
-                guard !Task.isCancelled, let self, ![.floating, .orb].contains(self.store.placement) else { return }
-                self.floating.orderOut(nil)
+            if unpinningToTop {
+                // Do not leave two task surfaces visible during the unpin transition.
+                floatingDismissTask = nil; floating.orderOut(nil)
+            } else {
+                floatingDismissTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(240))
+                    guard !Task.isCancelled, let self, ![.floating, .orb].contains(self.store.placement) else { return }
+                    self.floating.orderOut(nil)
+                }
             }
         }
-        if store.placement == .top || store.placement == .floating { top.orderFrontRegardless() }
-        else { topExpanded = false; top.orderOut(nil) }
+        if store.placement == .top { top.orderFrontRegardless() }
+        else { hideTopPanel() }
         updateContentSize(animated: true)
+    }
+    private func hideTopPanel() {
+        cancelHoverTransitions()
+        topMotion?.cancel(); topMotion = nil
+        topExpanded = false; topHovered = false
+        if top.isKeyWindow { top.resignKey() }
+        top.acceptsKeyboard = false
+        if top.isVisible { top.orderOut(nil) }
     }
     private func applyAppearance() {
         let appearance = NSAppearance(named: store.theme == .light ? .aqua : .darkAqua)

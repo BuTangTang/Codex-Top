@@ -25,6 +25,9 @@ struct NativeRunningArc: NSViewRepresentable {
 }
 
 final class RunningArcView: NSView {
+    private static let rotationDuration: CFTimeInterval = 1.2
+    private static let rotationEpoch = CACurrentMediaTime()
+    private static let referenceTipRadians = -Double.pi / 2 + 0.78 * Double.pi * 2
     private let arc = CAShapeLayer()
     private var rotating = false
     private var inset: CGFloat = 7
@@ -50,7 +53,10 @@ final class RunningArcView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         // AppKit can create or replace the backing layer after initialization.
-        if let backingLayer = layer, arc.superlayer !== backingLayer { backingLayer.addSublayer(arc) }
+        if let backingLayer = layer, arc.superlayer !== backingLayer {
+            stopRotation()
+            backingLayer.addSublayer(arc)
+        }
         arc.bounds = CGRect(origin: .zero, size: bounds.size)
         arc.position = CGPoint(x: bounds.midX, y: bounds.midY)
         let path = CGMutablePath()
@@ -98,13 +104,19 @@ final class RunningArcView: NSView {
 
     private func updateRotation() {
         guard rotating, window != nil, !isHiddenOrHasHiddenAncestor else { stopRotation(); return }
+        // The orb and task rows use different path starts/trims. Align their visible
+        // leading tips without changing either arc's length, thickness or radius.
+        let alignment = Self.referenceTipRadians - (Double(startRadians) + Double(arc.strokeEnd) * Double.pi * 2)
         // Updating counts, theme or hover must not reset the current rotation phase.
-        guard arc.animation(forKey: rotationKey) == nil else { return }
+        if let current = arc.animation(forKey: rotationKey) as? CABasicAnimation,
+           (current.fromValue as? NSNumber)?.doubleValue == alignment { return }
         let animation = CABasicAnimation(keyPath: "transform.rotation.z")
-        let angle = (arc.value(forKeyPath: "transform.rotation.z") as? NSNumber)?.doubleValue ?? 0
-        animation.fromValue = angle
-        animation.toValue = angle + Double.pi * 2
-        animation.duration = 1.2
+        animation.fromValue = alignment
+        animation.toValue = alignment + Double.pi * 2
+        animation.duration = Self.rotationDuration
+        // A shared monotonic epoch lets late-created or resumed views join the same
+        // phase. Convert the epoch to this layer's local Core Animation time space.
+        animation.beginTime = arc.convertTime(Self.rotationEpoch, from: nil)
         animation.repeatCount = .infinity
         animation.timingFunction = CAMediaTimingFunction(name: .linear)
         arc.add(animation, forKey: rotationKey)

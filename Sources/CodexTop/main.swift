@@ -48,6 +48,14 @@ import CodexTopCore
         for (title, selector, key) in [("剪切", "cut:", "x"), ("复制", "copy:", "c"), ("粘贴", "paste:", "v"), ("全选", "selectAll:", "a")] {
             edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
         }
+        let viewItem = NSMenuItem(title: "显示", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu(title: "显示"); viewItem.submenu = viewMenu; main.addItem(viewItem)
+        add("放大", #selector(increaseScale), to: viewMenu, key: "+")
+        add("缩小", #selector(decreaseScale), to: viewMenu, key: "-")
+        // App-menu equivalents stay local to the active app; '=' also works without Shift.
+        let increaseAlias = NSMenuItem(title: "放大", action: #selector(increaseScale), keyEquivalent: "=")
+        increaseAlias.target = self; increaseAlias.isHidden = true
+        increaseAlias.allowsKeyEquivalentWhenHidden = true; viewMenu.addItem(increaseAlias)
         NSApp.mainMenu = main
         statusObservation = store.objectWillChange.sink { [weak self] in
             DispatchQueue.main.async { self?.updateStatusItem() }
@@ -119,6 +127,8 @@ import CodexTopCore
     @objc private func menuBarOnly() { store.setPlacement(.menuBar) }
     @objc private func recover() { windows.recoverWindows() }
     @objc private func settings() { windows.showSettings() }
+    @objc private func increaseScale() { store.setScale(store.preferences.resolvedScale + MonitorScale.step) }
+    @objc private func decreaseScale() { store.setScale(store.preferences.resolvedScale - MonitorScale.step) }
     @objc private func refresh() { store.refreshQuota(force: true); Task { await store.refresh() } }
     @objc private func usage() { store.openUsagePage() }
     @objc private func quit() { NSApp.terminate(nil) }

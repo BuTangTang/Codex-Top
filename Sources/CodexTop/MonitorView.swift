@@ -132,7 +132,7 @@ struct MonitorView: View {
             if compact {
                 Button { store.setFloating(false) } label: {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 25, height: 30)
-                }.headerButtonHitArea().help("关闭浮窗，保留刘海监控").accessibilityLabel("关闭浮窗")
+                }.headerButtonHitArea().help("关闭浮窗，回到刘海模式").accessibilityLabel("关闭浮窗")
             }
         }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 16)
             .frame(height: compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader)
@@ -193,12 +193,17 @@ private struct MonitorTaskRow: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: compact ? 8 : 10) {
                         if activity.phase == .running {
-                            if compact { Text("运行中").foregroundStyle(activity.phase.tint(store.theme.colorScheme)) }
+                            if compact { TaskPhaseLabel(phase: .running) }
                             if let started = activity.startedAt {
                                 TimelineView(.periodic(from: .now, by: 1)) { context in
                                     let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
                                     Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
                                 }.foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                            } else {
+                                Text("--:--").monospacedDigit()
+                                    .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                                    .accessibilityLabel("运行计时待同步")
+                                    .help("计时待同步：缺少本轮开始记录，暂时无法计算运行时间")
                             }
                         } else {
                             TaskPhaseLabel(phase: activity.phase)

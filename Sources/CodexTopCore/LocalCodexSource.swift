@@ -4,12 +4,13 @@ import CSQLite
 public actor LocalCodexSource {
     public let root: URL
     private var tails: [String: IncrementalRollout] = [:]
+    private var recoveryCursor = 0
     public init(root: URL) { self.root = root.standardizedFileURL.resolvingSymlinksInPath() }
     public static var defaultRoot: URL {
         if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty { return URL(fileURLWithPath: override, isDirectory: true) }
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
-    public func snapshot(now: Date = .now) throws -> SourceSnapshot {
+    public func snapshot(now: Date = .now, recoverTimingFor rootIDs: Set<String> = []) throws -> SourceSnapshot {
         let database = try databaseURL()
         var connection: OpaquePointer?
         guard sqlite3_open_v2(database.path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -56,6 +57,31 @@ public actor LocalCodexSource {
                 }
             }
             tasks.append(task)
+        }
+        if !rootIDs.isEmpty {
+            let graph = TaskGraph(tasks: tasks)
+            let candidates = tasks.indices.filter { index in
+                let task = tasks[index]
+                guard rootIDs.contains(graph.rootIDs[task.id] ?? task.id), let tail = tails[task.id] else { return false }
+                return tail.reducer.activity.startedAt == nil && (tail.reducer.activity.phase == .running || tail.reducer.activity.phase == .waiting)
+            }
+            var remaining = 8 * 1_024 * 1_024
+            let first = candidates.isEmpty ? 0 : recoveryCursor % candidates.count
+            for distance in 0..<candidates.count {
+                guard remaining >= 1_024 else { break }
+                let index = candidates[(first + distance) % candidates.count]
+                let task = tasks[index]
+                guard var tail = tails[task.id] else { continue }
+                // Timing recovery is optional: an unavailable historical range
+                // must not replace a successfully read current task state. Share
+                // 8 MiB across the snapshot, at most 4 MiB per task, and rotate
+                // the first candidate so many selected tasks cannot starve later ones.
+                let recoveredBytes = (try? tail.recoverTiming(url: task.rolloutURL, maximumBytes: min(4 * 1_024 * 1_024, remaining))) ?? 0
+                bytes += recoveredBytes; remaining -= recoveredBytes
+                recoveryCursor = (first + distance + 1) % candidates.count
+                tails[task.id] = tail
+                if tail.isCaughtUp { tasks[index].activity = tail.reducer.activity.effective(at: now) }
+            }
         }
         let ids = Set(tasks.map(\.id)); tails = tails.filter { ids.contains($0.key) }
         return SourceSnapshot(tasks: tasks, quota: quota, warning: failures == 0 ? nil : "\(failures) 个任务的记录不可用，其状态显示为未知。", bytesRead: bytes, observedAt: now)
