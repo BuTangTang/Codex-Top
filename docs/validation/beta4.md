@@ -22,3 +22,6 @@
 DMG：`Codex-Top-0.1.0-beta.4-macOS.dmg`，1,469,059 字节，SHA-256 `19c8d3b5226c910091b386c66117e2f21477b246af749cb0a11f233e5ad5ce55`。可执行文件 SHA-256 `1073fe7dd7e96b9b062c3d38b8fcc855f3f583343ce8c76924df5ac184337685`。
 
 测试包为 ad-hoc 签名，未 Developer ID 签名或 Apple 公证。发布回执完成后追加；既有物理屏幕、真实换号、导航终点和动画范围继续见 [验收对照](acceptance-matrix.md)。
+
+
+发布回执：源码 `627788c23949ce39d0841aaf5ddbfca3d9fcbe6e` 已推送 main，注释标签 `v0.1.0-beta.4` 指向该提交。[GitHub Pre-release](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.4) 公开且非草稿；DMG、SHA-256 和 Windows 提示词三个附件状态及服务器摘要均已与本地核对。提示词附件 47,272 字节，SHA-256 `23898a404766cddf9b8c3ea600507161cb85d5abe350f61c83bebb4eb18b5a42`。回执文档的后续提交不改变包内源码或已上传附件。
