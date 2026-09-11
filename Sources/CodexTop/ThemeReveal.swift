@@ -31,7 +31,8 @@ private final class ThemeSnapshotView: NSView {
     private var removal: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
-    func prepare(window: NSWindow, oldTheme: PanelTheme, pointInWindow: NSPoint?, cornerRadius: CGFloat) -> Bool {
+    func prepare(window: NSWindow, oldTheme: PanelTheme, pointInWindow: NSPoint?,
+                 cornerRadius: CGFloat, squareTop: Bool, circularCorners: Bool) -> Bool {
         guard let content = window.contentView, content.bounds.width > 0, content.bounds.height > 0 else { cancel(); return false }
         content.layoutSubtreeIfNeeded()
         // Freeze the current presentation mask before replacing an in-flight reveal.
@@ -69,6 +70,11 @@ private final class ThemeSnapshotView: NSView {
         view.wantsLayer = true
         view.layer?.contentsScale = window.backingScaleFactor
         view.layer?.cornerRadius = cornerRadius
+        view.layer?.cornerCurve = circularCorners ? .circular : .continuous
+        // The snapshot is y-up. An attached notch surface has square upper
+        // corners; rounding them would expose the new theme before the wave.
+        view.layer?.maskedCorners = squareTop ? [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            : [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         view.layer?.masksToBounds = true
         content.addSubview(view, positioned: .above, relativeTo: nil)
         let point = pointInWindow.map { view.convert($0, from: nil) } ?? CGPoint(x: view.bounds.midX, y: view.bounds.midY)

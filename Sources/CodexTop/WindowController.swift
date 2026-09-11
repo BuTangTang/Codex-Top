@@ -525,8 +525,14 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let clickedWindow = event.flatMap { [.leftMouseDown, .leftMouseUp].contains($0.type) ? $0.window : nil }
         guard let window = windows.first(where: { $0 === clickedWindow }) ?? windows.first(where: \.isKeyWindow) ?? windows.first else { return false }
         let point = event.flatMap { $0.window === window && [.leftMouseDown, .leftMouseUp].contains($0.type) ? $0.locationInWindow : nil }
-        let radius: CGFloat = window === settings ? 0 : window === floating && store.placement == .orb ? 22 : 20
-        return themeReveal.prepare(window: window, oldTheme: store.theme, pointInWindow: point, cornerRadius: radius)
+        let topSurface = window === top && store.placement != .menuBar
+        let orbSurface = window === floating && store.placement == .orb
+        // Match the live surface's physical corners, including its outer scale.
+        let radius: CGFloat = window === settings ? 0 : topSurface ? 12 + 10 * topState.progress
+            : orbSurface ? 22 : 20 * store.uiScale
+        return themeReveal.prepare(window: window, oldTheme: store.theme, pointInWindow: point,
+                                   cornerRadius: radius, squareTop: topSurface && topState.cameraHeight > 0,
+                                   circularCorners: orbSurface)
     }
     func toggleExpanded() {
         hideTask?.cancel(); revealTask?.cancel()
