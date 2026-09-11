@@ -10,6 +10,8 @@ bash scripts/build-app.sh
 
 产物在 `dist/`，不提交 Git。演示包和实际应用使用不同 bundle ID 与设置目录。修改后退出旧应用、再复制新包、重新打开，避免检查到仍在运行的旧二进制。
 
+应用图标源文件为 `Resources/AppIcon.png`，构建脚本使用系统 `sips` 和 `iconutil` 生成完整的 16–1024 px ICNS，并写入 `CFBundleIconFile`。原图与[设计说明](design/logo-v1.md)纳入源码；中间 iconset 和 ICNS 留在构建目录。当前默认版本 `0.1.0`、构建号 `2`，图标修订不覆盖既有 Release 附件。
+
 ```sh
 # ZIP 和校验值；默认本机架构
 bash scripts/package.sh --demo

@@ -24,6 +24,8 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [M2 原生窗口与交互](REQ-001-任务监控/tasks/M2-界面交互.md)
 - [M3 打包与真实验收](REQ-001-任务监控/tasks/M3-交付验收.md)
 - [设计概念](design/README.md)
+- [应用 Logo 与生成提示词](design/logo-v1.md)
+- [Logo 安装与启动台核对](validation/app-icon.md)
 
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)

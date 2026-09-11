@@ -25,6 +25,16 @@ app_path="$repo_root/dist/$app_name.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 install -m 755 "$bin_path/CodexTop" "$app_path/Contents/MacOS/CodexTop"
 install -m 644 LICENSE "$app_path/Contents/Resources/LICENSE"
+icon_work="$(mktemp -d "$repo_root/dist/.app-icon.XXXXXX")"
+trap 'rm -rf "$icon_work"' EXIT
+iconset="$icon_work/AppIcon.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -s format png -z "$size" "$size" "$repo_root/Resources/AppIcon.png" --out "$iconset/icon_${size}x${size}.png" > /dev/null
+  double_size=$((size * 2))
+  sips -s format png -z "$double_size" "$double_size" "$repo_root/Resources/AppIcon.png" --out "$iconset/icon_${size}x${size}@2x.png" > /dev/null
+done
+iconutil -c icns "$iconset" -o "$app_path/Contents/Resources/AppIcon.icns"
 cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -33,9 +43,10 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
 <key>CFBundleDisplayName</key><string>$app_name</string>
 <key>CFBundleIdentifier</key><string>$bundle_id</string>
 <key>CFBundleExecutable</key><string>CodexTop</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
