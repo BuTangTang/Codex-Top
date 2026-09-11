@@ -25,3 +25,6 @@
 - 可执行文件 SHA-256：`c00b424d65c96c01ebe1b30eb19d267c85247c140aa2b34763073c4f74b35cef`。
 
 ad-hoc 签名，未 Developer ID 签名或 Apple 公证。其他仍待验范围见 [逐项验收](acceptance-matrix.md)。发布结果以本页后续回执和 [版本说明](../releases/0.1.0-beta.3.md) 为准。
+
+
+发布回执：源码提交 `00bfd6f61c0cb5047974336960b8f25c65dba219` 已推送 main；注释标签 `v0.1.0-beta.3` 指向同一提交。[GitHub Pre-release](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.3) 已公开，非草稿；DMG、SHA-256 文件和 Windows 提示词三个附件均为 uploaded，服务器摘要与本地逐一一致。提示词附件 44,638 字节，SHA-256 `e563bec71a7d32b8e0c2b868171af5bc6241895e0e8244661c0c93f6f121ec62`。后续回执文档提交不改变包内代码和已上传提示词。

@@ -26,7 +26,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-beta.2 已完成最终测试、镜像校验、列明窗口核对与实际截图。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
+beta.3 已独立预发布，包含主题轮廓修复、双语README和新增刘海实拍；beta.2 的比例/计时与历史截图记录保留。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
