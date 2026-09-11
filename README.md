@@ -4,13 +4,13 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-目前为 **Beta 预览版**。本轮 beta.3 修正主题扩散时快照与面板圆角不一致的问题；发布状态、校验值与验收范围以[版本说明](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.3)为准。
+目前为 **Beta 预览版**。本轮 beta.4 让设置窗口跟随鼠标所在屏幕；发布状态、校验值与验收范围以[版本说明](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.4)为准。
 
 ## 安装
 
 要求 **macOS 14+**，提供 **Apple Silicon / Intel 通用 DMG**。真实任务需要本机 Codex 及已落盘的任务记录；账户额度需要官方 Codex CLI 已登录，无需在本工具中填写 API Key。
 
-1. 从 [v0.1.0-beta.3 下载页](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.3)下载 DMG。
+1. 从 [v0.1.0-beta.4 下载页](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.4)下载 DMG。
 2. 打开 DMG，把 `Codex Top.app` 拖到“应用程序”。
 3. 启动应用，左键点击状态栏图标查看任务；右键打开菜单，选择任务、显示方式或设置。
 
@@ -56,7 +56,7 @@
 - **自由拖动**：常驻浮窗与展开圆环的顶部除按钮外均可拖动。拖到屏幕顶部不会自动吸附或切状态栏，显示方式由菜单切换；展开圆环移动后收回到新的球位置。
 - **任务与额度入口**：点击任务尝试打开对应 Codex 对话，点击额度打开[官方用量网页](https://chatgpt.com/codex/settings/usage)。额度自动约 60 秒刷新、手动最短 5 秒，单次超时 15 秒；悬停可看来源、更新时间和重置时间。
 
-应用激活时，`⌘,` 打开设置，`⌘T` 显示任务。详细操作见[使用说明](docs/usage.md)。
+应用激活时，`⌘,` 打开设置，`⌘T` 显示任务。设置跟随打开时鼠标所在屏幕，已在同一屏幕内显示时保留原位置。详细操作见[使用说明](docs/usage.md)。
 
 ## 数据与限制
 

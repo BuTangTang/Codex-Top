@@ -4,13 +4,13 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-This is a **Beta preview**. The beta.3 update corrects mismatched snapshot and panel corners during theme reveals. Check the [release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.3) for publication status, checksums, and validation scope.
+This is a **Beta preview**. The beta.4 update opens Settings on the display containing the pointer. Check the [release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.4) for publication status, checksums, and validation scope.
 
 ## Install
 
 Requires **macOS 14+**. The DMG is **universal for Apple Silicon and Intel**. Real tasks require a local Codex installation and task records saved to disk; account usage requires the official Codex CLI to be signed in. No API key needs to be entered in this app.
 
-1. Download the DMG from the [v0.1.0-beta.3 release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.3).
+1. Download the DMG from the [v0.1.0-beta.4 release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.4).
 2. Open the DMG and drag `Codex Top.app` to Applications.
 3. Launch the app. Left-click its menu bar item to view tasks; right-click for task selection, display modes, and settings.
 
@@ -56,7 +56,7 @@ Four display modes share one set of monitored tasks:
 - **Free dragging:** Drag any non-button area of the header in the floating list or expanded orb panel. Dropping at the screen's top edge does not dock or change modes; choose modes from the menu. After moving an expanded orb panel, it collapses to its new orb position.
 - **Task and usage links:** Click a task to attempt to open its Codex conversation, or click usage to open the [official usage page](https://chatgpt.com/codex/settings/usage). Account usage refreshes about every 60 seconds, with a 5-second minimum between manual requests and a 15-second timeout. Hover for source, update, and reset details.
 
-While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. See the [usage guide](docs/usage.md) for detailed instructions.
+While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. Settings opens on the display containing the pointer; if already visible within that display, it keeps its position. See the [usage guide](docs/usage.md) for detailed instructions.
 
 ## Data and limitations
 

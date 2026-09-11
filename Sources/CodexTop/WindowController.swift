@@ -708,14 +708,29 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         picker = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
     func showSettings() {
+        // Resolve the pointer's display before activation can change the main screen.
+        let pointer = NSEvent.mouseLocation
+        let screens = NSScreen.screens
+        let target = screens.first { NSMouseInRect(pointer, $0.frame, false) }
+            ?? screens.first { $0 == settings?.screen } ?? NSScreen.main ?? screens.first
         cancelHoverTransitions()
-        if let settings, settings.isVisible { settings.makeKeyAndOrderFront(nil); return }
-        dismissExpanded()
-        let window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610))
-        window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
-        settings = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
+        if settings?.isVisible != true { dismissExpanded() }
+        let window: NSWindow
+        if let settings { window = settings }
+        else {
+            window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610), screen: target)
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
+            settings = window
+        }
+        if let target, !window.isVisible || !target.visibleFrame.contains(window.frame) {
+            let visible = target.visibleFrame
+            let frame = CGRect(x: visible.midX - window.frame.width / 2, y: visible.midY - window.frame.height / 2,
+                               width: window.frame.width, height: window.frame.height)
+            window.setFrame(WindowGeometry.clamp(frame, to: visible), display: false)
+        }
+        NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
-    private func makeWindow(title: String, size: CGSize, popover: Bool = false) -> NSWindow {
+    private func makeWindow(title: String, size: CGSize, popover: Bool = false, screen: NSScreen? = nil) -> NSWindow {
         let window: NSWindow
         if popover {
             let panel = UtilityPanel(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -728,8 +743,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         window.title = title; window.isReleasedWhenClosed = false
         window.minSize = popover ? NSSize(width: 300, height: 320) : NSSize(width: 420, height: 400)
         window.appearance = NSAppearance(named: store.theme == .light ? .aqua : .darkAqua); window.level = .floating
-        if let chosen {
-            let visible = chosen.screen.visibleFrame
+        if let screen = screen ?? chosen?.screen {
+            let visible = screen.visibleFrame
             window.setFrame(WindowGeometry.clamp(CGRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height), to: visible), display: false)
         } else { window.center() }
         return window

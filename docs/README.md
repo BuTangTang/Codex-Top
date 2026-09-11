@@ -6,6 +6,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
 - [使用说明](usage.md)
 - [开发与打包](development.md)
+- [v0.1.0-beta.4 预发布说明](releases/0.1.0-beta.4.md)：设置在鼠标所在屏幕打开。
 - [v0.1.0-beta.3 预发布说明](releases/0.1.0-beta.3.md)：主题轮廓修复、双语说明与实际刘海截图。
 - [v0.1.0-beta.1 预发布说明](releases/0.1.0-beta.1.md)：DMG 安装、版本内容与验收限制。
 - [v0.1.0-beta.2 预发布说明](releases/0.1.0-beta.2.md)：D-49–D-51 内容与最终验收范围；保留 beta.1 附件。
@@ -31,3 +32,5 @@ beta.3 已独立预发布，包含主题轮廓修复、双语README和新增刘�
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
 - [beta.3 主题轮廓修复与实际核对](validation/beta3.md)
+
+- [beta.4 设置定位与实际核对](validation/beta4.md)
