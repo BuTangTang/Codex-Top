@@ -2,11 +2,11 @@
 
 最后更新：2026-09-11。接续先读本文件，再读阶段清单和验收记录。
 
-当前修订为 **D-49–D-51：紧凑字号、13 档比例、淡橙提醒与待处理时长**。92 项测试、universal、严格签名与 DMG 只读挂载检查通过，真实桌面应用已更新为 beta.2；README 已补实际应用截图（独立示例任务）。下载包待本轮上传，完整证据见 [beta.2 验收](validation/beta2.md)。
+当前修订为 **D-49–D-51：紧凑字号、13 档比例、淡橙提醒与待处理时长**。92 项测试、universal、严格签名与 DMG 只读挂载检查通过，真实桌面应用已更新为 beta.2；README 已补实际应用截图（独立示例任务）。已发布 GitHub [v0.1.0-beta.2](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.2)，完整证据见 [beta.2 验收](validation/beta2.md)。
 
-已发布检查点为 **D-48 / v0.1.0-beta.1**：78 项测试、universal、严格签名及 DMG 只读挂载校验通过，GitHub 预发布和桌面同版应用已交付。其 README 截图与完整顶部拖动当时因锁屏未完成，该限制保留为历史；不能据此声称当前仍锁定。D-47 的 76 项测试和 17:14 真实运行行/已结束区、滚动位置 0 也只属于旧检查点，不代表本轮字号与比例或 FPS 已验收。
+上一版检查点为 **D-48 / v0.1.0-beta.1**：78 项测试、universal、严格签名及 DMG 只读挂载校验通过，GitHub 预发布和桌面同版应用已交付。其 README 截图与完整顶部拖动当时因锁屏未完成，该限制保留为历史；不能据此声称当前仍锁定。D-47 的 76 项测试和 17:14 真实运行行/已结束区、滚动位置 0 也只属于旧检查点，不代表本轮字号与比例或 FPS 已验收。
 
-17:06 的上一真实候选已核对：点击后指针位于标题附近；打开和收回已结束区时，当前运行行仍可见，滚动位置为 0。该证据支持新方向和列表保留，不是 D-47 全部中间帧或 FPS 验收。保留用户当前模式和真实列表，不切入 Demo；D-40 透明菜单栏方案仍未实施。Windows 提示词及本轮代码已于 `bb5463a` 提交并推送；GitHub [v0.1.0-beta.1](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.1) 已公开为预发布版，DMG、SHA-256 和 Windows 提示词附件均已上传并核对服务器摘要。
+17:06 的上一真实候选已核对：点击后指针位于标题附近；打开和收回已结束区时，当前运行行仍可见，滚动位置为 0。该证据支持新方向和列表保留，不是 D-47 全部中间帧或 FPS 验收。保留用户当前模式和真实列表，不切入 Demo；D-40 透明菜单栏方案仍未实施。该阶段 Windows 提示词及代码已于 `bb5463a` 提交并推送；GitHub [v0.1.0-beta.1](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.1) 已公开为预发布版，DMG、SHA-256 和 Windows 提示词附件均已上传并核对服务器摘要。
 
 最新产物和逐次验证统一见 [刘海与圆环修订记录](validation/notch-orb-refinement.md)。旧阶段测试数、校验值和截图仅对应各自包，不能用作本轮最终标识。Windows 交接见 [开发提示词](handoff/windows-implementation-prompts.md)，本次没有实施 Windows 版。
 

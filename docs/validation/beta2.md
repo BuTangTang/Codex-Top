@@ -30,3 +30,5 @@
 - 最终副本中，运行计时从 03:16 继续增长，待处理始终为 03:24；浅深面板、常驻浮窗与 60% 下待处理后缀均实际可见，没有用等待时长冒充 CPU 时间。
 
 测试包为 ad-hoc 签名，未用 Developer ID 签名或 Apple 公证。发布回执另见[版本说明](../releases/0.1.0-beta.2.md)。
+
+发布回执：源码提交 `5d592b5b6c94e2c20c7d447157d30018653b6b60` 已推送 main，注释标签 `v0.1.0-beta.2` 指向该提交；[GitHub Pre-release](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0-beta.2) 为公开非草稿。DMG、SHA-256 文件和 Windows 提示词均为 uploaded，服务器 SHA-256 与本地逐一一致。后续回执文档提交不改变包内源码。
