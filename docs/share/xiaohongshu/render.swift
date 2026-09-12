@@ -65,12 +65,12 @@ func brand(_ number: Int) {
     let logo = NSImage(contentsOf: repo.appendingPathComponent("Resources/AppIcon.png"))!
     logo.draw(in: rect(75,63,72,72))
     label("Codex Top",162,75,31,ink,.semibold,600,55)
-    label(String(format:"%02d / 03",number),830,82,22,secondary,.medium,170,40,alignment:.right)
+    label(String(format:"%02d / 04",number),830,82,22,secondary,.medium,170,40,alignment:.right)
 }
 func footer(_ number: Int) {
     line(80,1311,1000,1311,color(0xCED7E1))
     label("macOS 14+  ·  开源社区项目",80,1341,22,secondary,.medium,600,40)
-    label("真实窗口 · 示例任务",670,1341,22,secondary,.regular,330,40,alignment:.right)
+    label(number == 4 ? "公开资料 · 2026.09.12" : "真实窗口 · 示例任务",670,1341,22,secondary,.regular,330,40,alignment:.right)
 }
 func card(_ filename: String, _ number: Int, _ body: () -> Void) throws {
     let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height),
@@ -86,12 +86,12 @@ func card(_ filename: String, _ number: Int, _ body: () -> Void) throws {
 try card("01-cover.png",1) {
     label("给 Codex",80,207,84,ink,.semibold,920,120)
     label("一个桌面小挂件",80,311,84,ink,.semibold,920,120)
-    label("少切几次窗口，多一点专注。",84,456,32,secondary,.regular,900,70)
+    label("简单看任务，自由选位置。",84,456,32,secondary,.regular,900,70)
     box(84,555,54,5,orange,radius:2.5)
     // A quiet display stage, with no personal desktop or invented app UI.
     box(80,615,920,428,color(0xFFFFFF,0.42),radius:32)
     photo("floating-light.jpg",275,674,530,24)
-    label("运行中、待处理，抬眼就能看到。",80,1111,34,ink,.medium,920,60,alignment:.center)
+    label("关注任务，四种方式随手切换。",80,1111,34,ink,.medium,920,60,alignment:.center)
     label("刘海  /  浮窗  /  圆环  /  状态栏",80,1176,25,secondary,.regular,920,50,alignment:.center)
 }
 
@@ -124,4 +124,33 @@ try card("03-details.png",3) {
     line(80,1153,1000,1153,color(0xD1DBE6))
     label("只读本地任务记录，不上传任务内容。",84,1185,26,ink,.medium,920,55)
     label("状态以本机记录为准；回复和批准仍在 Codex 中完成。",84,1232,21,secondary,.regular,920,45)
+}
+
+try card("04-comparison.png",4) {
+    label("简单一点，",80,205,76,ink,.semibold,920,110)
+    label("也自由一点。",80,301,76,ink,.semibold,920,110)
+    label("专注 Codex 任务，提供四种显示方式。",84,429,30,secondary,.regular,920,65)
+    box(80,536,920,69,color(0xFFFFFF,0.55),radius:14)
+    label("工具",104,554,23,secondary,.medium,240,45)
+    label("主要侧重",335,554,23,secondary,.medium,335,45)
+    label("主要显示入口",698,554,23,secondary,.medium,275,45)
+    let rows: [(String,String,String)] = [
+        ("Atoll","音乐、计时、系统信息","刘海 / 锁屏组件"),
+        ("CodexBar","多平台额度与用量","菜单栏 / 桌面组件"),
+        ("CodexNotch","Codex 额度与任务","刘海 / 无刘海回退")
+    ]
+    for (index,row) in rows.enumerated() {
+        let y: CGFloat = 634 + CGFloat(index) * 105
+        label(row.0,104,y,28,ink,.semibold,245,50)
+        label(row.1,335,y+3,24,ink,.regular,355,50)
+        label(row.2,698,y+3,23,secondary,.regular,290,50)
+        line(104,y+70,976,y+70,color(0xD2DCE7))
+    }
+    box(80,969,920,135,color(0xD8E5F5,0.86),radius:20)
+    label("Codex Top",104,990,31,blue,.semibold,290,55)
+    label("专注任务监控，关注列表共用",402,997,26,ink,.medium,570,50)
+    label("刘海  /  常驻浮窗  /  44pt 圆环  /  仅状态栏",104,1056,27,ink,.medium,850,55)
+    label("各有侧重；以上按公开说明整理，未经竞品实机横测。",84,1135,21,secondary,.regular,920,45)
+    label("来源  github.com/Ebullioscopic/Atoll",84,1190,18,secondary,.regular,920,35)
+    label("github.com/steipete/CodexBar  ·  github.com/fengdwx/codex-notch",84,1224,18,secondary,.regular,920,40)
 }
