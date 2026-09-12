@@ -5,6 +5,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
 - [使用说明](usage.md)
+- [小红书分享介绍与实际截图](share/xiaohongshu/README.md)：90% 示例窗口、三张竖版配图及可复制文案。
 - [开发与打包](development.md)
 - [v0.1.0 版本说明与下载](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)：回复刷新、计时回查、缩放快捷键、单浮窗与运行提示。
 - [v0.1.0-beta.4 预发布说明](releases/0.1.0-beta.4.md)：设置在鼠标所在屏幕打开。
