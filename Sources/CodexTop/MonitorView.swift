@@ -216,8 +216,16 @@ private struct MonitorTaskRow: View {
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                     }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
                 }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
-            }.buttonStyle(QuietRowStyle()).help("\(task.title)\n\(activity.detail)\n点击回到 Codex")
+            }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
         }
+    }
+
+    private func navigationHelp(for task: CodexTask, activity: TaskActivity) -> String {
+        guard activity.phase == .waiting else { return "\(task.title)\n\(activity.detail)\n点击回到 Codex" }
+        let target = store.graph.navigationTarget(for: task)
+        let waiting = activity.waitingStartedAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"
+        let latest = activity.lastEventAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"
+        return "\(target.title)\n进入待处理：\(waiting)\n最近活动记录：\(latest)\n尚未读到答复记录；已提交的答案可能仍在同步。\n点击打开待处理所在任务。Codex 暂不支持定位单条问题。"
     }
 }
 

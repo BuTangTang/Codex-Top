@@ -338,3 +338,10 @@ D-54–D-56 的测试与实机结果由本轮验收记录登记；这里只记�
 圆环和任务行的 path start、trimEnd 不同；动画 from/to 加入 `referenceTipRadians - (startRadians + strokeEnd × 2π)` 补偿，使运行弧可见前端同角度，弧长、线宽、半径和 inset 不变。已有固定 animation key 且 alignment 相同时不重新加动画；startDegrees 或 trimEnd 真正变化时更新 alignment，但仍使用原 epoch；trimStart 只改变弧长。
 
 不可见、拆除或减少动态效果时移除动画并冻结静态外观；恢复后重新接当前共享相位，不保留各自独立的旧暂停相位。backing layer 替换前先停止旋转，挂到新 layer 后按新时间空间重新接续。颜色、计数与悬停只更新输入，不驱动全局 Timer 或 SwiftUI 逐帧刷新。坐标和时间公式的静态审查不能代替真实多帧/FPS 验证。
+
+
+## D-60 待处理来源与导航一致
+
+TaskGraph.activitySource(for:) 复用原子孙活动优先级规则，activity(for:) 从该来源构造展示活动。navigationTarget(for:) 仅在来源为 waiting 时返回其任务，否则返回根任务；同级规则及顺序保持不变。TaskStore.openTask 在点击时调用该选择，并将实际目标用于 deepLink 和失败时复制 ID。MonitorTaskRow 的 help 使用相同目标、waitingStartedAt 和 lastEventAt，不读取或缓存提问正文。
+
+等待归约、文件监听、冷启动范围和计时回查不变。此次真实旧实例在匹配的用户答复记录落盘后已恢复运行，记录延迟不由修改状态或强制超时掩盖。当前 Codex 没有可用的外部单条问题定位参数，只生成已支持的 codex://threads/<id>。具体测试、真实包核对与精确定位未实现的边界见 [本次验收](../validation/waiting-navigation.md)。

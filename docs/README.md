@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [待处理记录延迟与来源任务跳转](validation/waiting-navigation.md)：build 3 的修正、实际核对与单条问题定位限制。
 - [使用说明](usage.md)
 - [小红书分享介绍与实际截图](share/xiaohongshu/README.md)：三张原生桌面截图（圆环、展开、钉住）、精简文案及历史竞品对比参考。
 - [开发与打包](development.md)
@@ -31,7 +32,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前版本为 v0.1.0，功能范围保持 D-54–D-59；当前构建、验收和发布记录见 [STATUS](STATUS.md)。此前测试版及 beta.5 候选保留各自证据，README 的实际截图仍来自明确标注的 beta.2/beta.3，不用真实私人任务截图替换。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
+当前版本为 v0.1.0，本机 build 3 增加 D-60 待处理来源任务跳转，公开 Release 附件未变；当前构建、验收和发布记录见 [STATUS](STATUS.md)。此前测试版及 beta.5 候选保留各自证据，README 的实际截图仍来自明确标注的 beta.2/beta.3，不用真实私人任务截图替换。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

@@ -117,9 +117,20 @@ public struct TaskGraph: Sendable {
         children = Dictionary(grouping: tasks.filter { resolved[$0.id] != $0.id }) { resolved[$0.id] ?? $0.id }
     }
     public func activity(for root: CodexTask) -> TaskActivity {
+        let source = activitySource(for: root)
+        guard source.id != root.id else { return root.activity }
+        var result = source.activity; result.detail = "子任务 · \(result.detail)"; return result
+    }
+    public func activitySource(for root: CodexTask) -> CodexTask {
         guard let child = (children[root.id] ?? []).filter({ $0.activity.phase.isActive || $0.activity.phase == .failed })
-            .min(by: { $0.activity.phase.priority < $1.activity.phase.priority }), child.activity.phase.priority < root.activity.phase.priority else { return root.activity }
-        var result = child.activity; result.detail = "子任务 · \(result.detail)"; return result
+            .min(by: { $0.activity.phase.priority < $1.activity.phase.priority }), child.activity.phase.priority < root.activity.phase.priority else { return root }
+        return child
+    }
+    /// A pending row opens the task that actually supplied its question or approval.
+    /// Other rows keep their existing root-task destination.
+    public func navigationTarget(for root: CodexTask) -> CodexTask {
+        let source = activitySource(for: root)
+        return source.activity.phase == .waiting ? source : root
     }
 }
 

@@ -281,9 +281,10 @@ import CodexTopCore
     }
     func openTask(_ task: CodexTask) {
         if demo { notice = "这是演示任务。实际任务会在 Codex 中打开。"; return }
-        guard let link = task.deepLink,
+        let target = graph.navigationTarget(for: task)
+        guard let link = target.deepLink,
               let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
-            taskNavigationFailed(id: task.id); return
+            taskNavigationFailed(id: target.id); return
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
@@ -292,7 +293,7 @@ import CodexTopCore
         NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { @Sendable [weak self] _, error in
             Task { @MainActor in
                 guard let self else { return }
-                if error != nil { self.taskNavigationFailed(id: task.id) }
+                if error != nil { self.taskNavigationFailed(id: target.id) }
                 else { self.onExternalNavigation?() }
             }
         }
