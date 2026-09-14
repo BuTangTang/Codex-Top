@@ -4,13 +4,13 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-当前版本为 **v0.1.0**，包含回答后的状态刷新、缺失开始时间回查、应用内缩放快捷键、单浮窗常驻和更清楚的运行提示。下载、校验值与验收范围见[版本说明](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)。
+当前源码与本机构建版本为 **v1.0.0**，面板右上角新增单个“显示位置”菜单，可切换刘海、常驻浮窗、圆环和仅状态栏。构建及验收见[1.0.0 记录](docs/validation/1.0.0.md)；[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
 
 ## 安装
 
 要求 **macOS 14+**，提供 **Apple Silicon / Intel 通用 DMG**。真实任务需要本机 Codex 及已落盘的任务记录；账户额度需要官方 Codex CLI 已登录，无需在本工具中填写 API Key。
 
-1. 从 [v0.1.0 下载页](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0)下载 DMG。
+1. 从[已发布版本](https://github.com/BuTangTang/Codex-Top/releases)下载 DMG，或按[构建说明](docs/development.md)构建当前 1.0.0。
 2. 打开 DMG，把 `Codex Top.app` 拖到“应用程序”。
 3. 启动应用，左键点击状态栏图标查看任务；右键打开菜单，选择任务、显示方式或设置。
 

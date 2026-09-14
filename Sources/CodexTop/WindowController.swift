@@ -73,6 +73,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var picker: NSWindow?
     private var settings: NSWindow?
     private var observer: NSObjectProtocol?
+    private var menuObservations = Set<AnyCancellable>()
+    private var trackingMenus = Set<ObjectIdentifier>()
     private var hideTask: Task<Void, Never>?
     private var revealTask: Task<Void, Never>?
     private var topMotion: Task<Void, Never>?
@@ -156,9 +158,28 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         observer = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.layout(recoverFloating: true) }
         }
+        observeMenuTracking()
         layout(recoverFloating: true)
         applyAppearance()
         applyMode()
+    }
+    private func observeMenuTracking() {
+        for (name, opening) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+            NotificationCenter.default.publisher(for: name).sink { [weak self] notification in
+                // AppKit tracks menus on the main thread. Update synchronously so
+                // the menu's first click cannot race the outside-click monitor.
+                MainActor.assumeIsolated {
+                    guard let self, let menu = notification.object as? NSMenu else { return }
+                    if opening {
+                        self.trackingMenus.insert(ObjectIdentifier(menu))
+                        self.cancelHoverTransitions()
+                    } else {
+                        self.trackingMenus.remove(ObjectIdentifier(menu))
+                        if self.trackingMenus.isEmpty && !self.topHovered { self.scheduleHide() }
+                    }
+                }
+            }.store(in: &menuObservations)
+        }
     }
     func layout(recoverFloating: Bool, bringAuxiliaryToChosen: Bool = false) {
         themeReveal.cancel()
@@ -265,7 +286,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }) { orbClickMonitors.append(monitor) }
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.store.placement == .orb, self.orbState.expanded else { return }
+                guard let self, self.store.placement == .orb, self.orbState.expanded, self.trackingMenus.isEmpty else { return }
                 self.dismissExpanded()
             }
         }) { orbClickMonitors.append(monitor) }
@@ -275,7 +296,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         orbClickMonitors.removeAll()
     }
     private func handleOrbClick(_ event: NSEvent) {
-        guard store.placement == .orb, orbState.expanded, !dragging else { return }
+        guard store.placement == .orb, orbState.expanded, !dragging, trackingMenus.isEmpty else { return }
         if event.window === floating {
             let point = floating.convertPoint(toScreen: event.locationInWindow)
             // The backing window temporarily includes the ring and expanded endpoints.
@@ -605,11 +626,11 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func scheduleHide() {
         hideTask?.cancel()
-        guard store.placement == .top else { return }
+        guard store.placement == .top, trackingMenus.isEmpty else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, let self, !self.topHovered,
-                  self.store.placement == .top else { return }
+                  self.store.placement == .top, self.trackingMenus.isEmpty else { return }
             self.dismissExpanded()
         }
     }
@@ -630,7 +651,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         orbState.hovered = true
     }
     private var canRevealOnHover: Bool {
-        !dragging && picker?.isVisible != true && settings?.isVisible != true
+        !dragging && trackingMenus.isEmpty && picker?.isVisible != true && settings?.isVisible != true
     }
     private func cancelHoverTransitions() {
         hideTask?.cancel(); hideTask = nil

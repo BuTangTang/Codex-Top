@@ -10,7 +10,7 @@ bash scripts/build-app.sh
 
 产物在 `dist/`，不提交 Git。演示包和实际应用使用不同 bundle ID 与设置目录。修改后退出旧应用、再复制新包、重新打开，避免检查到仍在运行的旧二进制。
 
-应用图标源文件为 `Resources/AppIcon.png`，构建脚本使用系统 `sips` 和 `iconutil` 生成完整的 16–1024 px ICNS，并写入 `CFBundleIconFile`。原图与[设计说明](design/logo-v1.md)纳入源码；中间 iconset 和 ICNS 留在构建目录。当前默认版本 `0.1.0`、构建号 `3`，待处理来源任务跳转修订不覆盖既有 Release 附件；图标安装验收仍对应历史 build 2。
+应用图标源文件为 `Resources/AppIcon.png`，构建脚本使用系统 `sips` 和 `iconutil` 生成完整的 16–1024 px ICNS，并写入 `CFBundleIconFile`。原图与[设计说明](design/logo-v1.md)纳入源码；中间 iconset 和 ICNS 留在构建目录。当前默认版本 `1.0.0`、构建号 `4`，包含单按钮显示位置菜单；本轮不覆盖既有 Release 附件；图标安装验收仍对应历史 build 2。
 
 ```sh
 # ZIP 和校验值；默认本机架构
@@ -20,7 +20,7 @@ bash scripts/package.sh
 bash scripts/package.sh --universal
 ```
 
-可设置 `VERSION=0.1.0`、`CONFIGURATION=release`。`SIGN_IDENTITY` 可指定本机已有签名身份；默认 `-` 是 ad-hoc 签名，不能等同 Developer ID 分发或 Apple 公证。签名身份、证书和本机设置不得提交。脚本不发布 GitHub Release，也不申请证书或公证。
+可设置 `VERSION=1.0.0`、`CONFIGURATION=release`。`SIGN_IDENTITY` 可指定本机已有签名身份；默认 `-` 是 ad-hoc 签名，不能等同 Developer ID 分发或 Apple 公证。签名身份、证书和本机设置不得提交。脚本不发布 GitHub Release，也不申请证书或公证。
 
 核心测试使用合成数据库/日志，覆盖有界增量读取、乱序/半行、生命周期、未知、配额、父子任务、选择规则、旧设置、缩放和多屏几何。v0.1.0 还包含本地监听生命周期、用户回复恢复及关注任务开始时间回查；计时只从兼容的明确事件补齐，不用文件时间估算。它们不代替打包应用的拖动、悬停、真实跳转和硬件验收。
 
@@ -39,7 +39,7 @@ bash scripts/package.sh --universal
 
 ```sh
 swift test
-VERSION=0.1.0 bash scripts/build-app.sh --universal
+VERSION=1.0.0 bash scripts/build-app.sh --universal
 bash scripts/build-dmg.sh
 ```
 

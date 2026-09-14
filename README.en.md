@@ -4,13 +4,13 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current version is **v0.1.0**, with faster updates after replies, recovery of missing start times, in-app scale shortcuts, a single pinned floating list, and clearer running indicators. See the [release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0) for downloads, checksums, and validation scope.
+The current source and local build are **v1.0.0**, adding one display-position menu in the panel header to switch between notch, pinned floating, ring, and menu-bar modes. See the [1.0.0 validation record](docs/validation/1.0.0.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately from the source version.
 
 ## Install
 
 Requires **macOS 14+**. The DMG is **universal for Apple Silicon and Intel**. Real tasks require a local Codex installation and task records saved to disk; account usage requires the official Codex CLI to be signed in. No API key needs to be entered in this app.
 
-1. Download the DMG from the [v0.1.0 release page](https://github.com/BuTangTang/Codex-Top/releases/tag/v0.1.0).
+1. Download a DMG from [published releases](https://github.com/BuTangTang/Codex-Top/releases), or [build the current 1.0.0 source](docs/development.md).
 2. Open the DMG and drag `Codex Top.app` to Applications.
 3. Launch the app. Left-click its menu bar item to view tasks; right-click for task selection, display modes, and settings.
 

@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 configuration="${CONFIGURATION:-release}"
-version="${VERSION:-0.1.0}"
+version="${VERSION:-1.0.0}"
 app_name="Codex Top"
 bundle_id="dev.butang.codextop"
 demo=false
@@ -46,7 +46,7 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
-<key>CFBundleVersion</key><string>3</string>
+<key>CFBundleVersion</key><string>4</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

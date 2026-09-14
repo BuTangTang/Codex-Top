@@ -345,3 +345,11 @@ D-54–D-56 的测试与实机结果由本轮验收记录登记；这里只记�
 TaskGraph.activitySource(for:) 复用原子孙活动优先级规则，activity(for:) 从该来源构造展示活动。navigationTarget(for:) 仅在来源为 waiting 时返回其任务，否则返回根任务；同级规则及顺序保持不变。TaskStore.openTask 在点击时调用该选择，并将实际目标用于 deepLink 和失败时复制 ID。MonitorTaskRow 的 help 使用相同目标、waitingStartedAt 和 lastEventAt，不读取或缓存提问正文。
 
 等待归约、文件监听、冷启动范围和计时回查不变。此次真实旧实例在匹配的用户答复记录落盘后已恢复运行，记录延迟不由修改状态或强制超时掩盖。当前 Codex 没有可用的外部单条问题定位参数，只生成已支持的 codex://threads/<id>。具体测试、真实包核对与精确定位未实现的边界见 [本次验收](../validation/waiting-navigation.md)。
+
+## D-61 显示位置快捷入口
+
+MonitorView 共用标题栏增加一个无边框 Menu，内部 inline Picker 以 PanelPlacement.allCases 生成带图标的四个位置选项，绑定 store.placement，由原生菜单显示当前勾选项。选择其他模式调用已有 TaskStore.setPlacement，由 WindowController.applyMode 维护互斥；选择当前模式不重触发窗口布局。悬停说明与辅助功能值显示当前模式，原图钉仍独立保留。
+
+菜单按钮注册 HeaderButtonBounds，标题栏拖动覆盖层排除其实际命中范围。单按钮固定尺寸，保留任务选择、主题和原收起/关闭入口；不改变监控来源、关注集合或窗口尺寸。验证以打包后的真实程序依次切换四种模式、核对当前勾选和原按钮兼容为主，不为直接 UI 绑定新增镜像测试。
+
+WindowController 同步监听 NSMenu 开始/结束跟踪通知，并按菜单对象记录活动集合；菜单展开期间暂停圆环外部点击收起和刘海离开延时收起，避免选择菜单项时先把其来源面板缩回。全部菜单关闭后恢复刘海离开计时。Combine 订阅随控制器释放，不创建全局定时器，也不吞掉菜单或外部应用的原始点击。

@@ -119,11 +119,12 @@ struct MonitorView: View {
                         .background(Palette.primary(store.theme.colorScheme).opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
                 }.headerButtonHitArea().help("搜索和选择监控任务").accessibilityLabel("选择任务")
             }
+            placementMenu
             Button { store.setFloating(!store.preferences.floating) } label: {
                 Image(systemName: store.preferences.floating ? "pin.fill" : "pin")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(store.preferences.floating ? Palette.accent : Palette.secondary(store.theme.colorScheme)).frame(width: 28, height: 30)
-            }.headerButtonHitArea().help(compact ? "收回刘海" : "悬浮置顶").accessibilityLabel(compact ? "收回刘海" : "悬浮置顶")
+            }.headerButtonHitArea().help(compact ? "取消置顶，回到刘海模式" : "悬浮置顶").accessibilityLabel(compact ? "取消置顶" : "悬浮置顶")
             if let collapse {
                 Button(action: collapse) {
                     Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).frame(width: 24, height: 30)
@@ -147,6 +148,31 @@ struct MonitorView: View {
             .contextMenu { Button("选择任务", action: pickTasks); Button("监控设置", action: settings) }
     }
 
+    private var placementMenu: some View {
+        Menu {
+            Picker("显示位置", selection: Binding(get: { store.placement }, set: { placement in
+                if placement != store.placement { store.setPlacement(placement) }
+            })) {
+                ForEach(PanelPlacement.allCases, id: \.self) { placement in
+                    Label(placement.shortcutTitle, systemImage: placement.shortcutSymbol).tag(placement)
+                }
+            }.pickerStyle(.inline)
+        } label: {
+            Image(systemName: "rectangle.3.group")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Palette.primary(store.theme.colorScheme))
+                .frame(width: 28, height: 30)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Palette.primary(store.theme.colorScheme))
+        .fixedSize()
+        .headerButtonHitArea()
+        .accessibilityLabel("显示位置")
+        .accessibilityValue(store.placement.shortcutTitle)
+        .help("显示位置：\(store.placement.shortcutTitle)。点击选择位置")
+    }
+
     private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 16) }
 
     private var footer: some View {
@@ -161,6 +187,25 @@ struct MonitorView: View {
                 Button(action: settings) { Image(systemName: "gearshape.fill").font(.system(size: 15)).frame(width: 28, height: 30) }
                     .buttonStyle(QuietButtonStyle()).help("监控设置").accessibilityLabel("监控设置")
             }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).font(.system(size: 13)).padding(.horizontal, 18).frame(height: PanelMetrics.footer)
+        }
+    }
+}
+
+private extension PanelPlacement {
+    var shortcutTitle: String {
+        switch self {
+        case .top: "刘海模式"
+        case .floating: "常驻浮窗"
+        case .orb: "圆环"
+        case .menuBar: "仅状态栏"
+        }
+    }
+    var shortcutSymbol: String {
+        switch self {
+        case .top: "macbook"
+        case .floating: "pin"
+        case .orb: "circle"
+        case .menuBar: "menubar.rectangle"
         }
     }
 }
