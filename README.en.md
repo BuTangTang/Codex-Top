@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and local build are **v1.0.0**, adding one display-position menu in the panel header to switch between notch, pinned floating, ring, and menu-bar modes. See the [1.0.0 validation record](docs/validation/1.0.0.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately from the source version.
+The current source and local build are **v1.0.0**, adding a single display-position menu, restoring the previous mode when unpinning, and a setting for 1–12 visible task rows. See the [1.0.0 validation record](docs/validation/1.0.0.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately from the source version.
 
 ## Install
 

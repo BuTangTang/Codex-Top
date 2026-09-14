@@ -21,7 +21,7 @@ import CodexTopCore
         let menu = NSMenu()
         add("显示任务", #selector(showTasks), to: menu)
         add("选择任务…", #selector(pickTasks), to: menu)
-        add("悬浮 / 收回刘海", #selector(toggleFloating), to: menu)
+        add("切换常驻浮窗", #selector(toggleFloating), to: menu)
         add("圆环模式", #selector(showOrb), to: menu)
         add("仅状态栏", #selector(menuBarOnly), to: menu)
         add("找回窗口", #selector(recover), to: menu)

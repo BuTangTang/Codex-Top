@@ -24,12 +24,29 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     // Optional for compatibility with preferences written before themes were added.
     public var theme: PanelTheme?
     public var placement: PanelPlacement?
+    public var floatingReturnPlacement: PanelPlacement?
     public var uiScale: Double?
+    public var visibleTaskCount: Int?
+    public static let visibleTaskCountRange = 1...12
+    public var resolvedVisibleTaskCount: Int {
+        min(Self.visibleTaskCountRange.upperBound, max(Self.visibleTaskCountRange.lowerBound, visibleTaskCount ?? 4))
+    }
     public var resolvedPlacement: PanelPlacement { placement ?? (floating ? .floating : .top) }
+    public var resolvedUnpinnedPlacement: PanelPlacement {
+        guard let previous = floatingReturnPlacement, previous != .floating else { return .top }
+        return previous
+    }
     public var resolvedScale: Double {
         MonitorScale.normalized(uiScale ?? 1)
     }
     public init() {}
+    public mutating func setPlacement(_ value: PanelPlacement) {
+        if value == .floating && resolvedPlacement != .floating {
+            floatingReturnPlacement = resolvedPlacement
+        }
+        placement = value
+        floating = value == .floating
+    }
 }
 
 public enum MonitoringPolicy {

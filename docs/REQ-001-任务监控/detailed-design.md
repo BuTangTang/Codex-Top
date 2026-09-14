@@ -353,3 +353,17 @@ MonitorView 共用标题栏增加一个无边框 Menu，内部 inline Picker 以
 菜单按钮注册 HeaderButtonBounds，标题栏拖动覆盖层排除其实际命中范围。单按钮固定尺寸，保留任务选择、主题和原收起/关闭入口；不改变监控来源、关注集合或窗口尺寸。验证以打包后的真实程序依次切换四种模式、核对当前勾选和原按钮兼容为主，不为直接 UI 绑定新增镜像测试。
 
 WindowController 同步监听 NSMenu 开始/结束跟踪通知，并按菜单对象记录活动集合；菜单展开期间暂停圆环外部点击收起和刘海离开延时收起，避免选择菜单项时先把其来源面板缩回。全部菜单关闭后恢复刘海离开计时。Combine 订阅随控制器释放，不创建全局定时器，也不吞掉菜单或外部应用的原始点击。
+
+## D-62 置顶来源记忆
+
+MonitorPreferences 增加可选 floatingReturnPlacement，只有从非 floating 模式进入 floating 时记录旧 resolvedPlacement；重复设置 floating 不覆盖。统一 setPlacement 同步 placement 与兼容字段 floating。resolvedUnpinnedPlacement 对缺失或 floating 自引用回退到 top。
+
+TaskStore.setPlacement 调用上述统一转换，setFloating(false) 使用 resolvedUnpinnedPlacement，图钉和关闭浮窗因此共用返回逻辑。提示文字读取同一目标，状态栏菜单用“切换常驻浮窗”避免固定承诺回刘海。字段通过原偏好保存路径持久化；合成回归覆盖三种来源的编码/解码返回、重复置顶、明确改模式后再置顶及旧文件兼容。
+
+## D-63 可见任务数
+
+MonitorPreferences 增加可选 visibleTaskCount，resolvedVisibleTaskCount 在缺失时返回 4，并将越界值限制在 1–12。SettingsView 的原生 Picker 绑定 TaskStore.setVisibleTaskCount，保存后通知控制器重算窗口尺寸。
+
+WindowController.panelHeight 将当前活动行与已展开结束行的总数限制到该上限，替换原固定 4 条。所有窗口沿用同一高度入口，各自保留紧凑行高、显示比例、空状态和可见屏幕裁限；ScrollView 继续提供超出行滚动，不裁掉数据或修改关注集合。
+
+SettingsView 仅调整 Section 顺序：显示位置 → 外观 → 任务 → 账户额度 → 数据与启动；绑定和行为不变。

@@ -208,7 +208,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func panelHeight(compact: Bool) -> CGFloat {
         let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
-        let rows = min(store.active.count + (includesFinished ? store.finished.count : 0), 4)
+        let rows = min(store.active.count + (includesFinished ? store.finished.count : 0), store.preferences.resolvedVisibleTaskCount)
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
         let body = store.selected.isEmpty ? 195 : CGFloat(rows) * (compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow) + (store.finished.isEmpty ? 0 : PanelMetrics.disclosure)
         let height = header + body + (compact ? 4 : PanelMetrics.footer + 2)

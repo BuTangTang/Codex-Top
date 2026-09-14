@@ -242,12 +242,17 @@ import CodexTopCore
         MonitoringPolicy.setAutoMonitor(enabled, preferences: &preferences, tasks: tasks, now: .now)
         save(); updateRolloutWatches()
     }
-    func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : .top) }
+    func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : preferences.resolvedUnpinnedPlacement) }
     func setPlacement(_ value: PanelPlacement) {
-        preferences.placement = value; preferences.floating = value == .floating
+        preferences.setPlacement(value)
         save(); onModeChange?()
     }
     func setScale(_ value: Double) { preferences.uiScale = MonitorScale.normalized(value); save(); onChange?() }
+    func setVisibleTaskCount(_ value: Int) {
+        preferences.visibleTaskCount = value
+        preferences.visibleTaskCount = preferences.resolvedVisibleTaskCount
+        save(); onChange?()
+    }
     func setTheme(_ theme: PanelTheme) {
         guard self.theme != theme else { return }
         if onAppearanceWillChange?() == true {

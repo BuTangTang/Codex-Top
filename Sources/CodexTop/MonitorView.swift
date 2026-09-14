@@ -124,7 +124,7 @@ struct MonitorView: View {
                 Image(systemName: store.preferences.floating ? "pin.fill" : "pin")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(store.preferences.floating ? Palette.accent : Palette.secondary(store.theme.colorScheme)).frame(width: 28, height: 30)
-            }.headerButtonHitArea().help(compact ? "取消置顶，回到刘海模式" : "悬浮置顶").accessibilityLabel(compact ? "取消置顶" : "悬浮置顶")
+            }.headerButtonHitArea().help(compact ? "取消置顶，回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)" : "悬浮置顶").accessibilityLabel(compact ? "取消置顶" : "悬浮置顶")
             if let collapse {
                 Button(action: collapse) {
                     Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).frame(width: 24, height: 30)
@@ -133,7 +133,7 @@ struct MonitorView: View {
             if compact {
                 Button { store.setFloating(false) } label: {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 25, height: 30)
-                }.headerButtonHitArea().help("关闭浮窗，回到刘海模式").accessibilityLabel("关闭浮窗")
+                }.headerButtonHitArea().help("关闭浮窗，回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)").accessibilityLabel("关闭浮窗")
             }
         }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 16)
             .frame(height: compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader)

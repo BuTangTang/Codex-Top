@@ -168,6 +168,23 @@ struct SettingsView: View {
     }
     var body: some View {
         Form {
+            Section("显示位置") {
+                Picker("显示方式", selection: Binding(get: { store.placement }, set: { store.setPlacement($0) })) {
+                    Text("刘海模式").tag(PanelPlacement.top)
+                    Text("常驻浮窗").tag(PanelPlacement.floating)
+                    Text("圆环").tag(PanelPlacement.orb)
+                    Text("仅状态栏").tag(PanelPlacement.menuBar)
+                }.pickerStyle(.segmented)
+                Picker("刘海显示器", selection: Binding(get: { store.preferences.preferredDisplay ?? "" }, set: { store.setDisplay($0) })) {
+                    Text("自动 · 系统主显示器").tag("")
+                    ForEach(displays) { display in Text(display.name).tag(display.id) }
+                    if let saved = store.preferences.preferredDisplay, !displays.contains(where: { $0.id == saved }) {
+                        Text("已断开的显示器 · 暂用主屏").tag(saved)
+                    }
+                }
+                Text("刘海模式悬停展开；无刘海的外接屏显示在屏幕上沿。圆环点击展开、点外或按 Esc 缩回，拖至上沿仍留桌面。常驻浮窗与圆环拖放均保持当前模式，仅状态栏需从菜单手动选择。").font(.caption).foregroundStyle(.secondary)
+                Button("找回窗口", action: recoverWindows)
+            }
             Section("外观") {
                 Picker("配色", selection: Binding(get: { store.theme }, set: { store.setTheme($0) })) {
                     Text("深色").tag(PanelTheme.dark)
@@ -206,29 +223,19 @@ struct SettingsView: View {
                 }
             }
             Section("任务") {
+                Picker("可见任务数", selection: Binding(get: { store.preferences.resolvedVisibleTaskCount }, set: { store.setVisibleTaskCount($0) })) {
+                    ForEach(MonitorPreferences.visibleTaskCountRange, id: \.self) { count in
+                        Text("\(count) 条").tag(count)
+                    }
+                }
+                Text("控制列表高度，默认 4 条。任务较少时自动收缩，超出时滚动查看；所有显示模式共用。")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("自动监控新任务", isOn: Binding(get: { store.preferences.autoMonitor }, set: { store.setAutoMonitor($0) }))
                 Text("新建并开始执行后加入列表。手动取消关注的任务不会再次自动加入。").font(.caption).foregroundStyle(.secondary)
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
             Section("账户额度") { UsageSettingsContent(store: store) }
-            Section("显示位置") {
-                Picker("显示方式", selection: Binding(get: { store.placement }, set: { store.setPlacement($0) })) {
-                    Text("刘海模式").tag(PanelPlacement.top)
-                    Text("常驻浮窗").tag(PanelPlacement.floating)
-                    Text("圆环").tag(PanelPlacement.orb)
-                    Text("仅状态栏").tag(PanelPlacement.menuBar)
-                }.pickerStyle(.segmented)
-                Picker("刘海显示器", selection: Binding(get: { store.preferences.preferredDisplay ?? "" }, set: { store.setDisplay($0) })) {
-                    Text("自动 · 系统主显示器").tag("")
-                    ForEach(displays) { display in Text(display.name).tag(display.id) }
-                    if let saved = store.preferences.preferredDisplay, !displays.contains(where: { $0.id == saved }) {
-                        Text("已断开的显示器 · 暂用主屏").tag(saved)
-                    }
-                }
-                Text("刘海模式悬停展开；无刘海的外接屏显示在屏幕上沿。圆环点击展开、点外或按 Esc 缩回，拖至上沿仍留桌面。常驻浮窗与圆环拖放均保持当前模式，仅状态栏需从菜单手动选择。").font(.caption).foregroundStyle(.secondary)
-                Button("找回窗口", action: recoverWindows)
-            }
             Section("数据与启动") {
                 HStack {
                     Text("Codex 数据目录"); Spacer(); Button("选择…") { store.chooseRoot() }.disabled(store.demo)

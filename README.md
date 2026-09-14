@@ -4,7 +4,7 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-当前源码与本机构建版本为 **v1.0.0**，面板右上角新增单个“显示位置”菜单，可切换刘海、常驻浮窗、圆环和仅状态栏。构建及验收见[1.0.0 记录](docs/validation/1.0.0.md)；[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
+当前源码与本机构建版本为 **v1.0.0**，面板右上角新增单个“显示位置”菜单，取消置顶返回先前模式；设置可选择显示 1–12 条任务以调整列表高度。构建及验收见[1.0.0 记录](docs/validation/1.0.0.md)；[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
 
 ## 安装
 
