@@ -4,7 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
-- [待处理记录延迟与来源任务跳转](validation/waiting-navigation.md)：build 3 的修正、实际核对与单条问题定位限制。
+- [待处理复查与来源任务跳转](validation/waiting-navigation.md)：build 3 的修正、长等待回复回归、未复现边界与单条问题定位限制。
 - [使用说明](usage.md)
 - [小红书分享介绍与实际截图](share/xiaohongshu/README.md)：三张原生桌面截图（圆环、展开、钉住）、精简文案及历史竞品对比参考。
 - [开发与打包](development.md)
