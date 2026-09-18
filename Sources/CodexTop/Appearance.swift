@@ -27,22 +27,6 @@ enum PanelFonts {
         let floor = compact ? max(11, minimum - 2) : minimum
         return .system(size: max(base, floor / max(CGFloat(MonitorScale.minimum), scale)), weight: weight)
     }
-
-    // Keep a two-point hierarchy in rendered points, including when the primary
-    // text reaches its readability floor at small scales.
-    static func monitorPrimary(scale: CGFloat, compact: Bool, weight: Font.Weight = .medium) -> Font {
-        monitorFont(scale: scale, compact: compact, secondary: false, weight: weight)
-    }
-
-    static func monitorSecondary(scale: CGFloat, compact: Bool, weight: Font.Weight = .regular) -> Font {
-        monitorFont(scale: scale, compact: compact, secondary: true, weight: weight)
-    }
-
-    private static func monitorFont(scale: CGFloat, compact: Bool, secondary: Bool, weight: Font.Weight) -> Font {
-        let scale = max(CGFloat(MonitorScale.minimum), scale)
-        let primary = max((compact ? 14 : 16) * scale, compact ? 13 : 14)
-        return .system(size: (primary - (secondary ? 2 : 0)) / scale, weight: weight)
-    }
 }
 
 enum Palette {

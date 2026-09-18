@@ -383,3 +383,10 @@ moreMenu 使用原生 Menu 的 button 样式和同一 QuietButtonStyle，避免 
 用户指出两个按钮大小不一并要求整体考虑文字；讨论主次层级后授权“你自己完善一下，然后实现把，记得提交push和readme”。PanelFonts 为监控面板提供主、辅两档字体，不改原生设置字号。面板标题 medium、任务标题 semibold 共用主字号；说明、数量、计时、结束折叠和额度用辅助字号，额度只保留 medium 和辅助文字色。
 
 常规主字号实际为 max(16×比例, 14)pt，外接屏/常驻浮窗为 max(14×比例, 13)pt；辅助字号从实际主字号减 2pt，然后除以比例传给已整体缩放的 SwiftUI 内容。这样所有比例都有两档差距，常规最小 14/12pt、紧凑最小 13/11pt，不依赖两个独立最小字号恰好一致。任务数量与计时使用等宽数字。窗口、行高、关注列表和状态归约保持不变。
+
+
+## D-66 恢复两按钮初版外观
+
+以 `2be13e2` 为基础应用本任务 17:25 的首次 D-64 修改，复原 MonitorView；Appearance 与 UsageViews 恢复该基线。TopPanelView 与 WindowController 的收起回调继续保留。headerIcon 回到 SF Symbol、14pt medium、主文字色 80%、28×30pt 框，两按钮间距 4pt；原生更多 Menu 回到 borderlessButton。移除 D-65 的 monitorPrimary/monitorSecondary，恢复原 PanelFonts.readable 的字号和可读下限，额度图标恢复 14pt、主文字色。
+
+版本仍为 1.0.0，构建号递增至 10，避免把恢复外观误记为旧可执行包。用户偏好和数据不回退，Git 通过新增提交记录恢复，不改写已推送历史。验证记录见 [D-66](../validation/appearance-restore.md)。
