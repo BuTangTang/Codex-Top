@@ -48,8 +48,8 @@ struct MonitorView: View {
                 } else if store.selected.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "rectangle.stack").font(.system(size: 26, weight: .light)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                        Text("选择你想关注的任务").font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography))
-                        Text(store.preferences.autoMonitor ? "新建并运行的任务会自动加入" : "自动监控已关闭，可手动选择任务").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        Text("选择你想关注的任务").font(PanelFonts.monitorPrimary(scale: store.uiScale, compact: compactTypography))
+                        Text(store.preferences.autoMonitor ? "新建并运行的任务会自动加入" : "自动监控已关闭，可手动选择任务").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         Button("选择任务", action: pickTasks).controlSize(.large)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -74,7 +74,7 @@ struct MonitorView: View {
                                 HStack(spacing: 14) {
                                     Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
                                         .font(.system(size: 11, weight: .medium)).frame(width: 24)
-                                    Text("已结束 \(store.finished.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography))
+                                    Text("已结束 \(store.finished.count)").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography))
                                     Spacer()
                                 }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.disclosure)
                             }.buttonStyle(QuietRowStyle())
@@ -82,12 +82,12 @@ struct MonitorView: View {
                     }
                 }
                 if let warning = store.sourceWarning {
-                    Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
+                    Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
                         .lineLimit(3).padding(.horizontal, 20).padding(.vertical, 10)
                 }
                 if let notice = store.notice {
                     HStack(alignment: .top, spacing: 10) {
-                        Text(notice).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        Text(notice).font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         Spacer(minLength: 0)
                         Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 12)).frame(width: 22, height: 22) }.buttonStyle(QuietButtonStyle())
                     }.padding(.horizontal, 20).padding(.vertical, 10)
@@ -98,42 +98,16 @@ struct MonitorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold, compact: compactTypography)).lineLimit(1)
-            Text("\(store.selected.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+            Text("监控任务").font(PanelFonts.monitorPrimary(scale: store.uiScale, compact: compactTypography)).lineLimit(1)
+            Text("\(store.selected.count)").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).monospacedDigit().foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 .contentTransition(.numericText()).animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.selected.count)
-            if compact && store.demo { Text("演示").font(.system(size: 12)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
+            if compact && store.demo { Text("演示").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             Spacer(minLength: 4)
-            if compact {
-                Button { store.setTheme(store.theme == .dark ? .light : .dark) } label: {
-                    ThemeToggleIcon(theme: store.theme).font(.system(size: 14)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 24, height: 30)
-                }.headerButtonHitArea().accessibilityLabel(store.theme == .dark ? "切换浅色玻璃" : "切换深色玻璃")
-            }
-            if !compact {
+            HStack(spacing: 6) {
                 Button(action: pickTasks) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 15, weight: .medium))
-                        if store.uiScale > 0.75 {
-                            Text("选择任务").font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography)).lineLimit(1)
-                        }
-                    }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 10).frame(height: 30)
-                        .background(Palette.primary(store.theme.colorScheme).opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+                    headerIcon("plus")
                 }.headerButtonHitArea().help("搜索和选择监控任务").accessibilityLabel("选择任务")
-            }
-            placementMenu
-            Button { store.setFloating(!store.preferences.floating) } label: {
-                Image(systemName: store.preferences.floating ? "pin.fill" : "pin")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(store.preferences.floating ? Palette.accent : Palette.secondary(store.theme.colorScheme)).frame(width: 28, height: 30)
-            }.headerButtonHitArea().help(compact ? "取消置顶，回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)" : "悬浮置顶").accessibilityLabel(compact ? "取消置顶" : "悬浮置顶")
-            if let collapse {
-                Button(action: collapse) {
-                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).frame(width: 24, height: 30)
-                }.headerButtonHitArea().accessibilityLabel("收回圆环").help("缩回原来的圆环位置")
-            }
-            if compact {
-                Button { store.setFloating(false) } label: {
-                    Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).frame(width: 25, height: 30)
-                }.headerButtonHitArea().help("关闭浮窗，回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)").accessibilityLabel("关闭浮窗")
+                moreMenu
             }
         }.buttonStyle(QuietButtonStyle()).padding(.horizontal, 16)
             .frame(height: compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader)
@@ -148,29 +122,70 @@ struct MonitorView: View {
             .contextMenu { Button("选择任务", action: pickTasks); Button("监控设置", action: settings) }
     }
 
-    private var placementMenu: some View {
-        Menu {
-            Picker("显示位置", selection: Binding(get: { store.placement }, set: { placement in
-                if placement != store.placement { store.setPlacement(placement) }
-            })) {
-                ForEach(PanelPlacement.allCases, id: \.self) { placement in
-                    Label(placement.shortcutTitle, systemImage: placement.shortcutSymbol).tag(placement)
+    private func headerIcon(_ name: String) -> some View {
+        let iconSize = max(18, 14 / store.uiScale)
+        let hitSize = max(32, 24 / store.uiScale)
+        return Group {
+            if name == "ellipsis" {
+                // Match the plus by visible width, not the symbol's font box.
+                HStack(spacing: iconSize / 5) {
+                    ForEach(0..<3) { _ in
+                        Circle().frame(width: iconSize / 5, height: iconSize / 5)
+                    }
                 }
-            }.pickerStyle(.inline)
-        } label: {
-            Image(systemName: "rectangle.3.group")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Palette.primary(store.theme.colorScheme))
-                .frame(width: 28, height: 30)
+            } else {
+                Image(systemName: name)
+                    .resizable().scaledToFit()
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: iconSize, height: iconSize)
+            }
         }
-        .menuStyle(.borderlessButton)
+            .frame(width: iconSize, height: iconSize)
+            .foregroundStyle(Palette.primary(store.theme.colorScheme).opacity(0.85))
+            .frame(width: hitSize, height: hitSize)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Menu("显示方式") {
+                Picker("显示方式", selection: Binding(get: { store.placement }, set: { placement in
+                    if placement != store.placement { store.setPlacement(placement) }
+                })) {
+                    ForEach(PanelPlacement.allCases, id: \.self) { placement in
+                        Label(placement.shortcutTitle, systemImage: placement.shortcutSymbol).tag(placement)
+                    }
+                }.pickerStyle(.inline)
+            }
+            Menu("主题") {
+                Picker("主题", selection: Binding(get: { store.theme }, set: { store.setTheme($0) })) {
+                    Label("深色", systemImage: "moon").tag(PanelTheme.dark)
+                    Label("浅色玻璃", systemImage: "sun.max").tag(PanelTheme.light)
+                }.pickerStyle(.inline)
+            }
+            Divider()
+            Button(action: settings) { Label("监控设置…", systemImage: "gearshape") }
+            if compact {
+                Divider()
+                Button { store.setFloating(false) } label: { Label("关闭浮窗", systemImage: "xmark") }
+                    .help("回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)")
+            } else if let collapse {
+                Divider()
+                Button(action: collapse) {
+                    Label(store.placement == .orb ? "收回圆环" : "收起面板", systemImage: "chevron.down")
+                }
+            }
+        } label: {
+            headerIcon("ellipsis")
+        }
+        .menuStyle(.button)
+        .buttonStyle(QuietButtonStyle())
         .menuIndicator(.hidden)
         .tint(Palette.primary(store.theme.colorScheme))
         .fixedSize()
         .headerButtonHitArea()
-        .accessibilityLabel("显示位置")
+        .accessibilityLabel("更多操作")
         .accessibilityValue(store.placement.shortcutTitle)
-        .help("显示位置：\(store.placement.shortcutTitle)。点击选择位置")
+        .help("显示方式、主题与设置。当前：\(store.placement.shortcutTitle)")
     }
 
     private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 16) }
@@ -180,12 +195,7 @@ struct MonitorView: View {
             Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5)
             HStack(spacing: 12) {
                 UsageSummaryButton(store: store)
-                if store.paused { Text("已暂停").font(.system(size: 13)) }
-                Button { store.setTheme(store.theme == .dark ? .light : .dark) } label: {
-                    ThemeToggleIcon(theme: store.theme).font(.system(size: 15)).frame(width: 26, height: 30)
-                }.buttonStyle(QuietButtonStyle()).accessibilityLabel(store.theme == .dark ? "切换浅色玻璃" : "切换深色玻璃")
-                Button(action: settings) { Image(systemName: "gearshape.fill").font(.system(size: 15)).frame(width: 28, height: 30) }
-                    .buttonStyle(QuietButtonStyle()).help("监控设置").accessibilityLabel("监控设置")
+                if store.paused { Text("已暂停").font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)) }
             }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).font(.system(size: 13)).padding(.horizontal, 18).frame(height: PanelMetrics.footer)
         }
     }
@@ -203,7 +213,7 @@ private extension PanelPlacement {
     var shortcutSymbol: String {
         switch self {
         case .top: "macbook"
-        case .floating: "pin"
+        case .floating: "macwindow"
         case .orb: "circle"
         case .menuBar: "menubar.rectangle"
         }
@@ -228,12 +238,12 @@ private struct MonitorTaskRow: View {
                 HStack(spacing: compact ? 11 : 14) {
                     ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        Text(task.title).font(PanelFonts.monitorPrimary(scale: store.uiScale, compact: compactTypography, weight: .semibold)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                         if !compact {
                             HStack(spacing: 5) {
                                 Text(activity.detail).lineLimit(1)
                                 if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                            }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                            }.font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: compact ? 8 : 10) {
@@ -259,7 +269,7 @@ private struct MonitorTaskRow: View {
                             }
                         }
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                    }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
+                    }.font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography)).fixedSize()
                 }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
         }

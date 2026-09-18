@@ -42,7 +42,7 @@ struct UsageSummaryButton: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             Button { store.openUsagePage() } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chart.bar.xaxis").font(.system(size: 14))
+                    Image(systemName: "chart.bar.xaxis")
                     if let quota = store.quota {
                         Text(UsageText.summary(quota, at: context.date)).monospacedDigit()
                         if UsageText.historical(quota, at: context.date) || store.quotaWarning != nil {
@@ -52,8 +52,8 @@ struct UsageSummaryButton: View {
                         Text(store.demo ? "演示模式 · 查看用量" : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
                     }
                 }
-                .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography))
-                .foregroundStyle(Palette.primary(store.theme.colorScheme))
+                .font(PanelFonts.monitorSecondary(scale: store.uiScale, compact: compactTypography, weight: .medium))
+                .foregroundStyle(Palette.secondary(store.theme.colorScheme))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading).frame(height: 30)
                 .contentShape(Rectangle())

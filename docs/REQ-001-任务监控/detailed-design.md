@@ -367,3 +367,19 @@ MonitorPreferences 增加可选 visibleTaskCount，resolvedVisibleTaskCount 在�
 WindowController.panelHeight 将当前活动行与已展开结束行的总数限制到该上限，替换原固定 4 条。所有窗口沿用同一高度入口，各自保留紧凑行高、显示比例、空状态和可见屏幕裁限；ScrollView 继续提供超出行滚动，不裁掉数据或修改关注集合。
 
 SettingsView 仅调整 Section 顺序：显示位置 → 外观 → 任务 → 账户额度 → 数据与启动；绑定和行为不变。
+
+
+## D-64 统一“＋ / ⋯”标题栏
+
+MonitorView 的共享标题栏使用 6pt 间距的两按钮组。图标按可见宽度对齐，基准 18pt、缩放后下限 14pt；加号使用 medium SF Symbol，省略号由三个等径圆点组成，每个直径及点间距均为总宽的 1/5，不强求与加号等高。命中区域基准 32×32pt、缩放后下限 24×24pt；深浅主题均取主文字色的 85%，静止无底色，悬停淡灰圆角底；不随紧凑模式或比例切回文字按钮。两者均登记 HeaderButtonBounds，保持拖动排除。
+
+moreMenu 使用原生 Menu 的 button 样式和同一 QuietButtonStyle，避免 borderlessButton 改写省略号标签的可见尺寸；包含“显示方式”和“主题”子菜单，各用 inline Picker 展示勾选；模式继续调用 TaskStore.setPlacement，主题继续调用 setTheme。监控设置复用既有窗口。“关闭浮窗”调用 setFloating(false) 保留返回来源；其他模式的收起闭包接入既有 dismissExpanded，TopPanelView 新增 close 传递给刘海与状态栏 MonitorView，圆环复用 closeTasks。NSMenu 跟踪保护涵盖嵌套菜单。
+
+非紧凑页底部移除主题和设置重复入口，保留 UsageSummaryButton 与暂停文字。紧凑行、列表高度、摄像头避让、圆环形变和数据逻辑保持原样。最终构建号增加至 9，版本维持 1.0.0；既有公开 Release 不覆盖。纯视图绑定不新增镜像测试，以现有核心回归、release/universal 构建和打包应用交互验收为证据。
+
+
+## D-65 监控文字层级（2026-09-18）
+
+用户指出两个按钮大小不一并要求整体考虑文字；讨论主次层级后授权“你自己完善一下，然后实现把，记得提交push和readme”。PanelFonts 为监控面板提供主、辅两档字体，不改原生设置字号。面板标题 medium、任务标题 semibold 共用主字号；说明、数量、计时、结束折叠和额度用辅助字号，额度只保留 medium 和辅助文字色。
+
+常规主字号实际为 max(16×比例, 14)pt，外接屏/常驻浮窗为 max(14×比例, 13)pt；辅助字号从实际主字号减 2pt，然后除以比例传给已整体缩放的 SwiftUI 内容。这样所有比例都有两档差距，常规最小 14/12pt、紧凑最小 13/11pt，不依赖两个独立最小字号恰好一致。任务数量与计时使用等宽数字。窗口、行高、关注列表和状态归约保持不变。

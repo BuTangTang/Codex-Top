@@ -127,7 +127,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         top.title = "Codex Top 监控任务"; floating.title = "Codex Top 悬浮任务"
         floating.isMovableByWindowBackground = false; floating.delegate = self
         let topView = HoverHostingView(rootView: TopPanelView(
-            store: store, state: topState, monitorState: monitorState, open: { [weak self] in self?.toggleExpanded() },
+            store: store, state: topState, monitorState: monitorState, open: { [weak self] in self?.toggleExpanded() }, close: { [weak self] in self?.dismissExpanded() },
             pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, finishedChanged: { [weak self] in
                 self?.updateContentSize(animated: true)
             }).windowTypography())

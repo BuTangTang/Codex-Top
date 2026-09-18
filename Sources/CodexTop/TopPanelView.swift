@@ -36,6 +36,7 @@ struct TopPanelView: View {
     @ObservedObject var state: TopPanelState
     @ObservedObject var monitorState: MonitorPanelState
     var open: () -> Void
+    var close: () -> Void
     var pickTasks: () -> Void
     var settings: () -> Void
     var finishedChanged: () -> Void
@@ -55,7 +56,7 @@ struct TopPanelView: View {
     }
 
     private var statusPopover: some View {
-        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, animationsActive: state.progress > 0,
+        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, animationsActive: state.progress > 0, collapse: close,
                     pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
             .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
             .scaleEffect(store.uiScale, anchor: .topLeading)
@@ -81,7 +82,7 @@ struct TopPanelView: View {
                         .fill(.black).frame(width: state.cameraWidth, height: state.cameraHeight)
                         .allowsHitTesting(false)
                 }
-                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false, animationsActive: state.progress > 0,
+                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false, animationsActive: state.progress > 0, collapse: close,
                             pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                     .frame(width: state.expandedSize.width / store.uiScale, height: max(1, (state.expandedSize.height - state.cameraHeight) / store.uiScale))
                     .scaleEffect(store.uiScale, anchor: .top)

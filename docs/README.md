@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [1.0.0 build 9 两按钮与文字层级](validation/header-actions.md)：四模式实机图、内置/外接屏检查及最终包证据。
 - [1.0.0 显示位置菜单](validation/1.0.0.md)：单按钮入口、菜单关闭保护、白色图标、取消置顶返回与可见任务数。
 - [待处理复查与来源任务跳转](validation/waiting-navigation.md)：build 3 的修正、长等待回复回归、未复现边界与单条问题定位限制。
 - [使用说明](usage.md)
@@ -33,7 +34,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码和本机构建为 v1.0.0 build 7，增加 D-61–D-63 显示位置菜单、置顶来源记忆与列表高度设置，公开 Release 附件未变；当前构建、验收和发布记录见 [STATUS](STATUS.md)。此前测试版及 beta.5 候选保留各自证据，README 的实际截图仍来自明确标注的 beta.2/beta.3，不用真实私人任务截图替换。剩余完整鼠标拖动、物理屏幕组合和动画时间线见验收记录；beta.1 锁屏仅为历史证据。
+当前源码和本机构建为 v1.0.0 build 9，D-64–D-65 将标题栏统一为“＋ / ⋯”，并整理主辅两级字号。中英文 README 已使用内置屏拍摄的四种模式真实窗口，任务为隔离合成数据。公开 Release 附件未变；本轮测试、外接屏范围、偏好恢复及后续边界见[验收记录](validation/header-actions.md)。历史图片和对应版本验收保留。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
