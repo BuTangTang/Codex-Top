@@ -21,6 +21,10 @@ public sealed class MonitorWindow : Window
     private readonly DispatcherTimer clock;
     private readonly DispatcherTimer hoverClose = new();
     private readonly DispatcherTimer dismissCheck = new();
+    private readonly DispatcherTimer completionEnd = new();
+    private readonly OrbCompletionTracker completionTracker = new();
+    private HashSet<string> completedTaskIds = [];
+    private long? completionStarted;
     private readonly List<(TextBlock Label, Activity Activity)> timers = [];
     private bool expanded, upward, dragging, menuOpen, renderQueued, closing, dismissRequestedByMenu;
     private int animationVersion;
@@ -68,6 +72,8 @@ public sealed class MonitorWindow : Window
             WindowState = WindowState.Normal; MinimizeToTray();
         };
         store.Changed += OnStoreChanged;
+        completionEnd.Interval = TimeSpan.FromMilliseconds(1600);
+        completionEnd.Tick += (_, _) => { ClearCompletion(); OnStoreChanged(); };
         clock = new(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateTimers(), Dispatcher);
         hoverClose.Interval = TimeSpan.FromMilliseconds(250);
         hoverClose.Tick += (_, _) => { hoverClose.Stop(); if (!IsMouseOver && !menuOpen && picker?.IsVisible != true && settings?.IsVisible != true && store.Preferences.Placement == Placement.Top) Collapse(); };
@@ -128,6 +134,18 @@ public sealed class MonitorWindow : Window
     private void OnStoreChanged()
     {
         if (closing) return;
+        var rows = store.Rows;
+        // Error also carries warnings about unrelated unreadable rollout files.
+        // A failed scan clears all rows; valid rows still have their own evidence.
+        bool reliable = !store.Loading && !store.Paused && (store.Error is null || rows.Count > 0);
+        var completed = completionTracker.Observe(store.Root, rows, reliable);
+        bool canShowCompletion = reliable && IsOrb && IsVisible && !menuOpen && !dragging && appliedPlacement == store.Preferences.Placement;
+        if (!canShowCompletion || completedTaskIds.Any(id => !rows.Any(r => r.Root.Id == id && r.Activity.Phase == Phase.Completed))) ClearCompletion();
+        if (canShowCompletion && completed.Count > 0)
+        {
+            completedTaskIds = completed; completionStarted = Stopwatch.GetTimestamp();
+            completionEnd.Stop(); completionEnd.Start();
+        }
         if (appliedPlacement != store.Preferences.Placement)
         {
             StopAnimation(); appliedPlacement = store.Preferences.Placement;
@@ -139,10 +157,12 @@ public sealed class MonitorWindow : Window
         if (menuOpen || dragging) { renderQueued = true; return; }
         Render(false);
     }
+    private void ClearCompletion()
+    { completionEnd.Stop(); completedTaskIds.Clear(); completionStarted = null; }
     private string DisplayKey()
     {
         var p = store.Preferences;
-        return $"{p.Placement}|{expanded}|{showFinished}|{p.Dark}|{p.Scale}|{p.VisibleTasks}|{p.ReduceMotion}|{store.Paused}|{store.Loading}|{store.Error}|{store.Notice}|{QuotaLong()}|{QuotaTooltip()}|" +
+        return $"{p.Placement}|{expanded}|{showFinished}|{p.Dark}|{p.Scale}|{p.VisibleTasks}|{p.ReduceMotion}|{completionStarted}|{store.Paused}|{store.Loading}|{store.Error}|{store.Notice}|{QuotaLong()}|{QuotaTooltip()}|" +
             string.Join('|', store.Rows.Select(r => $"{r.Root.Id}:{r.Root.Title}:{r.Root.Project}:{r.Source.Id}:{r.Activity.Phase}:{r.Activity.StartedAt:O}:{r.Activity.WaitingStartedAt:O}:{r.Activity.Detail}"));
     }
     private Phase Overall(IReadOnlyList<TaskRow> rows)
@@ -167,6 +187,8 @@ public sealed class MonitorWindow : Window
         displayKey = DisplayKey();
         bool dark = store.Preferences.Dark; var rows = store.Rows; var phase = Overall(rows); double scale = store.Preferences.Scale;
         Ui.SetThemeResources(this, dark);
+        var oldMark = (shell.Child as Panel)?.Children.OfType<CompletionMark>().FirstOrDefault();
+        double completionProgress = oldMark?.Cue == completionStarted ? oldMark?.Progress ?? 0 : 0;
         timers.Clear(); shell.Child = null;
         shell.Margin = IsOrb ? new(OrbPadding) : new(0);
         shell.RenderTransformOrigin = new(.5, .5);
@@ -184,12 +206,17 @@ public sealed class MonitorWindow : Window
             shell.BorderThickness = new(0); shell.BorderBrush = null;
             width = height = OrbSize; shell.CornerRadius = new(OrbSize / 2);
             var grid = new Grid(); var ring = new RunningRing(40, phase, dark, Animate) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; grid.Children.Add(ring);
-            var number = Ui.Text(phase == Phase.Completed ? "✓" : Math.Min(rows.Count(r => r.Activity.Phase == Phase.Running), 100) is var count && count > 99 ? "99+" : count.ToString(), 15, dark);
-            number.HorizontalAlignment = HorizontalAlignment.Center; number.FontWeight = FontWeights.SemiBold; grid.Children.Add(number);
+            bool justCompleted = completionStarted is not null;
+            if (justCompleted || phase == Phase.Completed)
+                grid.Children.Add(new CompletionMark(Animate && justCompleted, completionStarted is { } started ? Stopwatch.GetElapsedTime(started) : TimeSpan.Zero, completionStarted, completionProgress));
+            else
+            {
+                var number = Ui.Text(Math.Min(rows.Count(r => r.Activity.Phase == Phase.Running), 100) is var count && count > 99 ? "99+" : count.ToString(), 15, dark);
+                number.HorizontalAlignment = HorizontalAlignment.Center; number.FontWeight = FontWeights.SemiBold; grid.Children.Add(number);
+            }
             if (phase is Phase.Waiting or Phase.Failed)
             {
                 shell.Background = dark ? Ui.Brush(phase == Phase.Failed ? "#241214" : "#211B10") : Ui.Brush(phase == Phase.Failed ? "#FFF0F1" : "#FFF7EF");
-                var attention = Ui.Text("!", 10, dark); attention.Foreground = Ui.Status(phase, dark); attention.HorizontalAlignment = HorizontalAlignment.Right; attention.VerticalAlignment = VerticalAlignment.Top; attention.Margin = new(0, 4, 7, 0); grid.Children.Add(attention);
                 if (Animate)
                 {
                     // Pulse the contents separately so the hover outline and hit area stay stable.
@@ -198,8 +225,9 @@ public sealed class MonitorWindow : Window
                     transform.BeginAnimation(ScaleTransform.ScaleXProperty, pulse); transform.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
                 }
             }
-            shell.Child = grid; shell.ToolTip = Summary(rows) + " · 点击展开，拖动移动，右键菜单";
-            AutomationProperties.SetName(shell, "任务圆环，" + Summary(rows));
+            string summary = (justCompleted ? $"{completedTaskIds.Count} 项任务刚完成 · " : "") + Summary(rows);
+            shell.Child = grid; shell.ToolTip = summary + " · 点击展开，拖动移动，右键菜单";
+            AutomationProperties.SetName(shell, "任务圆环，" + summary);
             shell.PreviewMouseLeftButtonDown -= OrbDown; shell.PreviewMouseLeftButtonDown += OrbDown;
             shell.PreviewMouseMove -= OrbMove; shell.PreviewMouseMove += OrbMove;
             shell.PreviewMouseLeftButtonUp -= OrbUp; shell.PreviewMouseLeftButtonUp += OrbUp;
@@ -546,7 +574,7 @@ public sealed class MonitorWindow : Window
     });
     protected override void OnClosed(EventArgs e)
     {
-        closing = true; clock.Stop(); hoverClose.Stop(); dismissCheck.Stop(); store.Changed -= OnStoreChanged;
+        closing = true; clock.Stop(); hoverClose.Stop(); dismissCheck.Stop(); ClearCompletion(); store.Changed -= OnStoreChanged;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged; tray?.Dispose(); store.Dispose(); base.OnClosed(e);
         Application.Current.Shutdown();
     }

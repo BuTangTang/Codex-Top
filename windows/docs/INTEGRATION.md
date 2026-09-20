@@ -1,5 +1,7 @@
 # Windows 集成说明 / Windows integration notes
 
+以下记录初始 Windows 0.1.8 源码导入。当前 Windows 修订为 0.1.9，增加完成反馈并移除圆环上缘的小感叹号；这些后续改动见 [PROJECT.md](PROJECT.md) 和 [VALIDATION.md](VALIDATION.md)，不属于最初逐字节导入的范围。
+
 ## 范围与来源
 
 本次将已有的 Windows 0.1.8 开发预览作为独立 `windows/` 工程加入 Codex Top。按 L2 处理目录迁移与构建集成，不改变应用行为、数据协议或偏好结构。产品目标与设计见 [PROJECT.md](PROJECT.md)，使用与构建见 [Windows README](../README.md)。

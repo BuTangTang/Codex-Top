@@ -24,6 +24,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--fixture") return InlineSelectionChecks.Run(args[1]);
+        if (args.Contains("--orb-feedback")) return OrbFeedbackChecks.Run(args.Contains("--visual"));
         // Exercise only windows created by this process, using isolated preferences.
         string temporary = Path.Combine(Path.GetTempPath(), "CodexTop.Windows.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);

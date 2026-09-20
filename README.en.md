@@ -8,7 +8,7 @@ The current macOS source and local build are **v1.0.0 build 27**. Task rows load
 
 ## Windows version
 
-This branch adds a separate **Windows 11 x64 development preview, version 0.1.8**, built with C# / WPF / .NET 10. It includes a desktop orb, floating monitor, system tray integration, and account usage. See the [Windows README](windows/README.md) for usage and build instructions and the [integration notes](windows/docs/INTEGRATION.md) for provenance, platform differences, and validation scope. Source is available; no Windows download has been published. The installation instructions and screenshots below apply to macOS.
+This branch adds a separate **Windows 11 x64 development preview, version 0.1.9**, built with C# / WPF / .NET 10. It includes a desktop orb, floating monitor, system tray integration, and account usage. See the [Windows README](windows/README.md) for usage and build instructions and the [integration notes](windows/docs/INTEGRATION.md) for provenance, platform differences, and validation scope. Source is available; no Windows download has been published. The installation instructions and screenshots below apply to macOS.
 
 ## Install
 

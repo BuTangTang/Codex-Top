@@ -19,8 +19,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
         foreach ($name in @('LICENSE','NOTICE.md','README.md')) { Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64') }
         Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64') -Recurse -Force
-        Compress-Archive -Path (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64') -DestinationPath (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64-0.1.8.zip') -Force
+        Compress-Archive -Path (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64') -DestinationPath (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64-0.1.9.zip') -Force
         & (Join-Path $PSScriptRoot 'package-source.ps1')
-        Get-FileHash -LiteralPath (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64-0.1.8.zip') -Algorithm SHA256
+        Get-FileHash -LiteralPath (Join-Path $projectRoot 'artifacts/CodexTop-Windows-x64-0.1.9.zip') -Algorithm SHA256
     }
 } finally { Pop-Location }
