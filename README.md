@@ -4,7 +4,11 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-当前源码与本机构建为 **v1.0.0 build 27**。任务列表按需加载并保持确定行高；默认自动移出 7 天无活动的已结束任务，可在设置调整或关闭。更多菜单为实色背景、固定字号、同层选项，优先向右展开，并支持“跟随系统”主题。圆环底边重影已由用户确认消失。保留右键整理、80%–120% 比例和设置实时预览；详见[本轮验证及边界](docs/validation/expansion-performance.md)。[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
+macOS 当前源码与本机构建为 **v1.0.0 build 27**。任务列表按需加载并保持确定行高；默认自动移出 7 天无活动的已结束任务，可在设置调整或关闭。更多菜单为实色背景、固定字号、同层选项，优先向右展开，并支持“跟随系统”主题。圆环底边重影已由用户确认消失。保留右键整理、80%–120% 比例和设置实时预览；详见[本轮验证及边界](docs/validation/expansion-performance.md)。[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
+
+## Windows 版本
+
+本分支新增独立的 **Windows 11 x64 开发预览 0.1.8**，使用 C# / WPF / .NET 10，提供桌面圆环、浮窗、系统托盘和账户额度。使用方式与构建步骤见 [Windows README](windows/README.md)，来源、平台差异和验证范围见 [Windows 集成说明](windows/docs/INTEGRATION.md)。当前提供源码，尚未发布 Windows 下载包；以下安装说明和截图均对应 macOS。
 
 ## 安装
 
@@ -60,7 +64,7 @@
 - 已关注列表中的待处理活动，包括聚合到主任务的待处理子任务，最多监听 64 个本地任务文件；变化合并约 200ms 后触发增量刷新，并保留 2 秒轮询兜底。读取到已落盘的用户回复即可解除等待，无需再等后续完成事件；这不是从点击发送起算的固定延迟保证。暂停任务刷新会停止这些监听，账户额度仍按独立的 60 秒周期刷新。
 - 主额度只使用当前账户接口。日志额度单独标为历史，读取失败不拿旧账号或日志回填，也不补造缺失周期。“暂停任务刷新”不暂停额度；外部换号在下一次实际读取时反映，不保证瞬时检测。
 - Codex 内部格式可能变化；任务跳转终点、真实换号、物理拔插/合盖、完整鼠标拖动和动画帧率仍有未验范围，详见[当前状态](docs/STATUS.md)与[验收对照](docs/validation/acceptance-matrix.md)。
-- **目前仅实现 macOS 版。** [Windows 开发提示词](docs/handoff/windows-implementation-prompts.md)用于后续交接，不代表已有 Windows 软件。
+- **Windows 版为独立开发预览。** 工程和说明位于 [windows/](windows/README.md)，不代表已与 macOS build 27 完成功能对齐。[Windows 开发提示词](docs/handoff/windows-implementation-prompts.md)作为历史交接资料保留。
 
 ## 本地构建
 
