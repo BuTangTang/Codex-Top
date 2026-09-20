@@ -19,7 +19,7 @@ enum PanelFonts {
     static let detail = Font.system(size: 14)
     static let label = Font.system(size: 14, weight: .medium)
 
-    // Desktop monitors and pinned lists use tighter type at every scale. Adjust
+    // Monitor surfaces use the same tighter type on every display and scale. Adjust
     // both the base and its floor, otherwise the old minimum cancels the reduction.
     static func readable(_ size: CGFloat, minimum: CGFloat = 12, scale: CGFloat,
                          weight: Font.Weight = .regular, compact: Bool = false) -> Font {

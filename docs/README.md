@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [1.0.0 build 12 统一屏幕字号](validation/unified-typography.md)：保留外接屏紧凑字号，内置屏同步缩小；旧/新真实包同屏对照。
 - [1.0.0 build 11 圆环展开与拖动](validation/orb-drag.md)：动画期间立即拖动、原生整点坐标、内置屏与外接屏验收。
 - [1.0.0 build 10 恢复初版尺寸](validation/appearance-restore.md)：按用户指定时间点恢复按钮和文字，保留两入口功能。
 - [1.0.0 build 9 两按钮与文字层级](validation/header-actions.md)：四模式实机图、内置/外接屏检查及最终包证据。
@@ -36,7 +37,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码版本为 v1.0.0 build 11，D-67 修复圆环展开后的拖动锁定和动画/原生窗口坐标不一致，见[本轮验收](validation/orb-drag.md)。外观沿用 D-66，中英文 README 四模式图片仍明确对应 build 10 的隔离合成数据。公开 Release 附件未变；历史图片和对应版本验收保留。
+当前源码版本为 v1.0.0 build 12，D-68 保留原外接屏紧凑字号并让内置屏同步采用，见[本轮验收](validation/unified-typography.md)；D-67 圆环拖动修复继续保留。中英文 README 四模式图片仍明确对应 build 10 的隔离合成数据。公开 Release 附件未变；历史图片和对应版本验收保留。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

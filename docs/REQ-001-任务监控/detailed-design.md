@@ -219,6 +219,8 @@ D-48 覆盖先前左侧手柄和常驻浮窗吸附设计。非按钮拖动层按
 
 ## D-49 每窗口字号与待处理对比度
 
+> 历史按屏幕区分字号的规则已由 D-68 覆盖：所有屏幕统一使用此处的紧凑档；以下原始设计保留作历史依据。
+
 字号档位来自承载当前内容的实际窗口 screen，通过该窗口的显示环境传给 SwiftUI；不能用 NSScreen.main 或某个全局布尔值替代所有窗口。窗口实际位于外接屏时采用 compact，内置屏为 regular；screen 暂时为 nil 时保留该窗口已应用的值。常驻浮窗本身强制 compact，优先级高于屏幕类型，因此钉住后在内置屏也保持紧凑。跨屏重算只影响相应窗口，监控、选择器、额度与收起摘要使用一致的字号策略；原生设置控件不改系统字号。
 
 `PanelFonts.readable` 紧凑档先使用 `base - 2pt`，下限取 `max(11pt, oldMinimum - 2pt)`，再与用户 uiScale 合成：逻辑字号取 `max(adjustedBase, adjustedMinimum / uiScale)`，实际显示后的有效字号不会低于 adjustedMinimum。uiScale 使用 D-50 统一规范化后的 60%–120% 比例；字号档位不通过改变用户设置或把整窗再次缩小来实现。
@@ -390,3 +392,13 @@ moreMenu 使用原生 Menu 的 button 样式和同一 QuietButtonStyle，避免 
 以 `2be13e2` 为基础应用本任务 17:25 的首次 D-64 修改，复原 MonitorView；Appearance 与 UsageViews 恢复该基线。TopPanelView 与 WindowController 的收起回调继续保留。headerIcon 回到 SF Symbol、14pt medium、主文字色 80%、28×30pt 框，两按钮间距 4pt；原生更多 Menu 回到 borderlessButton。移除 D-65 的 monitorPrimary/monitorSecondary，恢复原 PanelFonts.readable 的字号和可读下限，额度图标恢复 14pt、主文字色。
 
 版本仍为 1.0.0，构建号递增至 10，避免把恢复外观误记为旧可执行包。用户偏好和数据不回退，Git 通过新增提交记录恢复，不改写已推送历史。验证记录见 [D-66](../validation/appearance-restore.md)。
+
+## D-68 内置屏与外接屏统一字号（2026-09-20）
+
+用户先要求核对两块屏幕的差异，确认更喜欢外接屏字号；对“内置屏也统一使用当前外接屏的字号，窗口尺寸保持不变”的建议回复“解决一下吧”，授权实施本次小范围界面修正。
+
+`windowTypography()` 从窗口根视图首次创建起固定提供紧凑字号，环境默认值同样为紧凑档。移除原生屏幕探针及移动、屏幕、backing scale 的字号监听，不再根据内置/外接身份更换字体。MonitorView 中原 externalTypography 命名改为 windowCompactTypography，避免继续暗示外接屏专用行为。
+
+沿用原紧凑档字号算法：基准字号减 2pt，有效下限为 `max(11pt, 原下限 - 2pt)`。当前 75% 时，标题/任务名/辅助说明分别为 13/12/11pt；其他比例继续按原算法缩放。此规则覆盖监控面板、额度、顶部摘要及任务选择器，原生设置控件继续使用系统字号。窗口尺寸、行高、圆环和按钮、主题与用户比例不变；屏幕的像素密度和系统渲染差异不属于应用字号差异。
+
+构建号递增为 12，验收见 [统一字号](../validation/unified-typography.md)。

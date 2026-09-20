@@ -21,8 +21,8 @@ struct MonitorView: View {
     var dragMoved: () -> Void = {}
     var dragEnded: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.compactMonitorTypography) private var externalTypography
-    private var compactTypography: Bool { compact || externalTypography }
+    @Environment(\.compactMonitorTypography) private var windowCompactTypography
+    private var compactTypography: Bool { compact || windowCompactTypography }
 
     private var visibleTaskIDs: [String] {
         (store.active + (showFinished ? store.finished : [])).map(\.id)
@@ -210,8 +210,8 @@ private struct MonitorTaskRow: View {
     let taskID: String
     let compact: Bool
     let animationsActive: Bool
-    @Environment(\.compactMonitorTypography) private var externalTypography
-    private var compactTypography: Bool { compact || externalTypography }
+    @Environment(\.compactMonitorTypography) private var windowCompactTypography
+    private var compactTypography: Bool { compact || windowCompactTypography }
 
     var body: some View {
         if let task = store.graph.roots.first(where: { $0.id == taskID }) {
