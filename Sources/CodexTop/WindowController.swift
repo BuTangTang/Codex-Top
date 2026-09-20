@@ -317,7 +317,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let willExpand = requestedExpanded ?? orbState.expanded
         if orbAnchor.width == 0 { orbAnchor = floating.frame }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
-        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame), on: display)
+        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame))
         let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false) * store.uiScale)
         let desired: CGRect
         let direction: OrbExpansionDirection
@@ -328,7 +328,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let layout = WindowGeometry.orbPanelLayout(from: orbAnchor, size: size, visible: display.screen.visibleFrame)
             desired = layout.frame; direction = layout.direction
         }
-        let expanded = WindowGeometry.pixelAligned(desired, scale: display.screen.backingScaleFactor)
+        let expanded = desired
         if willExpand { orbExpandedFrame = expanded; orbExpansionDirection = direction }
         if willExpand || (!orbState.expanded && orbMotion == nil) {
             // Lay out the list once at its destination size. The outer surface owns
@@ -344,8 +344,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private func restoreCollapsedOrb(to anchor: CGRect) {
         stopOrbClickMonitoring()
         orbHoverSuppressedUntilExit = false
-        let display = displays.first { $0.screen.frame.contains(CGPoint(x: anchor.midX, y: anchor.midY)) } ?? chosen
-        let anchor = display.map { alignedOrb(anchor, on: $0) } ?? anchor
+        let anchor = alignedOrb(anchor)
         cancelOrbMotion()
         orbCanvas = nil; orbAnchor = anchor; orbTarget = anchor; orbExpandedFrame = nil; orbExpansionDirection = nil
         orbLayoutPending = false
@@ -361,12 +360,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         floating.resignKey()
         floating.setFrame(anchor, display: true)
     }
-    private func alignedOrb(_ frame: CGRect, on display: DisplayChoice) -> CGRect {
-        let scale = display.screen.backingScaleFactor
-        // Keep the 44pt circle square and align both axes to device pixels. Normalized
-        // saved positions otherwise leave different fractional coverage on each edge.
-        return CGRect(x: (frame.minX * scale).rounded() / scale,
-                      y: (frame.minY * scale).rounded() / scale, width: 44, height: 44)
+    private func alignedOrb(_ frame: CGRect) -> CGRect {
+        // NSPanel rounds its frame to whole points even on Retina displays. Use
+        // the same coordinates for the native canvas and the SwiftUI surface.
+        return CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: 44, height: 44)
     }
     private func cancelOrbMotion() {
         orbMotionGeneration &+= 1
@@ -413,13 +410,22 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             orbState.surfaceFrame = surface
         } completion: { [weak self] in
             guard let self, self.store.placement == .orb, self.orbMotion == generation,
-                  self.orbMotionGeneration == generation, self.orbTarget == target else { return }
-            let wasPositioning = self.positioning
-            self.positioning = true; defer { self.positioning = wasPositioning }
-            self.commitOrbCanvas(target, surface: CGRect(origin: .zero, size: target.size))
-            self.orbCanvas = nil; self.orbMotion = nil
+                  self.orbMotionGeneration == generation else { return }
+            self.orbMotion = nil
+            // A drag translates the canvas and both endpoints together. Never
+            // trim under the pointer or restore the pre-drag captured target.
+            guard !self.dragging else { return }
+            self.finishOrbCanvas()
             self.finishOrbLayout()
         }
+    }
+    private func finishOrbCanvas() {
+        guard orbCanvas != nil else { return }
+        let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
+        cancelOrbMotion()
+        commitOrbCanvas(orbTarget, surface: CGRect(origin: .zero, size: orbTarget.size))
+        orbCanvas = nil
+        if !orbState.expanded { orbExpandedFrame = nil; orbExpansionDirection = nil }
     }
     private func finishOrbLayout() {
         if !orbState.expanded { orbExpandedFrame = nil; orbExpansionDirection = nil }
@@ -428,6 +434,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         updateOrbLayout(animated: true)
     }
     private func commitOrbCanvas(_ frame: CGRect, surface: CGRect) {
+        guard floating.frame != frame || orbState.surfaceFrame != surface else { return }
         // Rebase SwiftUI and AppKit in one display transaction. display:true used
         // to flush the resized window before its content consumed the new origin.
         NSAnimationContext.runAnimationGroup { context in
@@ -659,7 +666,6 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func beginDrag(initialTranslation: CGSize) {
         guard store.placement == .orb || store.placement == .floating else { return }
-        if store.placement == .orb && orbMotion != nil { return }
         themeReveal.cancel(); savePositionTask?.cancel()
         dragging = true; dragStart = floating.frame.origin; orbState.hovered = false
         dragExceededClickThreshold = false
@@ -686,13 +692,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let pointer = dragPointerLocation
         let moved = dragExceededClickThreshold || hypot(pointer.x - dragPointerStart.x, pointer.y - dragPointerStart.y) >= 4 ||
             hypot(floating.frame.minX - dragStart.x, floating.frame.minY - dragStart.y) >= 4
+        if store.placement == .orb { finishOrbCanvas() }
         if let display = displays.first(where: { $0.screen.frame.contains(pointer) }) ??
             displays.first(where: { $0.screen.frame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) }) ?? chosen {
             let frame = WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame)
-            let target = store.placement == .orb && !orbState.expanded ? alignedOrb(frame, on: display) : frame
+            let target = store.placement == .orb && !orbState.expanded ? alignedOrb(frame) : frame
             moveFloatingFrameForDrag(target)
         }
         dragging = false
+        orbLayoutPending = false
         persistFloatingPosition()
         let pointerInsideOrb = store.placement == .orb && !orbState.expanded && floating.frame.contains(pointer)
         orbHoverSuppressedUntilExit = moved && pointerInsideOrb
@@ -707,13 +715,22 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         else { floating.setFrame(frame, display: false) }
         guard store.placement == .orb else { return }
         let actual = floating.frame
+        if orbCanvas != nil {
+            // Keep the ongoing morph in local coordinates. Only its screen-space
+            // canvas and destinations move, so grabbing it never snaps the surface.
+            let dx = actual.minX - previous.minX, dy = actual.minY - previous.minY
+            orbAnchor = orbAnchor.offsetBy(dx: dx, dy: dy)
+            orbTarget = orbTarget.offsetBy(dx: dx, dy: dy)
+            orbExpandedFrame = orbExpandedFrame?.offsetBy(dx: dx, dy: dy)
+            orbCanvas = actual
+            return
+        }
         if orbState.expanded {
             orbAnchor = WindowGeometry.movingOrbAnchor(orbAnchor, from: previous, to: actual, direction: orbExpansionDirection ?? .down)
             orbExpandedFrame = actual
         } else {
             orbAnchor = actual
         }
-        // Dragging starts only after a morph finishes, so no larger canvas remains.
         // Keep every screen-space target in sync before a data refresh can lay out.
         orbTarget = actual; orbCanvas = nil
         if previous.size != actual.size {

@@ -94,6 +94,8 @@ public enum WindowGeometry {
 
     /// Content changes preserve the selected opening edge and direction. Cap the
     /// viewport at the visible edge instead of shifting the window or flipping it.
+    /// NSPanel uses integral point frames, including on Retina. Normalize before
+    /// the frame becomes a SwiftUI surface or a future resize anchor.
     public static func resizedOrbPanel(from panel: CGRect, size: CGSize, visible: CGRect, direction: OrbExpansionDirection = .down) -> CGRect {
         let area = visible.insetBy(dx: 8, dy: 8)
         let width = min(max(1, size.width), max(1, area.width))
@@ -102,12 +104,21 @@ public enum WindowGeometry {
         case .down:
             let top = min(max(panel.maxY, area.minY + 1), area.maxY)
             let height = min(max(1, size.height), max(1, top - area.minY))
-            return CGRect(x: x, y: top - height, width: width, height: height)
+            return integralOrbFrame(CGRect(x: x, y: top - height, width: width, height: height))
         case .up:
             let bottom = min(max(panel.minY, area.minY), area.maxY - 1)
             let height = min(max(1, size.height), max(1, area.maxY - bottom))
-            return CGRect(x: x, y: bottom, width: width, height: height)
+            return integralOrbFrame(CGRect(x: x, y: bottom, width: width, height: height))
         }
+    }
+
+    private static func integralOrbFrame(_ frame: CGRect) -> CGRect {
+        // Fractional scales can put an otherwise integral edge a few ULPs past
+        // its point. Do not grow another point on each subsequent refresh.
+        let epsilon: CGFloat = 1e-8
+        let x = floor(frame.minX + epsilon), y = floor(frame.minY + epsilon)
+        return CGRect(x: x, y: y, width: ceil(frame.maxX - epsilon) - x,
+                      height: ceil(frame.maxY - epsilon) - y)
     }
 
     /// Moving an open panel moves its return point too. A drop onto a smaller

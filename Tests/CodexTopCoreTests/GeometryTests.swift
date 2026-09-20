@@ -3,6 +3,41 @@ import CoreGraphics
 @testable import CodexTopCore
 
 final class GeometryTests: XCTestCase {
+    func testOrbEndpointsUseNativeWholePointsAtEverySupportedScale() {
+        for visible in [CGRect(x: 0, y: 40, width: 1728, height: 1039),
+                        CGRect(x: -2560, y: -323, width: 2560, height: 1402)] {
+            for percent in stride(from: 60, through: 120, by: 5) {
+                let scale = CGFloat(percent) / 100
+                for y in [visible.minY + 20, visible.maxY - 100] {
+                    let orb = CGRect(x: visible.midX, y: y, width: 44, height: 44)
+                    let layout = WindowGeometry.orbPanelLayout(from: orb, size: CGSize(width: 410 * scale, height: 398 * scale), visible: visible)
+                    XCTAssertEqual(layout.frame, layout.frame.integral)
+                    XCTAssertTrue(visible.contains(layout.frame))
+                    XCTAssertTrue(layout.frame.contains(orb))
+                    if layout.direction == .down { XCTAssertEqual(layout.frame.maxY, orb.maxY) }
+                    else { XCTAssertEqual(layout.frame.minY, orb.minY) }
+                }
+            }
+        }
+    }
+
+    func testRepeatedFractionalSizeRefreshDoesNotMoveOrbPanel() {
+        let visible = CGRect(x: 0, y: 40, width: 1728, height: 1039)
+        for percent in stride(from: 60, through: 120, by: 5) {
+            let scale = CGFloat(percent) / 100
+            let size = CGSize(width: 410 * scale, height: 398 * scale)
+            let orb = CGRect(x: 700, y: 900, width: 44, height: 44)
+            let layout = WindowGeometry.orbPanelLayout(from: orb, size: size, visible: visible)
+            var frame = layout.frame
+            for _ in 0..<50 {
+                // Simulate the native window's integral frame feeding the next layout.
+                frame = WindowGeometry.resizedOrbPanel(from: frame.integral, size: size, visible: visible, direction: layout.direction)
+                XCTAssertEqual(frame, layout.frame)
+                XCTAssertEqual(frame, frame.integral)
+            }
+        }
+    }
+
     func testOrbPrefersDownwardOpeningWithPointerNearHeaderAtEveryScale() {
         let visible = CGRect(x: 0, y: 40, width: 1440, height: 900)
         let orb = CGRect(x: 700, y: 600, width: 44, height: 44)
