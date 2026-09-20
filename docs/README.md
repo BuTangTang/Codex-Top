@@ -4,7 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
-- [Windows 使用与构建](../windows/README.md)：Windows 11 x64 开发预览 0.1.9，独立 C# / WPF 工程。
+- [Windows 使用与构建](../windows/README.md)：Windows 11 x64 开发预览 0.1.10，独立 C# / WPF 工程。
 - [Windows 集成说明](../windows/docs/INTEGRATION.md)：来源基线、与 macOS 的差异、本次迁移检查和未验范围。
 - [build 27 展开响应、自动整理与菜单](validation/expansion-performance.md)：按需加载、布局稳定、7 天自动移出、底边去重影与实色同层菜单。
 - [build 18 列表与比例验收](validation/task-list-refinement.md)：稳定滚动、手动整理、新 100% 基准与设置实时预览。

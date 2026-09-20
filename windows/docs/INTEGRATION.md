@@ -1,6 +1,6 @@
 # Windows 集成说明 / Windows integration notes
 
-以下记录初始 Windows 0.1.8 源码导入。当前 Windows 修订为 0.1.9，增加完成反馈并移除圆环上缘的小感叹号；这些后续改动见 [PROJECT.md](PROJECT.md) 和 [VALIDATION.md](VALIDATION.md)，不属于最初逐字节导入的范围。
+以下记录初始 Windows 0.1.8 源码导入。当前 Windows 修订为 0.1.10，默认圆环不打勾，新增自动完成信息卡，并保留 0.1.9 的完成动效与上缘小感叹号修复；这些后续改动见 [PROJECT.md](PROJECT.md) 和 [VALIDATION.md](VALIDATION.md)，不属于最初逐字节导入的范围。
 
 ## 范围与来源
 

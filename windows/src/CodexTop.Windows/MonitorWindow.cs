@@ -23,6 +23,7 @@ public sealed class MonitorWindow : Window
     private readonly DispatcherTimer dismissCheck = new();
     private readonly DispatcherTimer completionEnd = new();
     private readonly OrbCompletionTracker completionTracker = new();
+    internal CompletionNotice CompletionNotice { get; }
     private HashSet<string> completedTaskIds = [];
     private long? completionStarted;
     private readonly List<(TextBlock Label, Activity Activity)> timers = [];
@@ -50,6 +51,8 @@ public sealed class MonitorWindow : Window
         Topmost = true; Width = Height = 44; FontFamily = new("Microsoft YaHei UI");
         UseLayoutRounding = true; SnapsToDevicePixels = true;
         Content = canvas; canvas.Children.Add(shell); shell.HorizontalAlignment = HorizontalAlignment.Left; shell.VerticalAlignment = VerticalAlignment.Top;
+        CompletionNotice = new(this);
+        IsVisibleChanged += (_, _) => { if (!IsVisible) ClearCompletion(); };
         reducedBySystem = !SystemParameters.ClientAreaAnimation;
         appliedPlacement = store.Preferences.Placement;
         expanded = appliedPlacement == Placement.Floating;
@@ -72,7 +75,7 @@ public sealed class MonitorWindow : Window
             WindowState = WindowState.Normal; MinimizeToTray();
         };
         store.Changed += OnStoreChanged;
-        completionEnd.Interval = TimeSpan.FromMilliseconds(1600);
+        completionEnd.Interval = TimeSpan.FromSeconds(5);
         completionEnd.Tick += (_, _) => { ClearCompletion(); OnStoreChanged(); };
         clock = new(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateTimers(), Dispatcher);
         hoverClose.Interval = TimeSpan.FromMilliseconds(250);
@@ -139,11 +142,11 @@ public sealed class MonitorWindow : Window
         // A failed scan clears all rows; valid rows still have their own evidence.
         bool reliable = !store.Loading && !store.Paused && (store.Error is null || rows.Count > 0);
         var completed = completionTracker.Observe(store.Root, rows, reliable);
-        bool canShowCompletion = reliable && IsOrb && IsVisible && !menuOpen && !dragging && appliedPlacement == store.Preferences.Placement;
+        bool canShowCompletion = reliable && IsVisible && !menuOpen && !dragging && appliedPlacement == store.Preferences.Placement;
         if (!canShowCompletion || completedTaskIds.Any(id => !rows.Any(r => r.Root.Id == id && r.Activity.Phase == Phase.Completed))) ClearCompletion();
         if (canShowCompletion && completed.Count > 0)
         {
-            completedTaskIds = completed; completionStarted = Stopwatch.GetTimestamp();
+            completedTaskIds.UnionWith(completed); completionStarted = Stopwatch.GetTimestamp();
             completionEnd.Stop(); completionEnd.Start();
         }
         if (appliedPlacement != store.Preferences.Placement)
@@ -158,7 +161,7 @@ public sealed class MonitorWindow : Window
         Render(false);
     }
     private void ClearCompletion()
-    { completionEnd.Stop(); completedTaskIds.Clear(); completionStarted = null; }
+    { completionEnd.Stop(); completedTaskIds.Clear(); completionStarted = null; CompletionNotice.IsOpen = false; }
     private string DisplayKey()
     {
         var p = store.Preferences;
@@ -207,9 +210,9 @@ public sealed class MonitorWindow : Window
             width = height = OrbSize; shell.CornerRadius = new(OrbSize / 2);
             var grid = new Grid(); var ring = new RunningRing(40, phase, dark, Animate) { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; grid.Children.Add(ring);
             bool justCompleted = completionStarted is not null;
-            if (justCompleted || phase == Phase.Completed)
+            if (justCompleted)
                 grid.Children.Add(new CompletionMark(Animate && justCompleted, completionStarted is { } started ? Stopwatch.GetElapsedTime(started) : TimeSpan.Zero, completionStarted, completionProgress));
-            else
+            else if (phase != Phase.Completed && rows.Any(r => r.Activity.Phase.IsActive() || r.Activity.Phase == Phase.Failed))
             {
                 var number = Ui.Text(Math.Min(rows.Count(r => r.Activity.Phase == Phase.Running), 100) is var count && count > 99 ? "99+" : count.ToString(), 15, dark);
                 number.HorizontalAlignment = HorizontalAlignment.Center; number.FontWeight = FontWeights.SemiBold; grid.Children.Add(number);
@@ -226,7 +229,7 @@ public sealed class MonitorWindow : Window
                 }
             }
             string summary = (justCompleted ? $"{completedTaskIds.Count} 项任务刚完成 · " : "") + Summary(rows);
-            shell.Child = grid; shell.ToolTip = summary + " · 点击展开，拖动移动，右键菜单";
+            shell.Child = grid; shell.ToolTip = justCompleted ? null : summary + " · 点击展开，拖动移动，右键菜单";
             AutomationProperties.SetName(shell, "任务圆环，" + summary);
             shell.PreviewMouseLeftButtonDown -= OrbDown; shell.PreviewMouseLeftButtonDown += OrbDown;
             shell.PreviewMouseMove -= OrbMove; shell.PreviewMouseMove += OrbMove;
@@ -258,6 +261,9 @@ public sealed class MonitorWindow : Window
         if (expanded && upward) NativeWindow.MoveLogical(this, new(NativeWindow.LogicalPosition(this).X, anchorY + OrbHostSize - height));
         SetSize(width, height, animate);
         RefreshNativeStyle(); if (expanded || !animate || !Animate) NativeWindow.Clamp(this);
+        if (completionStarted is not null)
+            CompletionNotice.ShowTasks(rows.Where(r => completedTaskIds.Contains(r.Root.Id)).ToList(), Summary(rows), dark, Animate);
+        else CompletionNotice.IsOpen = false;
     }
     private Grid BuildPanel(IReadOnlyList<TaskRow> rows, bool dark, double scale)
     {
@@ -360,6 +366,7 @@ public sealed class MonitorWindow : Window
     private void Expand()
     {
         if (expanded) { Show(); Activate(); return; }
+        ClearCompletion();
         if (store.Preferences.Placement == Placement.Orb) ReadAnchor();
         expanded = true; upward = false;
         var area = NativeWindow.WorkArea(this);
@@ -370,7 +377,7 @@ public sealed class MonitorWindow : Window
     private void Collapse()
     {
         if (store.Preferences.Placement == Placement.Floating) { store.Preferences.SetPlacement(store.Preferences.ReturnPlacement); store.Save(); return; }
-        if (!expanded) return; expanded = false; upward = false; Render(true);
+        if (!expanded) return; ClearCompletion(); expanded = false; upward = false; Render(true);
     }
     private void MinimizeToTray()
     {
@@ -431,6 +438,7 @@ public sealed class MonitorWindow : Window
     }
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
+        ClearCompletion();
         // Anchors are global screen coordinates expressed in this window's DIPs.
         // Rebase them once for each transition; never mix the old and new units.
         anchorX *= oldDpi.DpiScaleX / newDpi.DpiScaleX;
@@ -446,7 +454,7 @@ public sealed class MonitorWindow : Window
             canvas.InvalidateMeasure(); canvas.InvalidateArrange(); canvas.InvalidateVisual();
             UpdateLayout();
             if (IsOrb) ReadAnchor();
-            RefreshNativeStyle(); NativeWindow.Redraw(this);
+            Render(false); RefreshNativeStyle(); NativeWindow.Redraw(this);
         }, DispatcherPriority.Loaded);
     }
     private void OrbDown(object sender, MouseButtonEventArgs e)
@@ -457,7 +465,7 @@ public sealed class MonitorWindow : Window
         var current = PointToScreen(e.GetPosition(this)); var difference = current - start;
         if (!moved && Math.Abs(difference.X) + Math.Abs(difference.Y) < 5) return;
         moved = true;
-        if (!dragging) { dragging = true; UpdateOrbHover(false); }
+        if (!dragging) { ClearCompletion(); renderQueued = true; dragging = true; UpdateOrbHover(false); }
         var bounds = NativeWindow.Bounds(this);
         NativeWindow.Move(this, new(bounds.X + difference.X, bounds.Y + difference.Y)); dragStart = current;
     }
@@ -471,7 +479,7 @@ public sealed class MonitorWindow : Window
     {
         DependencyObject? target = e.OriginalSource as DependencyObject;
         while (target != null && target != sender) { if (target is ButtonBase) return; target = VisualTreeHelper.GetParent(target); }
-        var before = NativeWindow.Bounds(this); StopAnimation(); dragging = true;
+        var before = NativeWindow.Bounds(this); ClearCompletion(); StopAnimation(); dragging = true;
         try { DragMove(); } catch (InvalidOperationException) { } finally { dragging = false; }
         NativeWindow.Clamp(this);
         var after = NativeWindow.Bounds(this); var dpi = VisualTreeHelper.GetDpi(this);
@@ -507,6 +515,7 @@ public sealed class MonitorWindow : Window
     }
     internal void OpenMenu()
     {
+        if (completionStarted is not null) { ClearCompletion(); Render(false); }
         var menu = new ContextMenu { PlacementTarget = shell, Placement = PlacementMode.MousePoint };
         ActiveMenu = menu; dismissRequestedByMenu = false;
         menu.AddHandler(Mouse.PreviewMouseDownOutsideCapturedElementEvent, new MouseButtonEventHandler((_, _) =>

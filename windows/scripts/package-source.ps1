@@ -19,6 +19,6 @@ foreach ($relative in $sourceFiles) {
     Copy-Item -LiteralPath (Join-Path $projectRoot $relative) -Destination $destination
 }
 New-Item -ItemType Directory -Path (Join-Path $projectRoot 'artifacts') -Force | Out-Null
-$archivePath = Join-Path $projectRoot 'artifacts/CodexTop-Windows-Source-0.1.9.zip'
+$archivePath = Join-Path $projectRoot 'artifacts/CodexTop-Windows-Source-0.1.10.zip'
 Compress-Archive -LiteralPath $sourceRoot -DestinationPath $archivePath -Force
 [pscustomobject]@{ SourceDirectory = $sourceRoot; Archive = $archivePath; FileCount = $sourceFiles.Count }
