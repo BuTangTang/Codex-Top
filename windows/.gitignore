@@ -1,0 +1,44 @@
+# Local SDK, upstream reference and generated packages
+/.reference/
+/.tools/
+/artifacts/
+
+# Build outputs and IDE state
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.pdb
+*.exe
+*.dll
+*.zip
+*.7z
+
+# Local account data, task logs and personal configuration
+.codex/
+.env
+.env.*
+!.env.example
+auth.json
+settings.json
+settings.json.*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.jsonl
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Temporary files and one-off local probes
+*.log
+__pycache__/
+*.pyc
+*.tmp
+*.bak
+/scripts/inspect_environment.py
+/新建 文本文档.txt

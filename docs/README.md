@@ -4,6 +4,8 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [Windows 使用与构建](../windows/README.md)：Windows 11 x64 开发预览 0.1.8，独立 C# / WPF 工程。
+- [Windows 集成说明](../windows/docs/INTEGRATION.md)：来源基线、与 macOS 的差异、本次迁移检查和未验范围。
 - [build 27 展开响应、自动整理与菜单](validation/expansion-performance.md)：按需加载、布局稳定、7 天自动移出、底边去重影与实色同层菜单。
 - [build 18 列表与比例验收](validation/task-list-refinement.md)：稳定滚动、手动整理、新 100% 基准与设置实时预览。
 - [任务行视觉方案](design/task-row-aesthetics.md)：行间留白、字重与对齐的概念来源，已实施。
@@ -43,7 +45,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码与本机安装为 v1.0.0 build 27。D-73 按需加载与稳定布局、D-74 默认 7 天自动整理、D-75 固定字号实色菜单与跟随系统主题已实现；菜单同层列出选项，优先向右并按屏幕边缘裁限。圆环关闭原生阴影后，用户确认底边重影消失。D-69 原生窗口拖动、D-68 紧凑字号、D-70–D-72 的布局与比例保留。中英文 README 四模式图片仍明确对应 build 10 的原比例与隔离合成数据。公开 Release 附件未变。
+macOS 当前源码与本机安装为 v1.0.0 build 27。D-73 按需加载与稳定布局、D-74 默认 7 天自动整理、D-75 固定字号实色菜单与跟随系统主题已实现；菜单同层列出选项，优先向右并按屏幕边缘裁限。圆环关闭原生阴影后，用户确认底边重影消失。D-69 原生窗口拖动、D-68 紧凑字号、D-70–D-72 的布局与比例保留。中英文 README 四模式图片仍明确对应 build 10 的原比例与隔离合成数据。公开 Release 附件未变。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

@@ -4,7 +4,11 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and local build are **v1.0.0 build 27**. Task rows load on demand with exact section heights. Finished tasks with no activity for 7 days leave monitoring automatically; the interval can be changed or disabled. The More menu has an opaque background, fixed font size, and all options at one level. It opens toward the right and supports Follow System appearance. The user confirmed that the duplicated bottom edge is gone. Manual selection, 80%–120% scaling, and settings previews remain available. See the [validation record and limits](docs/validation/expansion-performance.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current macOS source and local build are **v1.0.0 build 27**. Task rows load on demand with exact section heights. Finished tasks with no activity for 7 days leave monitoring automatically; the interval can be changed or disabled. The More menu has an opaque background, fixed font size, and all options at one level. It opens toward the right and supports Follow System appearance. The user confirmed that the duplicated bottom edge is gone. Manual selection, 80%–120% scaling, and settings previews remain available. See the [validation record and limits](docs/validation/expansion-performance.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+
+## Windows version
+
+This branch adds a separate **Windows 11 x64 development preview, version 0.1.8**, built with C# / WPF / .NET 10. It includes a desktop orb, floating monitor, system tray integration, and account usage. See the [Windows README](windows/README.md) for usage and build instructions and the [integration notes](windows/docs/INTEGRATION.md) for provenance, platform differences, and validation scope. Source is available; no Windows download has been published. The installation instructions and screenshots below apply to macOS.
 
 ## Install
 
@@ -60,7 +64,7 @@ While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. When the 
 - Waiting activities in the monitored list, including waiting child tasks grouped under a parent, use file-change notifications for up to 64 local rollout files. Changes are coalesced for about 200ms before an incremental refresh; 2-second polling remains as a fallback. Reading a saved user reply clears the waiting state without awaiting a later completion event. This does not guarantee a fixed delay from pressing Send. Pausing task refresh stops these watches; account usage retains its independent 60-second refresh cycle.
 - The main usage display uses only the current account interface. Log-based usage is shown separately as historical. Failed reads do not fall back to another account or old logs, and missing usage windows are not invented. Pausing task refresh does not pause usage refresh. Account changes appear on the next actual read, not necessarily immediately.
 - Codex's internal formats may change. Conversation destinations, real account switching, physical display disconnects/lid closure, complete mouse dragging, and animation frame rates still have unverified scenarios. See [current status](docs/STATUS.md) and the [validation matrix](docs/validation/acceptance-matrix.md).
-- **Only the macOS app is implemented.** The [Windows implementation prompts](docs/handoff/windows-implementation-prompts.md) are handoff material for future work, not a Windows release.
+- **The Windows app is a separate development preview.** Its code and documentation are under [windows/](windows/README.md); feature parity with macOS build 27 is not claimed. The [Windows implementation prompts](docs/handoff/windows-implementation-prompts.md) remain as historical handoff material.
 
 ## Build locally
 
