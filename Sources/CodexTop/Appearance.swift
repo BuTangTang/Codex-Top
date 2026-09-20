@@ -124,10 +124,15 @@ struct GlassFill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack {
-            FrostedBackdrop()
-                .overlay(LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .opacity(colorScheme == .light ? 1 : 0)
-            Color.black.opacity(colorScheme == .dark ? 1 : 0)
+            if colorScheme == .light {
+                FrostedBackdrop()
+                    .overlay(LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            } else {
+                // A behind-window effect is composited by WindowServer, outside
+                // SwiftUI's color layer. Do not leave an invisible glass backing
+                // attached to the opaque dark surface while its window resizes.
+                Color.black
+            }
         }
         .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
         .allowsHitTesting(false)

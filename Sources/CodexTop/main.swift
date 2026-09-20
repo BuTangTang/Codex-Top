@@ -108,6 +108,7 @@ import CodexTopCore
         let isContextClick = event?.type == .rightMouseUp ||
             (event?.type == .leftMouseUp && event?.modifierFlags.contains(.control) == true)
         if isContextClick {
+            statusMenu.appearance = NSAppearance(named: store.theme == .light ? .aqua : .darkAqua)
             statusItem.menu = statusMenu
             defer { statusItem.menu = nil }
             sender.performClick(nil)

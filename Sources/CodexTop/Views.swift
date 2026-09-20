@@ -190,9 +190,10 @@ struct SettingsView: View {
                 Button("找回窗口", action: recoverWindows)
             }
             Section("外观") {
-                Picker("配色", selection: Binding(get: { store.theme }, set: { store.setTheme($0) })) {
+                Picker("配色", selection: Binding(get: { store.themeChoice }, set: { store.setTheme($0) })) {
                     Text("深色").tag(PanelTheme.dark)
                     Text("浅色玻璃").tag(PanelTheme.light)
+                    Text("跟随系统").tag(PanelTheme.system)
                 }.pickerStyle(.segmented)
                 Text("刘海、展开面板与浮窗使用同一主题。").font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 8) {
@@ -236,6 +237,12 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("自动监控新任务", isOn: Binding(get: { store.preferences.autoMonitor }, set: { store.setAutoMonitor($0) }))
                 Text("新建并开始执行后加入列表。手动取消关注的任务不会再次自动加入。").font(.caption).foregroundStyle(.secondary)
+                Picker("自动移出已结束任务", selection: Binding(get: { store.preferences.resolvedFinishedRetentionDays }, set: { store.setFinishedRetentionDays($0) })) {
+                    ForEach(MonitorPreferences.finishedRetentionOptions, id: \.self) { days in
+                        Text(days == 0 ? "关闭" : "\(days) 天无活动后").tag(days)
+                    }
+                }
+                Text("仅移出已停止、已完成的任务，按最近活动计算。再次运行会自动回来；通过＋重新加入后保留。关闭此项会恢复自动移出的任务。").font(.caption).foregroundStyle(.secondary)
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }

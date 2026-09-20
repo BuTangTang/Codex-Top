@@ -75,6 +75,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var observer: NSObjectProtocol?
     private var menuObservations = Set<AnyCancellable>()
     private var trackingMenus = Set<ObjectIdentifier>()
+    private var menuLayoutPending = false
     private var hideTask: Task<Void, Never>?
     private var revealTask: Task<Void, Never>?
     private var topMotion: Task<Void, Never>?
@@ -144,6 +145,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         floatingView.hoverChanged = { [weak self] value in self?.hoverFloating(value) }
         floatingView.contextMenuProvider = { [weak self] in
             guard let self, self.store.placement == .orb, !self.orbState.expanded else { return nil }
+            self.orbContextMenu?.appearance = self.floating.effectiveAppearance
             return self.orbContextMenu
         }
         floating.contentView = floatingView
@@ -165,18 +167,25 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         applyMode()
     }
     private func observeMenuTracking() {
-        for (name, opening) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+        for (name, opening) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false),
+                                (MonitorMenuPresenter.didOpen, true), (MonitorMenuPresenter.didClose, false)] {
             NotificationCenter.default.publisher(for: name).sink { [weak self] notification in
                 // AppKit tracks menus on the main thread. Update synchronously so
                 // the menu's first click cannot race the outside-click monitor.
                 MainActor.assumeIsolated {
-                    guard let self, let menu = notification.object as? NSMenu else { return }
+                    guard let self, let menu = notification.object as? NSObject else { return }
                     if opening {
                         self.trackingMenus.insert(ObjectIdentifier(menu))
                         self.cancelHoverTransitions()
                     } else {
                         self.trackingMenus.remove(ObjectIdentifier(menu))
-                        if self.trackingMenus.isEmpty && !self.topHovered { self.scheduleHide() }
+                        if self.trackingMenus.isEmpty {
+                            if self.menuLayoutPending {
+                                self.menuLayoutPending = false
+                                self.updateContentSize(animated: false)
+                            }
+                            if !self.topHovered { self.scheduleHide() }
+                        }
                     }
                 }
             }.store(in: &menuObservations)
@@ -223,6 +232,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         return CGSize(width: PanelMetrics.floatingWidth * store.uiScale, height: panelHeight(compact: true) * store.uiScale)
     }
     private func updateContentSize(animated: Bool = false) {
+        // Keep the source surface stationary throughout menu interaction. Data
+        // still refreshes; coalesce incidental geometry updates until dismissal.
+        guard trackingMenus.isEmpty else { menuLayoutPending = true; return }
         // Pinning uses only the floating window, including refresh/recovery paths.
         if store.placement == .floating { hideTopPanel() }
         guard let chosen else { return }
@@ -389,7 +401,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         guard animated, floating.isVisible, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) { orbState.expanded = expanded }
-            floating.hasShadow = expanded
+            // WindowServer's shadow left a duplicate bottom contour after the
+            // transparent orb canvas shrank. Keep this surface shadow-free.
+            floating.hasShadow = false
             commitOrbCanvas(target, surface: CGRect(origin: .zero, size: target.size))
             orbCanvas = nil
             finishOrbLayout()
@@ -410,7 +424,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let response = expanded ? 0.32 : 0.28
         let generation = orbMotionGeneration
         orbMotion = generation
-        floating.hasShadow = expanded
+        floating.hasShadow = false
         withAnimation(.spring(response: response, dampingFraction: 1, blendDuration: 0), completionCriteria: .removed) {
             orbState.expanded = expanded
             orbState.surfaceFrame = surface

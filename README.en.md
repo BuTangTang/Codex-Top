@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and local build are **v1.0.0 build 18**. Finished tasks use single-line rows, with one separator after the running group. Mixed-height scrolling now keeps a stable content extent. Right-click a task to remove it from monitoring, or deselect filtered results in the picker. The new 100% matches the previous 75% size; the range is 80%–120%. See the [validation record](docs/validation/task-list-refinement.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current source and local build are **v1.0.0 build 27**. Task rows load on demand with exact section heights. Finished tasks with no activity for 7 days leave monitoring automatically; the interval can be changed or disabled. The More menu has an opaque background, fixed font size, and all options at one level. It opens toward the right and supports Follow System appearance. The user confirmed that the duplicated bottom edge is gone. Manual selection, 80%–120% scaling, and settings previews remain available. See the [validation record and limits](docs/validation/expansion-performance.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
 
 ## Install
 

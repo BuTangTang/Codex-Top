@@ -23,11 +23,8 @@ struct MonitorView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
+    @StateObject private var menuPresenter = MonitorMenuPresenter()
     private var compactTypography: Bool { compact || windowCompactTypography }
-
-    private var visibleTaskIDs: [String] {
-        (store.active + (showFinished ? store.finished : [])).map(\.id)
-    }
 
     private var runningBoundaryID: String? {
         let tasks = store.active + (showFinished ? store.finished : [])
@@ -49,7 +46,7 @@ struct MonitorView: View {
 
     private var panelContent: some View {
         VStack(spacing: 0) {
-                header
+                header.layoutPriority(1)
                 separator
                 if store.loading {
                     ProgressView("正在读取任务…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -64,24 +61,17 @@ struct MonitorView: View {
                     VStack(spacing: 0) {
                         ScrollView {
                             let boundaryID = runningBoundaryID
-                            // Mixed single/double-height rows need an exact extent. A lazy stack
-                            // revises its estimates as rows enter view, moving the scroll position.
+                            // Each section has uniform rows and an exact total height. Keep
+                            // offscreen controls lazy without estimating a mixed-height list.
                             VStack(spacing: 0) {
-                                ForEach(visibleTaskIDs, id: \.self) { taskID in
-                                    MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
-                                        .overlay(alignment: .bottom) {
-                                            if taskID == boundaryID {
-                                                Rectangle().fill(Palette.hairline(store.theme.colorScheme))
-                                                    .frame(height: 1 / (displayScale * store.uiScale))
-                                                    .padding(.horizontal, 16)
-                                                    .allowsHitTesting(false)
-                                            }
-                                        }
-                                        .id(taskID)
-                                        .transition(.opacity)
+                                taskSection(store.active, rowHeight: PanelMetrics.expandedRow, boundaryID: boundaryID)
+                                if showFinished {
+                                    taskSection(store.finished, rowHeight: PanelMetrics.finishedRow, boundaryID: nil)
                                 }
                             }
-                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: visibleTaskIDs)
+                            // The panel owns disclosure/morph animation. Do not animate the
+                            // insertion or removal of every offscreen history row as well.
+                            .transaction { $0.animation = nil }
                         }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
                     }
                 }
@@ -96,8 +86,29 @@ struct MonitorView: View {
                         Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 12)).frame(width: 22, height: 22) }.buttonStyle(QuietButtonStyle())
                     }.padding(.horizontal, 20).padding(.vertical, 10)
                 }
-                footer
+                footer.fixedSize(horizontal: false, vertical: true).layoutPriority(1)
         }
+        // The native panel/surface owns size changes. Inheriting its spring or
+        // the disclosure transaction gives text and footer a second layout path.
+        .animation(nil, value: showFinished)
+        .animation(nil, value: animationsActive)
+    }
+
+    private func taskSection(_ tasks: [CodexTask], rowHeight: CGFloat, boundaryID: String?) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(tasks.map(\.id), id: \.self) { taskID in
+                MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
+                    .frame(height: rowHeight)
+                    .overlay(alignment: .bottom) {
+                        if taskID == boundaryID {
+                            Rectangle().fill(Palette.hairline(store.theme.colorScheme))
+                                .frame(height: 1 / (displayScale * store.uiScale))
+                                .padding(.horizontal, 16)
+                                .allowsHitTesting(false)
+                        }
+                    }
+            }
+        }.frame(height: CGFloat(tasks.count) * rowHeight, alignment: .top)
     }
 
     private var header: some View {
@@ -134,41 +145,12 @@ struct MonitorView: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Menu("显示方式") {
-                Picker("显示方式", selection: Binding(get: { store.placement }, set: { placement in
-                    if placement != store.placement { store.setPlacement(placement) }
-                })) {
-                    ForEach(PanelPlacement.allCases, id: \.self) { placement in
-                        Label(placement.shortcutTitle, systemImage: placement.shortcutSymbol).tag(placement)
-                    }
-                }.pickerStyle(.inline)
-            }
-            Menu("主题") {
-                Picker("主题", selection: Binding(get: { store.theme }, set: { store.setTheme($0) })) {
-                    Label("深色", systemImage: "moon").tag(PanelTheme.dark)
-                    Label("浅色玻璃", systemImage: "sun.max").tag(PanelTheme.light)
-                }.pickerStyle(.inline)
-            }
-            Divider()
-            Button(action: settings) { Label("监控设置…", systemImage: "gearshape") }
-            if compact {
-                Divider()
-                Button { store.setFloating(false) } label: { Label("关闭浮窗", systemImage: "xmark") }
-                    .help("回到\(store.preferences.resolvedUnpinnedPlacement.shortcutTitle)")
-            } else if let collapse {
-                Divider()
-                Button(action: collapse) {
-                    Label(store.placement == .orb ? "收回圆环" : "收起面板", systemImage: "chevron.down")
-                }
-            }
+        Button {
+            menuPresenter.present(store: store, compact: compact, settings: settings, collapse: collapse)
         } label: {
             headerIcon("ellipsis")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .tint(Palette.primary(store.theme.colorScheme))
-        .fixedSize()
+        .background(MonitorMenuAnchor(presenter: menuPresenter).allowsHitTesting(false))
         .headerButtonHitArea()
         .accessibilityLabel("更多操作")
         .accessibilityValue(store.placement.shortcutTitle)
@@ -183,12 +165,13 @@ struct MonitorView: View {
             HStack(spacing: 8) {
                 if !store.finished.isEmpty {
                     Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
+                        showFinished.toggle()
                         finishedChanged()
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
                                 .font(.system(size: 11, weight: .medium)).frame(width: 16)
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showFinished)
                             Text("已结束 \(store.finished.count)")
                         }
                         .font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography))
@@ -208,7 +191,7 @@ struct MonitorView: View {
     }
 }
 
-private extension PanelPlacement {
+extension PanelPlacement {
     var shortcutTitle: String {
         switch self {
         case .top: "刘海模式"
@@ -227,8 +210,8 @@ private extension PanelPlacement {
     }
 }
 
-/// Keep one row identity across active/finished transitions, but observe its current data directly.
-/// A lazy row must not retain a task snapshot captured by an older group-content closure.
+/// Observe current data directly: a lazy row must not retain a snapshot captured
+/// by an older group-content closure when a task resumes or finishes.
 private struct MonitorTaskRow: View {
     @ObservedObject var store: TaskStore
     let taskID: String
@@ -259,6 +242,7 @@ private struct MonitorTaskRow: View {
                     if activity.phase.isFinished { activityStatus(activity) }
                 }.padding(.horizontal, 16).frame(height: PanelMetrics.rowHeight(for: activity.phase)).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
+                .accessibilityIdentifier("monitor-task-\(taskID)")
                 .contextMenu {
                     Button("打开任务") { store.openTask(task) }
                     Divider()

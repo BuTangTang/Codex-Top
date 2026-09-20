@@ -25,6 +25,7 @@ import CodexTopCore
     @Published private(set) var loading = true
     @Published private(set) var completionSequence = 0
     @Published private(set) var demoPhase: TaskPhase?
+    @Published private(set) var systemTheme: PanelTheme = .light
     let demo: Bool
     var onChange: (() -> Void)?
     var onDisplayChange: (() -> Void)?
@@ -49,6 +50,7 @@ import CodexTopCore
     private var fastRefreshTask: Task<Void, Never>?
     private var fastRefreshID: UUID?
     private var fastRefreshNeeded = false
+    private var appearanceObservation: NSKeyValueObservation?
 
     init(stateDirectory: URL? = nil) {
         demo = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CodexTopDemo") as? Bool == true
@@ -62,9 +64,12 @@ import CodexTopCore
         source = LocalCodexSource(root: root)
         usageClient = AccountUsageClient(root: root)
         notice = failure
+        systemTheme = Self.resolvedSystemTheme(NSApplication.shared.effectiveAppearance)
     }
     var rootURL: URL { preferences.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot }
-    var theme: PanelTheme { preferences.theme ?? .dark }
+    var themeChoice: PanelTheme { preferences.theme ?? .dark }
+    /// Rendering always receives a concrete theme; the saved choice may follow macOS.
+    var theme: PanelTheme { themeChoice == .system ? systemTheme : themeChoice }
     var placement: PanelPlacement { preferences.resolvedPlacement }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
     var selected: [CodexTask] {
@@ -82,6 +87,7 @@ import CodexTopCore
     func start() {
         guard refreshLoop == nil else { return }
         stopping = false
+        startObservingAppearance()
         rolloutChanges = RolloutChangeMonitor { [weak self] in self?.requestFastRefresh() }
         updateRolloutWatches()
         refreshLoop = Task { [weak self] in
@@ -93,8 +99,19 @@ import CodexTopCore
         }
         startUsageLoop()
     }
+    func startObservingAppearance() {
+        updateSystemAppearance(NSApplication.shared.effectiveAppearance)
+        guard appearanceObservation == nil else { return }
+        appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.appearanceObservation != nil else { return }
+                self.updateSystemAppearance(NSApplication.shared.effectiveAppearance)
+            }
+        }
+    }
     func stop() {
         stopping = true
+        appearanceObservation = nil
         cancelFastRefresh()
         rolloutChanges?.stop(); rolloutChanges = nil
         refreshLoop?.cancel(); refreshLoop = nil
@@ -258,17 +275,37 @@ import CodexTopCore
         preferences.visibleTaskCount = preferences.resolvedVisibleTaskCount
         save(); onChange?()
     }
+    func setFinishedRetentionDays(_ value: Int) {
+        preferences.finishedRetentionDays = value
+        preferences.finishedRetentionDays = preferences.resolvedFinishedRetentionDays
+        MonitoringPolicy.reconcile(&preferences, tasks: tasks, now: .now)
+        save(); updateRolloutWatches(); onChange?()
+    }
     func setTheme(_ theme: PanelTheme) {
-        guard self.theme != theme else { return }
+        guard themeChoice != theme else { return }
+        let resolved = theme == .system ? systemTheme : theme
+        if self.theme == resolved { preferences.theme = theme }
+        else { changeTheme { preferences.theme = theme } }
+        save(); onAppearanceChange?()
+    }
+    static func resolvedSystemTheme(_ appearance: NSAppearance) -> PanelTheme {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+    }
+    func updateSystemAppearance(_ appearance: NSAppearance) {
+        let next = Self.resolvedSystemTheme(appearance)
+        guard systemTheme != next else { return }
+        if themeChoice == .system {
+            changeTheme { systemTheme = next }
+            onAppearanceChange?()
+        } else { systemTheme = next }
+    }
+    private func changeTheme(_ update: () -> Void) {
         if onAppearanceWillChange?() == true {
             var transaction = Transaction(); transaction.disablesAnimations = true
-            withTransaction(transaction) { preferences.theme = theme }
+            withTransaction(transaction, update)
         } else {
-            withAnimation(ThemeMotion.transition(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)) {
-                preferences.theme = theme
-            }
+            withAnimation(ThemeMotion.transition(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), update)
         }
-        save(); onAppearanceChange?()
     }
     func setDisplay(_ id: String) { preferences.preferredDisplay = id.isEmpty ? nil : id; save(); onDisplayChange?() }
     func saveFloatingPosition(display: String, x: Double, y: Double) {
@@ -283,6 +320,7 @@ import CodexTopCore
             cancelFastRefresh(); rolloutChanges?.stop()
             preferences.codexHome = url.path; preferences.initialized = false
             preferences.selectedIDs.removeAll(); preferences.excludedIDs.removeAll()
+            preferences.automaticallyRemovedIDs = []; preferences.retentionProtectedIDs = []
             source = LocalCodexSource(root: url); tasks = []; graph = TaskGraph(tasks: []); quota = nil
             resetUsageSource()
             sourceWarning = nil; loading = true; save(); onChange?()

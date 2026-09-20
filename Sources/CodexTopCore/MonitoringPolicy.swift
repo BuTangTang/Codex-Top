@@ -1,7 +1,7 @@
 import Foundation
 
 public enum PanelTheme: String, Codable, CaseIterable, Sendable {
-    case dark, light
+    case dark, light, system
 }
 public enum PanelPlacement: String, Codable, CaseIterable, Sendable {
     case top, floating, orb, menuBar
@@ -28,6 +28,15 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     // Persist the rendering factor so legacy 0.75 retains its exact size.
     public var uiScale: Double?
     public var visibleTaskCount: Int?
+    // Keep automatic retirement separate from the user's explicit exclusions.
+    public var finishedRetentionDays: Int?
+    public var automaticallyRemovedIDs: Set<String>?
+    public var retentionProtectedIDs: Set<String>?
+    public static let finishedRetentionOptions = [0, 3, 7, 14, 30]
+    public var resolvedFinishedRetentionDays: Int {
+        let days = finishedRetentionDays ?? 7
+        return Self.finishedRetentionOptions.contains(days) ? days : 7
+    }
     public static let visibleTaskCountRange = 1...12
     public var resolvedVisibleTaskCount: Int {
         min(Self.visibleTaskCountRange.upperBound, max(Self.visibleTaskCountRange.lowerBound, visibleTaskCount ?? 4))
@@ -85,13 +94,57 @@ public enum MonitoringPolicy {
             // Keep legacy catch-up for later tasks, without guessing which same-second IDs were new.
             preferences.autoBaselineIDs = Set(tasks.filter { $0.createdAt < preferences.autoEnabledAt }.map(\.id))
         }
-        guard preferences.autoMonitor else { return }
-        // SQLite creation timestamps have whole-second precision; Date() does not.
-        let creationBoundary = Date(timeIntervalSince1970: floor(preferences.autoEnabledAt.timeIntervalSince1970))
-        for t in tasks where t.createdAt >= creationBoundary && preferences.autoBaselineIDs?.contains(t.id) != true && (t.activity.startedAt != nil || t.activity.phase.isActive || t.activity.phase.isFinished || t.activity.phase == .failed) {
-            let root = graph.rootIDs[t.id] ?? t.id
-            if !preferences.excludedIDs.contains(root) { preferences.selectedIDs.insert(root) }
+        if preferences.autoMonitor {
+            // SQLite creation timestamps have whole-second precision; Date() does not.
+            let creationBoundary = Date(timeIntervalSince1970: floor(preferences.autoEnabledAt.timeIntervalSince1970))
+            for t in tasks where t.createdAt >= creationBoundary && preferences.autoBaselineIDs?.contains(t.id) != true && (t.activity.startedAt != nil || t.activity.phase.isActive || t.activity.phase.isFinished || t.activity.phase == .failed) {
+                let root = graph.rootIDs[t.id] ?? t.id
+                if !preferences.excludedIDs.contains(root), preferences.automaticallyRemovedIDs?.contains(root) != true {
+                    preferences.selectedIDs.insert(root)
+                }
+            }
         }
+        applyRetention(&preferences, graph: graph, now: now)
+    }
+    private static func applyRetention(_ preferences: inout MonitorPreferences, graph: TaskGraph, now: Date) {
+        var retired = preferences.automaticallyRemovedIDs ?? []
+        retired.subtract(preferences.excludedIDs)
+        let days = preferences.resolvedFinishedRetentionDays
+        guard days > 0 else {
+            preferences.selectedIDs.formUnion(retired)
+            preferences.automaticallyRemovedIDs = []
+            return
+        }
+        let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
+        for root in graph.roots where preferences.selectedIDs.contains(root.id) || retired.contains(root.id) {
+            let phase = graph.activity(for: root).phase
+            // An explicit resumed state is sufficient even if its clock is missing.
+            if retired.contains(root.id), phase.isActive || phase == .failed {
+                retired.remove(root.id)
+                if !preferences.excludedIDs.contains(root.id) { preferences.selectedIDs.insert(root.id) }
+                continue
+            }
+            let members = [root] + (graph.children[root.id] ?? [])
+            // Use real activity/database update timestamps, never task creation or file mtime.
+            // A missing/unknown member is not evidence that the whole conversation ended.
+            let dates = members.map { [$0.updatedAt, $0.activity.lastEventAt].compactMap { $0 } }
+            guard dates.joined().allSatisfy({ $0.timeIntervalSince1970.isFinite }) else { continue }
+            // The source represents an absent DB timestamp as epoch zero. Every
+            // member needs a usable date; an old sibling cannot stand in for it.
+            let latestPerMember = dates.compactMap { $0.filter { $0.timeIntervalSince1970 > 0 }.max() }
+            guard latestPerMember.count == members.count, let latest = latestPerMember.max() else { continue }
+            let expired = members.allSatisfy { $0.activity.phase.isFinished } && latest <= cutoff
+            if retired.contains(root.id) {
+                if phase.isFinished && latest > cutoff {
+                    retired.remove(root.id)
+                    if !preferences.excludedIDs.contains(root.id) { preferences.selectedIDs.insert(root.id) }
+                }
+            } else if expired && preferences.retentionProtectedIDs?.contains(root.id) != true {
+                preferences.selectedIDs.remove(root.id)
+                retired.insert(root.id)
+            }
+        }
+        preferences.automaticallyRemovedIDs = retired
     }
     public static func setAutoMonitor(_ enabled: Bool, preferences: inout MonitorPreferences, tasks: [CodexTask], now: Date) {
         preferences.autoMonitor = enabled
@@ -106,6 +159,11 @@ public enum MonitoringPolicy {
         preferences.selectedIDs.formUnion(added)
         preferences.excludedIDs.formUnion(removed)
         preferences.excludedIDs.subtract(added)
+        var protected = preferences.retentionProtectedIDs ?? []
+        protected.formUnion(added)
+        protected.subtract(removed)
+        preferences.retentionProtectedIDs = protected
+        preferences.automaticallyRemovedIDs?.subtract(added.union(removed))
     }
     public static func selectVisible(_ visible: Set<String>, selected: inout Set<String>) {
         if visible.isSubset(of: selected) { selected.subtract(visible) } else { selected.formUnion(visible) }

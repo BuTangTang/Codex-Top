@@ -4,7 +4,7 @@
 
 原生 macOS Codex 任务监控工具。在刘海附近、桌面浮窗或 44pt 小圆环中查看关注任务，不必频繁切回 Codex。
 
-当前源码与本机构建为 **v1.0.0 build 18**。停止/完成任务使用单行，运行区末尾保留分组线，并修复混合行高列表的滚动位置变化。任务可右键移出，选择器可批量取消当前结果；新 100% 等于原 75% 的实际大小，范围为 80%–120%。详见[本轮验收](docs/validation/task-list-refinement.md)；[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
+当前源码与本机构建为 **v1.0.0 build 27**。任务列表按需加载并保持确定行高；默认自动移出 7 天无活动的已结束任务，可在设置调整或关闭。更多菜单为实色背景、固定字号、同层选项，优先向右展开，并支持“跟随系统”主题。圆环底边重影已由用户确认消失。保留右键整理、80%–120% 比例和设置实时预览；详见[本轮验证及边界](docs/validation/expansion-performance.md)。[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)与源码版本分别记录。
 
 ## 安装
 
