@@ -13,6 +13,7 @@ import CodexTopCore
 struct FloatingPanelView: View {
     @ObservedObject var store: TaskStore
     @ObservedObject var presentation: PanelPresentation
+    @ObservedObject var resizeState: FloatingResizeState
     @ObservedObject var orbState: OrbMorphState
     @ObservedObject var monitorState: MonitorPanelState
     var pickTasks: () -> Void
@@ -24,17 +25,14 @@ struct FloatingPanelView: View {
     var dragMoved: (CGPoint) -> Void
     var dragEnded: (CGPoint) -> Void
     var body: some View {
-        if store.placement == .orb {
+        if (presentation.placement ?? store.placement) == .orb {
             OrbPanelView(store: store, state: orbState, showFinished: $monitorState.expandedFinished, openTasks: openTasks, closeTasks: closeTasks,
                          pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
                          dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
         } else {
-            AnimatedPanel(presentation: presentation, anchor: .center) {
-                ScaledPanel(scale: store.uiScale) {
-                    MonitorView(store: store, compact: true, showFinished: $monitorState.floatingFinished, pickTasks: pickTasks, settings: settings,
-                                finishedChanged: finishedChanged, draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
-                }
-            }
+            MonitorView(store: store, compact: true, showFinished: $monitorState.floatingFinished, pickTasks: pickTasks, settings: settings,
+                        finishedChanged: finishedChanged, draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
+                .modifier(FloatingViewport(size: resizeState.size, scale: store.uiScale))
         }
     }
 }

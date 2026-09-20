@@ -155,15 +155,16 @@ import CodexTopCore
         let menu = NSMenu()
         // Screen-coordinate menus cannot inherit the anchor window's appearance.
         menu.appearance = NSAppearance(named: theme == .light ? .aqua : .darkAqua)
-        menu.font = .menuFont(ofSize: 0)
-        menu.minimumWidth = 160
+        menu.font = .systemFont(ofSize: MonitorMenuContent.fontSize, weight: .medium)
+        menu.minimumWidth = MonitorMenuContent.width
         return menu
     }
 
     private func item(_ title: String, symbol: String, action: @escaping () -> Void) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(invoke(_:)), keyEquivalent: "")
         item.target = self; item.tag = actions.count
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: MonitorMenuContent.fontSize, weight: .regular))
         actions.append(action)
         return item
     }

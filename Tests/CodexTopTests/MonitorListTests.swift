@@ -7,6 +7,61 @@ import CodexTopCore
 
 final class MonitorListTests: XCTestCase {
     @MainActor
+    func testFloatingViewportKeepsRunningRowAndMovesFooterWithItsHeight() async throws {
+        let fixture = try makeFixture(count: 60)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        store.setPlacement(.floating)
+        store.setVisibleTaskCount(5)
+        let state = MonitorPanelState(), resizeState = FloatingResizeState()
+        let presentation = PanelPresentation()
+        resizeState.size = CGSize(width: 270, height: 106)
+        let host = NSHostingView(rootView: FloatingPanelView(store: store, presentation: presentation,
+            resizeState: resizeState, orbState: OrbMorphState(), monitorState: state,
+            pickTasks: {}, settings: {}, openTasks: {}, closeTasks: {}, finishedChanged: {},
+            dragStarted: { _ in }, dragMoved: { _ in }, dragEnded: { _ in }).windowTypography())
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 270, height: 214),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        flushLayout(host)
+        try await Task.sleep(for: .milliseconds(120))
+        let initial = try runningFrame(in: host)
+        let scroll = try XCTUnwrap(findScroll(in: host))
+        let initialScroll = viewFrame(scroll, in: host)
+        // These are explicit samples of the modifier's interpolated size. The
+        // separate coordinator tests cover native canvas lifetime and callbacks.
+        state.floatingFinished = true
+        for height: CGFloat in [106, 118, 137, 164, 190, 214, 190, 164, 137, 118, 106] {
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { resizeState.size.height = height }
+            flushLayout(host)
+            try await Task.sleep(for: .milliseconds(25))
+            let row = try runningFrame(in: host), viewport = viewFrame(scroll, in: host)
+            XCTAssertEqual(row.minX, initial.minX, accuracy: 0.5)
+            XCTAssertEqual(row.minY, initial.minY, accuracy: 0.5)
+            XCTAssertEqual(row.size.width, initial.size.width, accuracy: 0.5)
+            XCTAssertEqual(row.size.height, initial.size.height, accuracy: 0.5)
+            XCTAssertEqual(viewport.minX, initialScroll.minX, accuracy: 0.5)
+            XCTAssertEqual(viewport.minY, initialScroll.minY, accuracy: 0.5)
+            XCTAssertEqual(viewport.width, initialScroll.width, accuracy: 0.5)
+            XCTAssertEqual(height - viewport.maxY, (PanelMetrics.footer + PanelMetrics.separator) * store.uiScale, accuracy: 1)
+        }
+        state.floatingFinished = false
+        flushLayout(host)
+        XCTAssertEqual(try runningFrame(in: host).minY, initial.minY, accuracy: 0.5)
+        XCTAssertFalse(window.isVisible)
+    }
+
+    @MainActor private func viewFrame(_ view: NSView, in host: NSView) -> CGRect {
+        let frame = view.convert(view.bounds, to: host)
+        return CGRect(x: frame.minX, y: host.isFlipped ? frame.minY : host.bounds.height - frame.maxY,
+                      width: frame.width, height: frame.height)
+    }
+
+    @MainActor
     func testFirstDisclosureCycleKeepsRunningRowGeometry() async throws {
         let fixture = try makeFixture(count: 60)
         defer { try? FileManager.default.removeItem(at: fixture) }
@@ -60,7 +115,7 @@ final class MonitorListTests: XCTestCase {
         let orb = OrbMorphState(), panel = MonitorPanelState()
         panel.expandedFinished = true
         orb.expandedSize = CGSize(width: 307.5, height: 218.25)
-        let host = NSHostingView(rootView: FloatingPanelView(store: store, presentation: PanelPresentation(),
+        let host = NSHostingView(rootView: FloatingPanelView(store: store, presentation: PanelPresentation(), resizeState: FloatingResizeState(),
             orbState: orb, monitorState: panel, pickTasks: {}, settings: {}, openTasks: {}, closeTasks: {},
             finishedChanged: {}, dragStarted: { _ in }, dragMoved: { _ in }, dragEnded: { _ in }).windowTypography())
         host.sizingOptions = []

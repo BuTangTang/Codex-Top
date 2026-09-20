@@ -198,21 +198,7 @@ struct QuietRowStyle: ButtonStyle {
 }
 
 @MainActor final class PanelPresentation: ObservableObject {
-    @Published var visible = false
-}
-
-struct AnimatedPanel<Content: View>: View {
-    @ObservedObject var presentation: PanelPresentation
-    var anchor: UnitPoint = .top
-    @ViewBuilder var content: Content
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        content
-            .scaleEffect(reduceMotion || presentation.visible ? 1 : anchor == .top ? 0.72 : 0.86, anchor: anchor)
-            .offset(y: reduceMotion || presentation.visible ? 0 : anchor == .top ? -14 : 0)
-            .opacity(presentation.visible ? 1 : 0)
-            .animation(reduceMotion ? .easeOut(duration: 0.10) : presentation.visible ? .smooth(duration: 0.24) : .easeInOut(duration: 0.18), value: presentation.visible)
-    }
+    @Published var placement: PanelPlacement?
 }
 
 /// Scale the contents as well as their AppKit window, keeping hit targets and layout aligned.

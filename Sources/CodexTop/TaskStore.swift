@@ -266,6 +266,7 @@ import CodexTopCore
     }
     func setFloating(_ enabled: Bool) { setPlacement(enabled ? .floating : preferences.resolvedUnpinnedPlacement) }
     func setPlacement(_ value: PanelPlacement) {
+        guard placement != value else { return }
         preferences.setPlacement(value)
         save(); onModeChange?()
     }

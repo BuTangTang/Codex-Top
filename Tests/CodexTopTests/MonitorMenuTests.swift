@@ -6,7 +6,7 @@ import CodexTopCore
 
 final class MonitorMenuTests: XCTestCase {
     @MainActor
-    func testMenuKeepsSystemSizeAndAllActionsAtEitherPanelScale() throws {
+    func testMenuKeepsCompactSizeAndAllActionsAtEitherPanelScale() throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -62,7 +62,7 @@ final class MonitorMenuTests: XCTestCase {
     @MainActor
     func testMenuFitsVisibleScreenEvenBesideShortPanelAndScreenEdges() {
         let visible = CGRect(x: 1728, y: -236, width: 2560, height: 1353)
-        let menu = CGSize(width: 196, height: 282)
+        let menu = CGSize(width: 144, height: 226)
         for x in [visible.minX, visible.midX, visible.midX + 0.5, visible.maxX - 28] {
             for y in [visible.minY + 10, visible.midY, visible.maxY - 30] {
                 let anchor = MonitorMenuPresenter.popupOrigin(buttonFrame: CGRect(x: x, y: y, width: 28, height: 30),

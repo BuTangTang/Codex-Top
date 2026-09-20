@@ -4,6 +4,7 @@ import CodexTopCore
 /// Window geometry and the visible surface share a single progress value.
 /// Closed windows really occupy only the status strip, so an invisible panel cannot eat clicks.
 @MainActor final class TopPanelState: ObservableObject {
+    @Published var placement: PanelPlacement?
     @Published var progress: CGFloat = 0
     @Published var compactSize = CGSize(width: 250, height: 34)
     @Published var expandedSize = CGSize(width: 410, height: 340)
@@ -49,7 +50,7 @@ struct TopPanelView: View {
 
     var body: some View {
         Group {
-            if store.placement == .menuBar { statusPopover }
+            if (state.placement ?? store.placement) == .menuBar { statusPopover }
             else { topSurface }
         }
         .environment(\.colorScheme, store.theme == .light ? .light : .dark)
@@ -92,7 +93,7 @@ struct TopPanelView: View {
                     .animation(reduceMotion ? nil : state.progress > 0 ? .easeOut(duration: 0.16).delay(0.04) : .easeOut(duration: 0.09), value: state.progress)
                     .allowsHitTesting(state.progress > 0.92)
                     .accessibilityHidden(state.progress < 0.99)
-                if store.placement == .top || store.placement == .floating {
+                if (state.placement ?? store.placement) == .top || (state.placement ?? store.placement) == .floating {
                     CompactView(store: store, notchWidth: state.cameraWidth, drawsSurface: false, open: open)
                     .frame(width: state.compactSize.width, height: state.compactSize.height)
                     .opacity(1 - fade(state.progress / 0.32))
