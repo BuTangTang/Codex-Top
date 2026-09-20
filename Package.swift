@@ -14,6 +14,7 @@ let package = Package(
         .target(name: "CodexTopCore", dependencies: ["CSQLite"]),
         .executableTarget(name: "CodexTop", dependencies: ["CodexTopCore"]),
         .executableTarget(name: "CodexTopInspect", dependencies: ["CodexTopCore"]),
-        .testTarget(name: "CodexTopCoreTests", dependencies: ["CodexTopCore", "CSQLite"])
+        .testTarget(name: "CodexTopCoreTests", dependencies: ["CodexTopCore", "CSQLite"]),
+        .testTarget(name: "CodexTopTests", dependencies: ["CodexTop"])
     ]
 )

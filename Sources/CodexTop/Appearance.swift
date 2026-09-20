@@ -219,37 +219,6 @@ struct ScaledPanel<Content: View>: View {
     }
 }
 
-/// The overlay catches header drags, while holes let buttons receive their own mouse events.
-struct WindowDragHandle: View {
-    var started: (CGSize) -> Void
-    var moved: () -> Void
-    var ended: () -> Void
-    var excludedFrames: [CGRect] = []
-    @State private var active = false
-    var body: some View {
-        Color.clear
-            .contentShape(HeaderDragArea(excludedFrames: excludedFrames), eoFill: true)
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                .onChanged { value in
-                    if !active { active = true; started(value.translation) }
-                    moved()
-                }
-                .onEnded { _ in active = false; ended() })
-    }
-}
-
-private struct HeaderDragArea: Shape {
-    var excludedFrames: [CGRect]
-    func path(in rect: CGRect) -> Path {
-        var path = Path(rect)
-        for excluded in excludedFrames {
-            let clipped = excluded.intersection(rect)
-            if !clipped.isNull { path.addRect(clipped) }
-        }
-        return path
-    }
-}
-
 struct ActivityIndicator: View {
     let phase: TaskPhase
     var small = false

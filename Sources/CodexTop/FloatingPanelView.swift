@@ -20,9 +20,9 @@ struct FloatingPanelView: View {
     var openTasks: () -> Void
     var closeTasks: () -> Void
     var finishedChanged: () -> Void
-    var dragStarted: (CGSize) -> Void
-    var dragMoved: () -> Void
-    var dragEnded: () -> Void
+    var dragStarted: (CGPoint) -> Void
+    var dragMoved: (CGPoint) -> Void
+    var dragEnded: (CGPoint) -> Void
     var body: some View {
         if store.placement == .orb {
             OrbPanelView(store: store, state: orbState, showFinished: $monitorState.expandedFinished, openTasks: openTasks, closeTasks: closeTasks,
@@ -50,9 +50,9 @@ private struct OrbPanelView: View {
     var pickTasks: () -> Void
     var settings: () -> Void
     var finishedChanged: () -> Void
-    var dragStarted: (CGSize) -> Void
-    var dragMoved: () -> Void
-    var dragEnded: () -> Void
+    var dragStarted: (CGPoint) -> Void
+    var dragMoved: (CGPoint) -> Void
+    var dragEnded: (CGPoint) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var attentionScale: CGFloat = 1
     private var shouldBreathe: Bool { store.attentionCount > 0 && !state.expanded && !reduceMotion }
@@ -82,7 +82,7 @@ private struct OrbPanelView: View {
             StatusRing(store: store, hovered: state.hovered, visible: !state.expanded)
                 .frame(width: 44, height: 44)
                 .overlay {
-                    OrbDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded)
+                    WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded, enabled: !state.expanded)
                 }
                 .modifier(OrbRevealOpacity(progress: state.expanded ? 1 : 0, layer: .ring))
                 .allowsHitTesting(!state.expanded)
@@ -157,23 +157,6 @@ private struct OrbRevealOpacity: AnimatableModifier {
     private func smoothstep(_ value: Double) -> Double {
         let t = min(1, max(0, value))
         return t * t * (3 - 2 * t)
-    }
-}
-
-/// Preserve the first delivered movement: onChanged can begin after mouse-down.
-private struct OrbDragHandle: View {
-    var started: (CGSize) -> Void
-    var moved: () -> Void
-    var ended: () -> Void
-    @State private var active = false
-    var body: some View {
-        Color.clear.contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if !active { active = true; started(value.translation) }
-                    moved()
-                }
-                .onEnded { _ in active = false; ended() })
     }
 }
 

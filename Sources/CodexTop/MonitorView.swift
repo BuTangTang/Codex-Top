@@ -17,9 +17,9 @@ struct MonitorView: View {
     var settings: () -> Void
     var finishedChanged: () -> Void = {}
     var draggable = false
-    var dragStarted: (CGSize) -> Void = { _ in }
-    var dragMoved: () -> Void = {}
-    var dragEnded: () -> Void = {}
+    var dragStarted: (CGPoint) -> Void = { _ in }
+    var dragMoved: (CGPoint) -> Void = { _ in }
+    var dragEnded: (CGPoint) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
     private var compactTypography: Bool { compact || windowCompactTypography }
@@ -115,7 +115,7 @@ struct MonitorView: View {
                 if draggable {
                     GeometryReader { geometry in
                         WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded,
-                                         excludedFrames: anchors.map { geometry[$0] })
+                                         excludedFrames: anchors.map { geometry[$0] }, enabled: animationsActive)
                     }
                 }
             }

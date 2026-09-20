@@ -103,6 +103,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var dragExceededClickThreshold = false
     private var dragStart = CGPoint.zero
     private var dragPointerStart = CGPoint.zero
+    private var dragLastFrame = CGRect.zero
     private let themeReveal = ThemeReveal()
     private var displays: [DisplayChoice] = []
     private var chosen: DisplayChoice? {
@@ -138,7 +139,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             store: store, presentation: floatingPresentation, orbState: orbState, monitorState: monitorState,
             pickTasks: { [weak self] in self?.showPicker() }, settings: { [weak self] in self?.showSettings() }, openTasks: { [weak self] in self?.toggleExpanded() }, closeTasks: { [weak self] in self?.dismissExpanded() }, finishedChanged: { [weak self] in
                 self?.updateContentSize(animated: true)
-            }, dragStarted: { [weak self] translation in self?.beginDrag(initialTranslation: translation) }, dragMoved: { [weak self] in self?.moveDrag() }, dragEnded: { [weak self] in self?.endDrag() }).windowTypography())
+            }, dragStarted: { [weak self] point in self?.beginDrag(at: point) }, dragMoved: { [weak self] _ in self?.synchronizeNativeDrag() }, dragEnded: { [weak self] point in self?.endDrag(at: point) }).windowTypography())
         floatingView.sizingOptions = []
         floatingView.hoverChanged = { [weak self] value in self?.hoverFloating(value) }
         floatingView.contextMenuProvider = { [weak self] in
@@ -664,32 +665,29 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         hideTask?.cancel(); hideTask = nil
         revealTask?.cancel(); revealTask = nil
     }
-    private func beginDrag(initialTranslation: CGSize) {
+    private func beginDrag(at point: CGPoint) {
         guard store.placement == .orb || store.placement == .floating else { return }
         themeReveal.cancel(); savePositionTask?.cancel()
         dragging = true; dragStart = floating.frame.origin; orbState.hovered = false
+        dragLastFrame = floating.frame
         dragExceededClickThreshold = false
         if store.placement == .orb { orbHoverSuppressedUntilExit = true }
-        let point = dragPointerLocation
-        // SwiftUI's first onChanged may already contain a short drag. Convert its
-        // downward-positive translation back to the original AppKit mouse-down point.
-        dragPointerStart = CGPoint(x: point.x - initialTranslation.width, y: point.y + initialTranslation.height)
+        dragPointerStart = point
         hideTask?.cancel(); revealTask?.cancel()
         if store.placement == .floating { dismissExpanded() }
     }
-    private func moveDrag() {
+    private func synchronizeNativeDrag() {
         guard dragging else { return }
-        let point = dragPointerLocation
-        var origin = CGPoint(x: dragStart.x + point.x - dragPointerStart.x, y: dragStart.y + point.y - dragPointerStart.y)
-        if hypot(origin.x - dragStart.x, origin.y - dragStart.y) >= 4 { dragExceededClickThreshold = true }
-        if let display = displays.first(where: { $0.screen.frame.contains(point) }) {
-            origin.y = min(origin.y, display.screen.visibleFrame.maxY - floating.frame.height)
-        }
-        moveFloatingFrameForDrag(CGRect(origin: origin, size: floating.frame.size))
+        // Window Server owns the frame during the gesture. Only follow its result;
+        // competing setFrameOrigin calls cause cross-display corrections to jitter.
+        let actual = floating.frame
+        if hypot(actual.minX - dragStart.x, actual.minY - dragStart.y) >= 4 { dragExceededClickThreshold = true }
+        synchronizeOrbAfterDrag(from: dragLastFrame, to: actual)
+        dragLastFrame = actual
     }
-    private func endDrag() {
+    private func endDrag(at pointer: CGPoint) {
         guard dragging else { return }
-        let pointer = dragPointerLocation
+        synchronizeNativeDrag()
         let moved = dragExceededClickThreshold || hypot(pointer.x - dragPointerStart.x, pointer.y - dragPointerStart.y) >= 4 ||
             hypot(floating.frame.minX - dragStart.x, floating.frame.minY - dragStart.y) >= 4
         if store.placement == .orb { finishOrbCanvas() }
@@ -711,10 +709,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private func moveFloatingFrameForDrag(_ frame: CGRect) {
         let previous = floating.frame
         guard previous != frame else { return }
+        let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
         if previous.size == frame.size { floating.setFrameOrigin(frame.origin) }
         else { floating.setFrame(frame, display: false) }
+        synchronizeOrbAfterDrag(from: previous, to: floating.frame)
+        dragLastFrame = floating.frame
+    }
+    private func synchronizeOrbAfterDrag(from previous: CGRect, to actual: CGRect) {
+        guard previous != actual else { return }
         guard store.placement == .orb else { return }
-        let actual = floating.frame
         if orbCanvas != nil {
             // Keep the ongoing morph in local coordinates. Only its screen-space
             // canvas and destinations move, so grabbing it never snaps the surface.
@@ -742,15 +745,6 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             floating.contentView?.layoutSubtreeIfNeeded()
             floating.displayIfNeeded()
         }
-    }
-    /// Use the delivered mouse event, so movement follows its coordinates even when
-    /// the system pointer is updated on a different schedule (for example remote input).
-    private var dragPointerLocation: CGPoint {
-        if let event = NSApp.currentEvent, let window = event.window,
-           [.leftMouseDown, .leftMouseDragged, .leftMouseUp].contains(event.type) {
-            return window.convertPoint(toScreen: event.locationInWindow)
-        }
-        return NSEvent.mouseLocation
     }
     private func persistFloatingPosition() {
         let frame = store.placement == .orb ? orbAnchor : floating.frame
@@ -815,8 +809,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     func windowDidMove(_ notification: Notification) {
         guard !positioning, notification.object as? NSWindow === floating else { return }
+        if dragging { synchronizeNativeDrag(); return }
         if store.placement == .orb && (orbState.expanded || orbMotion != nil) { return }
-        if dragging { return }
         savePositionTask?.cancel()
         savePositionTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
