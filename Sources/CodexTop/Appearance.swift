@@ -6,11 +6,15 @@ enum PanelMetrics {
     static let expandedWidth: CGFloat = 410
     static let floatingWidth: CGFloat = 360
     static let expandedRow: CGFloat = 54
-    static let floatingRow: CGFloat = 42
+    static let finishedRow: CGFloat = 36
     static let expandedHeader: CGFloat = 48
     static let floatingHeader: CGFloat = 44
-    static let disclosure: CGFloat = 36
     static let footer: CGFloat = 42
+    static let separator: CGFloat = 0.5
+
+    static func rowHeight(for phase: TaskPhase) -> CGFloat {
+        phase.isFinished ? finishedRow : expandedRow
+    }
 }
 
 enum PanelFonts {
@@ -25,7 +29,7 @@ enum PanelFonts {
                          weight: Font.Weight = .regular, compact: Bool = false) -> Font {
         let base = compact ? size - 2 : size
         let floor = compact ? max(11, minimum - 2) : minimum
-        return .system(size: max(base, floor / max(CGFloat(MonitorScale.minimum), scale)), weight: weight)
+        return .system(size: max(base, floor / max(CGFloat(MonitorScale.renderingScale(for: MonitorScale.minimum)), scale)), weight: weight)
     }
 }
 

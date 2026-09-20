@@ -50,10 +50,10 @@ import CodexTopCore
     private var fastRefreshID: UUID?
     private var fastRefreshNeeded = false
 
-    init() {
+    init(stateDirectory: URL? = nil) {
         demo = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CodexTopDemo") as? Bool == true
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Codex Top")
-        let stateFolder = ProcessInfo.processInfo.environment["CODEX_TOP_STATE_DIR"].map { URL(fileURLWithPath: $0) } ?? (demo ? base.appendingPathComponent("Demo") : base)
+        let stateFolder = stateDirectory ?? ProcessInfo.processInfo.environment["CODEX_TOP_STATE_DIR"].map { URL(fileURLWithPath: $0) } ?? (demo ? base.appendingPathComponent("Demo") : base)
         file = PreferencesFile(url: stateFolder.appendingPathComponent("preferences.json"))
         var loaded = MonitorPreferences(), failure: String?
         do { loaded = try file.load() } catch { failure = "设置文件无法读取。当前使用默认值，原文件已保留。"; persistenceAvailable = false }
@@ -238,6 +238,11 @@ import CodexTopCore
         MonitoringPolicy.applySelection(draft, original: original, preferences: &preferences); save(); onChange?()
         updateRolloutWatches()
     }
+    func removeFromMonitoring(_ id: String) {
+        let root = graph.rootIDs[id] ?? id
+        guard preferences.selectedIDs.contains(root) else { return }
+        applySelection([], original: [root])
+    }
     func setAutoMonitor(_ enabled: Bool) {
         MonitoringPolicy.setAutoMonitor(enabled, preferences: &preferences, tasks: tasks, now: .now)
         save(); updateRolloutWatches()
@@ -247,7 +252,7 @@ import CodexTopCore
         preferences.setPlacement(value)
         save(); onModeChange?()
     }
-    func setScale(_ value: Double) { preferences.uiScale = MonitorScale.normalized(value); save(); onChange?() }
+    func setScale(_ value: Double) { preferences.uiScale = MonitorScale.renderingScale(for: value); save(); onChange?() }
     func setVisibleTaskCount(_ value: Int) {
         preferences.visibleTaskCount = value
         preferences.visibleTaskCount = preferences.resolvedVisibleTaskCount

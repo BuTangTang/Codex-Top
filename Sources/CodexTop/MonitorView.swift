@@ -21,11 +21,19 @@ struct MonitorView: View {
     var dragMoved: (CGPoint) -> Void = { _ in }
     var dragEnded: (CGPoint) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
     private var compactTypography: Bool { compact || windowCompactTypography }
 
     private var visibleTaskIDs: [String] {
         (store.active + (showFinished ? store.finished : [])).map(\.id)
+    }
+
+    private var runningBoundaryID: String? {
+        let tasks = store.active + (showFinished ? store.finished : [])
+        guard let index = tasks.lastIndex(where: { store.graph.activity(for: $0).phase == .running }),
+              index < tasks.count - 1 else { return nil }
+        return tasks[index].id
     }
 
     var body: some View {
@@ -55,30 +63,26 @@ struct MonitorView: View {
                 } else {
                     VStack(spacing: 0) {
                         ScrollView {
-                            LazyVStack(spacing: 0) {
+                            let boundaryID = runningBoundaryID
+                            // Mixed single/double-height rows need an exact extent. A lazy stack
+                            // revises its estimates as rows enter view, moving the scroll position.
+                            VStack(spacing: 0) {
                                 ForEach(visibleTaskIDs, id: \.self) { taskID in
-                                    VStack(spacing: 0) {
-                                        MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
-                                        separator
-                                    }.id(taskID)
+                                    MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
+                                        .overlay(alignment: .bottom) {
+                                            if taskID == boundaryID {
+                                                Rectangle().fill(Palette.hairline(store.theme.colorScheme))
+                                                    .frame(height: 1 / (displayScale * store.uiScale))
+                                                    .padding(.horizontal, 16)
+                                                    .allowsHitTesting(false)
+                                            }
+                                        }
+                                        .id(taskID)
                                         .transition(.opacity)
                                 }
                             }
                             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: visibleTaskIDs)
                         }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
-                        if !store.finished.isEmpty {
-                            Button {
-                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
-                                finishedChanged()
-                            } label: {
-                                HStack(spacing: 14) {
-                                    Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
-                                        .font(.system(size: 11, weight: .medium)).frame(width: 24)
-                                    Text("已结束 \(store.finished.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography))
-                                    Spacer()
-                                }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.disclosure)
-                            }.buttonStyle(QuietRowStyle())
-                        }
                     }
                 }
                 if let warning = store.sourceWarning {
@@ -92,7 +96,7 @@ struct MonitorView: View {
                         Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 12)).frame(width: 22, height: 22) }.buttonStyle(QuietButtonStyle())
                     }.padding(.horizontal, 20).padding(.vertical, 10)
                 }
-                if !compact { footer }
+                footer
         }
     }
 
@@ -171,15 +175,35 @@ struct MonitorView: View {
         .help("显示方式、主题与设置。当前：\(store.placement.shortcutTitle)")
     }
 
-    private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 16) }
+    private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: PanelMetrics.separator).padding(.horizontal, 16) }
 
     private var footer: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5)
-            HStack(spacing: 12) {
+            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: PanelMetrics.separator)
+            HStack(spacing: 8) {
+                if !store.finished.isEmpty {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) { showFinished.toggle() }
+                        finishedChanged()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.down").rotationEffect(.degrees(showFinished ? 180 : 0))
+                                .font(.system(size: 11, weight: .medium)).frame(width: 16)
+                            Text("已结束 \(store.finished.count)")
+                        }
+                        .font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography))
+                        .fixedSize().frame(height: 30).contentShape(Rectangle())
+                    }.buttonStyle(QuietButtonStyle())
+                        .accessibilityLabel("已结束 \(store.finished.count) 个任务")
+                        .accessibilityValue(showFinished ? "已展开" : "已折叠")
+                        .help(showFinished ? "收起已结束任务" : "展开已结束任务")
+                }
+                if store.paused {
+                    Image(systemName: "pause.circle").font(.system(size: 13))
+                        .accessibilityLabel("任务刷新已暂停").help("任务刷新已暂停，额度仍独立更新")
+                }
                 UsageSummaryButton(store: store)
-                if store.paused { Text("已暂停").font(.system(size: 13)) }
-            }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).font(.system(size: 13)).padding(.horizontal, 18).frame(height: PanelMetrics.footer)
+            }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.footer)
         }
     }
 }
@@ -221,45 +245,57 @@ private struct MonitorTaskRow: View {
                 HStack(spacing: compact ? 11 : 14) {
                     ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
-                        if !compact {
-                            HStack(spacing: 5) {
-                                Text(activity.detail).lineLimit(1)
-                                if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
+                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? .regular : .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        if !activity.phase.isFinished {
+                            HStack(spacing: 8) {
+                                HStack(spacing: 5) {
+                                    Text(activity.detail).lineLimit(1)
+                                    if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                activityStatus(activity)
                             }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: compact ? 8 : 10) {
-                        if activity.phase == .running {
-                            if compact { TaskPhaseLabel(phase: .running) }
-                            if let started = activity.startedAt {
-                                TimelineView(.periodic(from: .now, by: 1)) { context in
-                                    let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
-                                    Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
-                                }.foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                            } else {
-                                Text("--:--").monospacedDigit()
-                                    .foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                                    .accessibilityLabel("运行计时待同步")
-                                    .help("计时待同步：缺少本轮开始记录，暂时无法计算运行时间")
-                            }
-                        } else {
-                            TaskPhaseLabel(phase: activity.phase)
-                            if let elapsed = activity.waitingElapsedSeconds {
-                                Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60))
-                                    .monospacedDigit().foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                                    .help("本轮开始到进入待处理的时长，等待回答时暂停计时")
-                            }
-                        }
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                    }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
-                }.padding(.horizontal, 16).frame(height: compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow).contentShape(Rectangle())
+                    if activity.phase.isFinished { activityStatus(activity) }
+                }.padding(.horizontal, 16).frame(height: PanelMetrics.rowHeight(for: activity.phase)).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
+                .contextMenu {
+                    Button("打开任务") { store.openTask(task) }
+                    Divider()
+                    Button("移出监控") { store.removeFromMonitoring(task.id) }
+                }
         }
     }
 
+    private func activityStatus(_ activity: TaskActivity) -> some View {
+        HStack(spacing: 8) {
+            if activity.phase == .running {
+                if let started = activity.startedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
+                        Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
+                    }.foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                } else {
+                    Text("--:--").monospacedDigit()
+                        .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        .accessibilityLabel("运行计时待同步")
+                        .help("计时待同步：缺少本轮开始记录，暂时无法计算运行时间")
+                }
+            } else {
+                TaskPhaseLabel(phase: activity.phase)
+                if let elapsed = activity.waitingElapsedSeconds {
+                    Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60))
+                        .monospacedDigit().foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        .help("本轮开始到进入待处理的时长，等待回答时暂停计时")
+                }
+            }
+        }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
+    }
+
     private func navigationHelp(for task: CodexTask, activity: TaskActivity) -> String {
-        guard activity.phase == .waiting else { return "\(task.title)\n\(activity.detail)\n点击回到 Codex" }
+        let children = store.graph.children[task.id]?.count ?? 0
+        let childDetail = children > 0 ? "\n\(children) 个子任务" : ""
+        guard activity.phase == .waiting else { return "\(task.title)\n\(activity.detail)\(childDetail)\n点击回到 Codex" }
         let target = store.graph.navigationTarget(for: task)
         let waiting = activity.waitingStartedAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"
         let latest = activity.lastEventAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"

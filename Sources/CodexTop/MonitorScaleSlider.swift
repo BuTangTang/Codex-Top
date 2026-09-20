@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import CodexTopCore
 
-/// Keep the native thumb and the stored percentage on the same thirteen ticks.
+/// Keep the native thumb and the displayed percentage on the same nine ticks.
 struct MonitorScaleSlider: NSViewRepresentable {
     @Binding var percentage: Double
 

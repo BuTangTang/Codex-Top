@@ -4,6 +4,10 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [build 18 列表与比例验收](validation/task-list-refinement.md)：稳定滚动、手动整理、新 100% 基准与设置实时预览。
+- [任务行视觉方案](design/task-row-aesthetics.md)：行间留白、字重与对齐的概念来源，已实施。
+- [任务移出监控方案](design/task-retention-proposal.md)：右键移出与选择器批量整理，已实施。
+- [D-70 紧凑任务布局](validation/compact-layout.md)：单行结束任务、双行活动任务和合并底栏；已随 build 18 收口。
 - [1.0.0 build 15 跨屏拖动](validation/cross-screen-drag.md)：系统窗口服务接管展开区和圆环拖动，用户实测确认正常。
 - [1.0.0 build 12 统一屏幕字号](validation/unified-typography.md)：保留外接屏紧凑字号，内置屏同步缩小；旧/新真实包同屏对照。
 - [1.0.0 build 11 圆环展开与拖动](validation/orb-drag.md)：动画期间立即拖动、原生整点坐标、内置屏与外接屏验收。
@@ -38,7 +42,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码版本为 v1.0.0 build 15，D-69 将跨屏拖动交给系统窗口服务，见[本轮验收](validation/cross-screen-drag.md)；D-68 紧凑字号和 D-67 动画期间可拖动继续保留。中英文 README 四模式图片仍明确对应 build 10 的隔离合成数据。公开 Release 附件未变；历史图片和对应版本验收保留。
+当前源码与本机安装为 v1.0.0 build 18，D-70–D-72 已完成本轮实现与列明验收。D-69 系统窗口拖动和 D-68 紧凑字号保留；新 100% 等于旧 75%，范围 80%–120%。中英文 README 四模式图片仍明确对应 build 10 的原比例与隔离合成数据。公开 Release 附件未变；历史图片和版本验收保留。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

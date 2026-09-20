@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and local build are **v1.0.0 build 10**. All four expanded modes now have two header controls: **+** to select tasks and **⋯** for display mode, theme, and settings. The original compact control sizes and typography have been restored. See the [current validation record](docs/validation/appearance-restore.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current source and local build are **v1.0.0 build 18**. Finished tasks use single-line rows, with one separator after the running group. Mixed-height scrolling now keeps a stable content extent. Right-click a task to remove it from monitoring, or deselect filtered results in the picker. The new 100% matches the previous 75% size; the range is 80%–120%. See the [validation record](docs/validation/task-list-refinement.md). [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
 
 ## Install
 
@@ -28,7 +28,7 @@ These four images show **actual v1.0.0 build 10 windows on the Mac’s built-in 
 |---|---|
 | ![Expanded orb on the built-in display](docs/images/1.0.0-build10/orb-expanded-dark.jpg) | ![Menu bar panel on the built-in display](docs/images/1.0.0-build10/menubar-dark.jpg) |
 
-The collapsed orb remains 44pt. The floating list uses compact single-line rows; the other expanded modes include task details. All four share one task selection and the same two header controls. See [capture provenance and validation scope](docs/validation/appearance-restore.md).
+These images retain build 10’s original scale and layout. Current modes share single-line finished rows, two-line active rows, and a combined finished/usage footer. The collapsed orb remains 44pt; all modes share one task selection and the same two header controls. See [capture provenance and validation scope](docs/validation/appearance-restore.md).
 
 ## Features
 
@@ -41,16 +41,16 @@ Four display modes share one set of monitored tasks:
 | Orb | Left-click to expand in place. Moving the pointer away keeps it open; click outside, choose “⋯ → Collapse to orb,” or press Escape to close. Right-click for the menu. |
 | Menu bar only | Status counts on a transparent background. Left-click to show/hide tasks; right-click for the menu. |
 
-- **Task selection:** Search, select multiple tasks, or select all current results. Newly created tasks join automatically when they start; manual exclusions take priority. Child tasks are grouped under their parent, attention comes first, and finished tasks can be collapsed. Creating tasks, answering questions, and granting approvals still happen in Codex.
+- **Task selection:** Search, select multiple tasks, or select/deselect current results. Right-click to remove a task from monitoring; select it again to restore it. Newly created tasks join automatically when they start; manual exclusions take priority. Child tasks are grouped under their parent, attention comes first, and finished tasks can be collapsed. Creating tasks, answering questions, and granting approvals still happen in Codex.
 - **Status cues:** Blue running arcs share a rotation phase; newly shown or resumed arcs join the same rhythm. The orb's center shows the running count. The running label uses the theme's primary text color, while the arc stays blue. Attention adds a subtle tint and `!`: orange in the light theme, amber in dark, red for failures, and green for completion. Attention gently pulses; Reduce Motion keeps static cues.
 - **Fixed elapsed time:** The `mm:ss` next to a waiting label measures from the current turn's start to the start of the current wait. It stays fixed while awaiting an answer and is omitted when reliable timestamps are missing. It is not CPU time and does not subtract earlier waits in the same turn.
 - **Running timer:** Without a reliable record of the current turn's start, the timer shows `--:--` with an explanation on hover. A bounded search for explicit start records runs only for monitored tasks and their children, filling time fields after compatibility checks. Missing or uncertain evidence keeps the placeholder; app launch time, file modification time, and the latest output timestamp are not used to invent a duration.
-- **Appearance and placement:** Choose black or light glass under “⋯ → Theme,” with the existing reveal transition matching the window outline. Adjust app scale from 60% to 120% in 5% steps, or reset to 100%; the orb stays at 44pt. External displays and floating lists use compact type. Panel titles, task names, and secondary information use their original sizes and weights, with readability floors at small scales.
+- **Appearance and placement:** Choose black or light glass under “⋯ → Theme,” with the existing reveal transition matching the window outline. Adjust app scale from 80% to 120% in 5% steps, or reset to 100% (the previous 75% size); the orb stays at 44pt. Built-in displays, external displays, and floating lists use the same compact type. Finished task titles use a lighter weight, with readability floors retained at small scales.
 - **Free dragging:** Drag any non-button area of the header in the floating list or expanded orb panel. Dropping at the screen's top edge does not dock or change modes; choose modes from the menu. After moving an expanded orb panel, it collapses to its new orb position.
 - **Two header controls:** “+ / ⋯” remain visible at every scale, using native small icons and compact click targets. “+” selects tasks; “⋯” contains display modes, themes, settings, and collapse. Choosing the floating list hides other monitor windows; closing it returns to the previous mode. The system menu bar item stays available.
 - **Task and usage links:** Click a task to attempt to open its Codex conversation, or click usage to open the [official usage page](https://chatgpt.com/codex/settings/usage). Account usage refreshes about every 60 seconds, with a 5-second minimum between manual requests and a 15-second timeout. Hover for source, update, and reset details.
 
-While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. When the app or a monitor window has keyboard focus, `⌘+` / `⌘=` increases scale and `⌘-` decreases it in 5-percentage-point steps within 60%–120%. These shortcuts do not globally intercept keys in other apps. Settings opens on the display containing the pointer; if already visible within that display, it keeps its position. See the [usage guide](docs/usage.md) for detailed instructions.
+While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. When the app or a monitor window has keyboard focus, `⌘+` / `⌘=` increases scale and `⌘-` decreases it in 5-percentage-point steps within 80%–120%. These shortcuts do not globally intercept keys in other apps. Settings opens on the display containing the pointer; if already visible within that display, it keeps its position. See the [usage guide](docs/usage.md) for detailed instructions.
 
 ## Data and limitations
 

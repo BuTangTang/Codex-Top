@@ -209,10 +209,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func panelHeight(compact: Bool) -> CGFloat {
         let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
-        let rows = min(store.active.count + (includesFinished ? store.finished.count : 0), store.preferences.resolvedVisibleTaskCount)
+        let visibleTasks = (store.active + (includesFinished ? store.finished : [])).prefix(store.preferences.resolvedVisibleTaskCount)
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
-        let body = store.selected.isEmpty ? 195 : CGFloat(rows) * (compact ? PanelMetrics.floatingRow : PanelMetrics.expandedRow) + (store.finished.isEmpty ? 0 : PanelMetrics.disclosure)
-        let height = header + body + (compact ? 4 : PanelMetrics.footer + 2)
+        let body = store.selected.isEmpty ? 195 : visibleTasks.reduce(CGFloat.zero) { height, task in
+            height + PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase)
+        }
+        let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separator
         let messageScale = max(0.8, store.uiScale) / store.uiScale
         return height + (store.sourceWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
     }
@@ -298,6 +300,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func handleOrbClick(_ event: NSEvent) {
         guard store.placement == .orb, orbState.expanded, !dragging, trackingMenus.isEmpty else { return }
+        // Settings is part of the live preview, not an outside click. Keep the
+        // expanded task list visible while its scale or appearance is edited.
+        if let settings, event.window === settings { return }
         if event.window === floating {
             let point = floating.convertPoint(toScreen: event.locationInWindow)
             // The backing window temporarily includes the ring and expanded endpoints.
@@ -634,11 +639,11 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func scheduleHide() {
         hideTask?.cancel()
-        guard store.placement == .top, trackingMenus.isEmpty else { return }
+        guard store.placement == .top, trackingMenus.isEmpty, settings?.isVisible != true else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, let self, !self.topHovered,
-                  self.store.placement == .top, self.trackingMenus.isEmpty else { return }
+                  self.store.placement == .top, self.trackingMenus.isEmpty, self.settings?.isVisible != true else { return }
             self.dismissExpanded()
         }
     }
@@ -767,12 +772,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let target = screens.first { NSMouseInRect(pointer, $0.frame, false) }
             ?? screens.first { $0 == settings?.screen } ?? NSScreen.main ?? screens.first
         cancelHoverTransitions()
-        if settings?.isVisible != true { dismissExpanded() }
         let window: NSWindow
         if let settings { window = settings }
         else {
             window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610), screen: target)
             window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
+            window.delegate = self
             settings = window
         }
         if let target, !window.isVisible || !target.visibleFrame.contains(window.frame) {
@@ -806,6 +811,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if let chosen { store.saveFloatingPosition(display: chosen.id, x: 0.7, y: 0.7) }
         layout(recoverFloating: true, bringAuxiliaryToChosen: true)
         if [.floating, .orb].contains(store.placement) { floatingDismissTask?.cancel(); floatingPresentation.visible = true; floating.orderFrontRegardless() } else { revealExpanded() }
+    }
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === settings else { return }
+        // The visibility flag changes after willClose; resume normal notch hover
+        // dismissal only after the settings window has actually closed.
+        DispatchQueue.main.async { [weak self] in self?.scheduleHide() }
     }
     func windowDidMove(_ notification: Notification) {
         guard !positioning, notification.object as? NSWindow === floating else { return }

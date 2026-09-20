@@ -25,6 +25,7 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var theme: PanelTheme?
     public var placement: PanelPlacement?
     public var floatingReturnPlacement: PanelPlacement?
+    // Persist the rendering factor so legacy 0.75 retains its exact size.
     public var uiScale: Double?
     public var visibleTaskCount: Int?
     public static let visibleTaskCountRange = 1...12
@@ -37,7 +38,10 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
         return previous
     }
     public var resolvedScale: Double {
-        MonitorScale.normalized(uiScale ?? 1)
+        MonitorScale.renderingScale(for: resolvedDisplayScale)
+    }
+    public var resolvedDisplayScale: Double {
+        MonitorScale.displayScale(forRenderingScale: uiScale ?? MonitorScale.baseline)
     }
     public init() {}
     public mutating func setPlacement(_ value: PanelPlacement) {

@@ -271,16 +271,16 @@ final class CoreTests: XCTestCase {
         var p = MonitorPreferences(); p.floating = true; p.selectedIDs = ["kept"]
         let legacy = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
         XCTAssertEqual(legacy.resolvedPlacement, .floating)
-        XCTAssertEqual(legacy.resolvedScale, 1)
+        XCTAssertEqual(legacy.resolvedScale, 0.75)
         for mode in PanelPlacement.allCases {
             p.placement = mode; p.uiScale = 0.8
             let restored = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
             XCTAssertEqual(restored.resolvedPlacement, mode)
-            XCTAssertEqual(restored.resolvedScale, 0.8)
+            XCTAssertEqual(restored.resolvedScale, 0.7875, accuracy: 0.000_001)
             XCTAssertEqual(restored.selectedIDs, ["kept"])
         }
-        p.uiScale = -5; XCTAssertEqual(p.resolvedScale, 0.6)
-        p.uiScale = 8; XCTAssertEqual(p.resolvedScale, 1.2)
+        p.uiScale = -5; XCTAssertEqual(p.resolvedScale, 0.6, accuracy: 0.000_001)
+        p.uiScale = 8; XCTAssertEqual(p.resolvedScale, 0.9, accuracy: 0.000_001)
     }
     func testRealSQLiteReadOnlyAdapterFiltersArchivesAndBlocksOutsidePaths() async throws {
         let root = try temporary(), db = root.appendingPathComponent("state_5.sqlite"), log = root.appendingPathComponent("rollout.jsonl")

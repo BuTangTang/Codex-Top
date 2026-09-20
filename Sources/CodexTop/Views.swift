@@ -103,6 +103,10 @@ struct TaskPickerView: View {
                     Image(systemName: !ids.isEmpty && ids.isSubset(of: draft) ? "checkmark.square.fill" : !ids.isDisjoint(with: draft) ? "minus.square.fill" : "square").font(.system(size: 22)).foregroundStyle(Palette.accent)
                     Text("全选当前结果")
                 }.buttonStyle(.plain).disabled(filtered.isEmpty)
+                Button("取消当前结果") { draft.subtract(filtered.map(\.id)) }
+                    .buttonStyle(.plain).foregroundStyle(Palette.accent)
+                    .disabled(Set(filtered.map(\.id)).isDisjoint(with: draft))
+                    .help("仅取消当前筛选结果的勾选，确认选择后保存")
                 Spacer(); Text("\(filtered.count) 项").foregroundStyle(Palette.secondary(store.theme.colorScheme))
             }.font(PanelFonts.readable(15, scale: store.uiScale, compact: compactTypography)).padding(.horizontal, 28).frame(height: 46)
             Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: 0.5).padding(.horizontal, 26)
@@ -195,14 +199,14 @@ struct SettingsView: View {
                     HStack {
                         Text("显示比例")
                         Spacer()
-                        Text("\(Int((store.preferences.resolvedScale * 100).rounded()))%")
+                        Text("\(Int((store.preferences.resolvedDisplayScale * 100).rounded()))%")
                             .monospacedDigit().foregroundStyle(.secondary)
                         Button("100%") { store.setScale(1) }
                             .accessibilityLabel("恢复显示比例为100%")
                     }
                     HStack(spacing: 10) {
-                        Text("60%").font(.caption).foregroundStyle(.secondary)
-                        MonitorScaleSlider(percentage: Binding(get: { (store.preferences.resolvedScale * 100).rounded() }, set: { store.setScale($0 / 100) }))
+                        Text("80%").font(.caption).foregroundStyle(.secondary)
+                        MonitorScaleSlider(percentage: Binding(get: { (store.preferences.resolvedDisplayScale * 100).rounded() }, set: { store.setScale($0 / 100) }))
                             .frame(maxWidth: .infinity).frame(height: 22)
                         Text("120%").font(.caption).foregroundStyle(.secondary)
                     }

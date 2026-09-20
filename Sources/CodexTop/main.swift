@@ -127,8 +127,8 @@ import CodexTopCore
     @objc private func menuBarOnly() { store.setPlacement(.menuBar) }
     @objc private func recover() { windows.recoverWindows() }
     @objc private func settings() { windows.showSettings() }
-    @objc private func increaseScale() { store.setScale(store.preferences.resolvedScale + MonitorScale.step) }
-    @objc private func decreaseScale() { store.setScale(store.preferences.resolvedScale - MonitorScale.step) }
+    @objc private func increaseScale() { store.setScale(store.preferences.resolvedDisplayScale + MonitorScale.step) }
+    @objc private func decreaseScale() { store.setScale(store.preferences.resolvedDisplayScale - MonitorScale.step) }
     @objc private func refresh() { store.refreshQuota(force: true); Task { await store.refresh() } }
     @objc private func usage() { store.openUsagePage() }
     @objc private func quit() { NSApp.terminate(nil) }

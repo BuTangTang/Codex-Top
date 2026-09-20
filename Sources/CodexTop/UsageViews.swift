@@ -18,8 +18,12 @@ enum UsageText {
     static func windows(_ quota: QuotaSnapshot) -> [QuotaWindow] {
         quota.windows.sorted { $0.minutes < $1.minutes }
     }
-    static func summary(_ quota: QuotaSnapshot, at date: Date) -> String {
-        "剩余 " + windows(quota).prefix(2).map { "\(window($0.minutes)) \(remaining($0, at: date))" }.joined(separator: " · ")
+    static func summary(_ quota: QuotaSnapshot, at date: Date, abbreviated: Bool = false) -> String {
+        let values = Array(windows(quota).prefix(2))
+        if values.count == 1, let value = values.first {
+            return "\(window(value.minutes))剩余 \(remaining(value, at: date))"
+        }
+        return (abbreviated ? "" : "剩余 ") + values.map { "\(window($0.minutes)) \(remaining($0, at: date))" }.joined(separator: " · ")
     }
     static func historical(_ quota: QuotaSnapshot, at date: Date) -> Bool {
         date.timeIntervalSince(quota.observedAt) > 300 || quota.windows.contains { expired($0, at: date) }
@@ -41,21 +45,14 @@ struct UsageSummaryButton: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             Button { store.openUsagePage() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chart.bar.xaxis").font(.system(size: 14))
-                    if let quota = store.quota {
-                        Text(UsageText.summary(quota, at: context.date)).monospacedDigit()
-                        if UsageText.historical(quota, at: context.date) || store.quotaWarning != nil {
-                            Image(systemName: "clock").foregroundStyle(TaskPhase.waiting.tint(store.theme.colorScheme))
-                        }
-                    } else {
-                        Text(store.demo ? "演示模式 · 查看用量" : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
-                    }
+                ViewThatFits(in: .horizontal) {
+                    summary(at: context.date, abbreviated: false)
+                    summary(at: context.date, abbreviated: true)
                 }
                 .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography))
                 .foregroundStyle(Palette.primary(store.theme.colorScheme))
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading).frame(height: 30)
+                .frame(maxWidth: .infinity, alignment: .trailing).frame(height: 30)
                 .contentShape(Rectangle())
             }
             .buttonStyle(QuietButtonStyle())
@@ -67,6 +64,19 @@ struct UsageSummaryButton: View {
                 Button("刷新额度") { store.refreshQuota(force: true) }.disabled(store.demo || store.quotaRefreshing)
             }
         }
+    }
+    private func summary(at date: Date, abbreviated: Bool) -> some View {
+        HStack(spacing: 6) {
+            if !abbreviated { Image(systemName: "chart.bar.xaxis").font(.system(size: 14)) }
+            if let quota = store.quota {
+                Text(UsageText.summary(quota, at: date, abbreviated: abbreviated)).monospacedDigit()
+                if UsageText.historical(quota, at: date) || store.quotaWarning != nil {
+                    Image(systemName: "clock").foregroundStyle(TaskPhase.waiting.tint(store.theme.colorScheme))
+                }
+            } else {
+                Text(store.demo ? (abbreviated ? "演示 · 查看用量" : "演示模式 · 查看用量") : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
+            }
+        }.fixedSize()
     }
     private func tooltip(at date: Date) -> String {
         let value = store.quota.map { UsageText.details($0, at: date) }
