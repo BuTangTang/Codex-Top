@@ -70,7 +70,7 @@ struct MonitorMenuContent: View {
         .frame(width: Self.size(for: menu).width, height: Self.size(for: menu).height)
         .foregroundStyle(dark ? Color.white : Color(white: 0.12))
         // Solid endpoint colors, with no material or vibrancy behind the rows.
-        .background(dark ? Color.black : Color(white: 0.98))
+        .background(dark ? Color.black : Color(white: Palette.lightSurfaceWhite))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10), lineWidth: 0.5))
         .environment(\.colorScheme, store.theme.colorScheme)
@@ -80,7 +80,7 @@ struct MonitorMenuContent: View {
         let item = menu.items[index]
         let selected = item.state == .on
         let focused = presenter.focusedIndex == index
-        let title = theme ? ["浅色玻璃": "浅色", "跟随系统": "系统"][item.title] ?? item.title : item.title
+        let title = theme && item.title == "跟随系统" ? "系统" : item.title
         return Button { presenter.performItem(at: index) } label: {
             HStack(spacing: 6) {
                 if !theme, let image = item.image {

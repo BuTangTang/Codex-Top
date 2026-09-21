@@ -62,8 +62,6 @@ private struct OrbPanelView: View {
     var body: some View {
         ZStack(alignment: contentAlignment) {
             GlassFill()
-            Color.white.opacity(store.theme == .light && !state.expanded ? 0.36 : 0)
-                .allowsHitTesting(false)
             attentionTint.opacity(showsAttention ? (store.theme == .light ? 0.04 : 0.16) : 0)
                 .allowsHitTesting(false)
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, collapse: closeTasks,
@@ -109,7 +107,7 @@ private struct OrbPanelView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .circular)
                 .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
-                .opacity(store.theme == .light && !state.expanded ? 1 : 0)
+                .opacity(store.theme == .light ? 1 : 0)
                 .allowsHitTesting(false)
         }
         .scaleEffect(state.expanded || reduceMotion ? 1 : attentionScale)

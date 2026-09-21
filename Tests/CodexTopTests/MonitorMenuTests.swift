@@ -59,10 +59,10 @@ final class MonitorMenuTests: XCTestCase {
             store.setTheme(choice)
             let menu = presenter.makeMenu(store: store, compact: false, settings: {}, collapse: {})
             XCTAssertEqual(menu.appearance?.name, expected)
-            let themes = menu.items.filter { ["深色", "浅色玻璃", "跟随系统"].contains($0.title) }
+            let themes = menu.items.filter { ["深色", "浅色", "跟随系统"].contains($0.title) }
             XCTAssertEqual(themes.count, 3)
             XCTAssertEqual(themes.filter { $0.state == .on }.count, 1)
-            XCTAssertEqual(themes.first { $0.state == .on }?.title, choice == .system ? "跟随系统" : choice == .dark ? "深色" : "浅色玻璃")
+            XCTAssertEqual(themes.first { $0.state == .on }?.title, choice == .system ? "跟随系统" : choice == .dark ? "深色" : "浅色")
         }
         let menu = presenter.makeMenu(store: store, compact: false, settings: {}, collapse: {})
         menu.performActionForItem(at: menu.indexOfItem(withTitle: "深色"))

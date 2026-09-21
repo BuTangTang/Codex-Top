@@ -35,6 +35,7 @@ enum PanelFonts {
 
 enum Palette {
     static let accent = Color(red: 0.19, green: 0.52, blue: 1)
+    static let lightSurfaceWhite: CGFloat = 0.98
     // Explicit endpoints can interpolate. Dynamic NSColor providers jump when AppKit changes appearance.
     static func primary(_ scheme: ColorScheme) -> Color { scheme == .dark ? .white : Color(white: 0.12) }
     static func secondary(_ scheme: ColorScheme) -> Color { Color(white: scheme == .dark ? 0.76 : 0.34) }
@@ -98,39 +99,14 @@ struct TaskPhaseLabel: View {
     }
 }
 
-@MainActor enum GlassMaterial {
-    static func makeBackdrop(frame: CGRect = .zero) -> NSVisualEffectView {
-        let view = NSVisualEffectView(frame: frame)
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.appearance = NSAppearance(named: .aqua)
-        // Fade the tint, never the effect view: a translucent effect layer blends
-        // the sharp window underneath back into the already blurred backdrop.
-        view.alphaValue = 1
-        return view
-    }
-}
-
-struct FrostedBackdrop: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        GlassMaterial.makeBackdrop()
-    }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
 struct GlassFill: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack {
             if colorScheme == .light {
-                FrostedBackdrop()
-                    .overlay(LinearGradient(colors: [.white.opacity(0.12), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Color(white: Palette.lightSurfaceWhite)
             } else {
-                // A behind-window effect is composited by WindowServer, outside
-                // SwiftUI's color layer. Do not leave an invisible glass backing
-                // attached to the opaque dark surface while its window resizes.
                 Color.black
             }
         }
@@ -148,7 +124,7 @@ struct PanelSurface<Content: View>: View {
         content
             .background { GlassFill() }
             .clipShape(outline)
-            .overlay(outline.stroke(.white.opacity(colorScheme == .dark ? 0 : 0.65), lineWidth: 0.6).padding(0.5))
+            .overlay(outline.stroke(.black.opacity(colorScheme == .dark ? 0 : 0.10), lineWidth: 0.6).padding(0.5))
             .foregroundStyle(Palette.primary(colorScheme))
             .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
     }

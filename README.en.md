@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and installed build are **v1.0.0 build 30**. This update changes only the More menu: four display modes in two columns, a horizontal theme row, a fixed 208pt width and 12pt text, opening beside the monitor when space permits. All 159 tests pass. The installed app was checked for menu appearance, complete entries, Escape dismissal, and keyboard access to settings; see the [validation record and limits](docs/validation/quick-menu-grid.md). Existing task lists, animations, seven-day automatic retirement, Follow System appearance, manual selection, and 80%–120% scaling remain unchanged. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current source and installed build are **v1.0.0 build 31**. Light monitors now use the same opaque off-white surface as the menu. Dark, Light, and Follow System remain available, with existing sizing, typography, and animations unchanged. All 160 tests pass, and system light, manual light, and dark appearances were checked in the installed app; see the [validation record and limits](docs/validation/solid-light-theme.md). The two-column quick menu, seven-day automatic retirement, manual selection, and 80%–120% scaling remain available. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
 
 ## Install
 

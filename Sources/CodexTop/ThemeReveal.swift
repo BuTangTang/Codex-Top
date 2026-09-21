@@ -5,15 +5,9 @@ import CodexTopCore
 private final class ThemeSnapshotView: NSView {
     let imageView = NSImageView()
     var image: NSImage? { get { imageView.image } set { imageView.image = newValue } }
-    var glass = false
     override var isFlipped: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    func configure(image: NSImage, light: Bool) {
-        glass = light
-        if light {
-            let effect = GlassMaterial.makeBackdrop(frame: bounds)
-            addSubview(effect)
-        }
+    func configure(image: NSImage) {
         imageView.frame = bounds; imageView.image = image
         imageView.imageScaling = .scaleAxesIndependently
         imageView.setAccessibilityElement(false)
@@ -39,25 +33,21 @@ private final class ThemeSnapshotView: NSView {
         let oldImage = self.window === window ? overlay?.image : nil
         let oldPath = self.window === window ? (mask?.presentation()?.path ?? mask?.path) : nil
         let oldOpacity = self.window === window ? (overlay?.layer?.presentation()?.opacity ?? overlay?.layer?.opacity ?? 1) : 1
-        let oldGlass = self.window === window && overlay?.glass == true
         overlay?.isHidden = true
         guard let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { cancel(); return false }
         content.cacheDisplay(in: content.bounds, to: bitmap)
         let underlay = NSImage(size: content.bounds.size)
         underlay.addRepresentation(bitmap)
         let size = content.bounds.size
-        // The overlay retains its own native glass. cacheDisplay cannot capture the
-        // WindowServer backdrop; do not replace a normal light transition with a white card.
-        let backing = oldTheme == .dark ? NSColor.black : NSColor.clear
+        // The snapshot uses the same opaque surface as the live view, including
+        // when a theme change interrupts a previous reveal.
+        let backing = oldTheme == .dark ? NSColor.black : NSColor(calibratedWhite: Palette.lightSurfaceWhite, alpha: 1)
         let image = NSImage(size: size, flipped: false) { bounds in
             backing.setFill(); bounds.fill()
             underlay.draw(in: bounds)
             if let oldImage, let oldPath, let context = NSGraphicsContext.current?.cgContext {
                 context.saveGState()
                 context.addPath(oldPath); context.clip(using: .evenOdd)
-                // Only an interrupted light reveal needs this approximation of its
-                // previous backdrop; the normal path keeps live behind-window glass.
-                if oldGlass { NSColor(calibratedWhite: 0.94, alpha: CGFloat(oldOpacity) * 0.9).setFill(); bounds.fill() }
                 oldImage.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: CGFloat(oldOpacity))
                 context.restoreGState()
             }
@@ -65,7 +55,7 @@ private final class ThemeSnapshotView: NSView {
         }
         cancel()
         let view = ThemeSnapshotView(frame: content.bounds)
-        view.configure(image: image, light: oldTheme == .light)
+        view.configure(image: image)
         view.setAccessibilityElement(false)
         view.wantsLayer = true
         view.layer?.contentsScale = window.backingScaleFactor

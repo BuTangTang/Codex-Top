@@ -192,7 +192,7 @@ struct SettingsView: View {
             Section("外观") {
                 Picker("配色", selection: Binding(get: { store.themeChoice }, set: { store.setTheme($0) })) {
                     Text("深色").tag(PanelTheme.dark)
-                    Text("浅色玻璃").tag(PanelTheme.light)
+                    Text("浅色").tag(PanelTheme.light)
                     Text("跟随系统").tag(PanelTheme.system)
                 }.pickerStyle(.segmented)
                 Text("刘海、展开面板与浮窗使用同一主题。").font(.caption).foregroundStyle(.secondary)

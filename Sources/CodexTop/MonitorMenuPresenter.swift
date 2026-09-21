@@ -135,7 +135,7 @@ import CodexTopCore
         }
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "主题"))
-        for (title, symbol, value) in [("深色", "moon", PanelTheme.dark), ("浅色玻璃", "sun.max", PanelTheme.light), ("跟随系统", "circle.lefthalf.filled", PanelTheme.system)] {
+        for (title, symbol, value) in [("深色", "moon", PanelTheme.dark), ("浅色", "sun.max", PanelTheme.light), ("跟随系统", "circle.lefthalf.filled", PanelTheme.system)] {
             let entry = item(title, symbol: symbol) { store.setTheme(value) }
             entry.state = store.themeChoice == value ? .on : .off
             menu.addItem(entry)

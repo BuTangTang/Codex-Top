@@ -73,10 +73,6 @@ struct TopPanelView: View {
             let outline = TopSurfaceOutline(progress: state.progress, attached: state.cameraHeight > 0)
             ZStack(alignment: .top) {
                 GlassFill()
-                // Keep the same glass tint through expansion so the wings and body
-                // read as one continuous surface. The underlying blur stays opaque.
-                Color.white.opacity(store.theme == .light ? 0.24 : 0)
-                    .allowsHitTesting(false)
                 if state.cameraHeight > 0 {
                     UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 9,
                                            bottomTrailingRadius: 9, topTrailingRadius: 0)
@@ -104,7 +100,7 @@ struct TopPanelView: View {
             .frame(width: state.surfaceSize.width, height: state.surfaceSize.height, alignment: .top)
             .clipShape(outline)
             .overlay {
-                outline.stroke(.white.opacity(store.theme == .light ? 0.20 : 0), lineWidth: 0.5).padding(0.5)
+                outline.stroke(.black.opacity(store.theme == .light ? 0.10 : 0), lineWidth: 0.5).padding(0.5)
                     .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
