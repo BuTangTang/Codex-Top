@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and local build are **v1.0.0 build 29**. The More menu is now 144pt wide with 12pt text, a solid black dark appearance, and matching rounded corners. Floating history expansion keeps the top edge and task layout stable; display modes fade out and in. All 159 tests pass, and history expansion/collapse was checked in the installed app. Continuous animation and external-display visual checks remain open; see the [validation record and limits](docs/validation/compact-menu-motion.md). Seven-day automatic retirement, Follow System appearance, manual selection, and 80%–120% scaling remain available. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current source and installed build are **v1.0.0 build 30**. This update changes only the More menu: four display modes in two columns, a horizontal theme row, a fixed 208pt width and 12pt text, opening beside the monitor when space permits. All 159 tests pass. The installed app was checked for menu appearance, complete entries, Escape dismissal, and keyboard access to settings; see the [validation record and limits](docs/validation/quick-menu-grid.md). Existing task lists, animations, seven-day automatic retirement, Follow System appearance, manual selection, and 80%–120% scaling remain unchanged. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
 
 ## Install
 

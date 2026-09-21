@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [build 30 双列快捷菜单](validation/quick-menu-grid.md)：四模式 2×2、主题横排、208pt 宽和固定字号；只调整菜单。
 - [build 29 紧凑菜单与浮窗动效](validation/compact-menu-motion.md)：144pt 菜单、12pt 字号、固定顶部的浮窗视口动画与模式淡入淡出。
 - [build 27 展开响应、自动整理与菜单](validation/expansion-performance.md)：按需加载、布局稳定、7 天自动移出、底边去重影与实色同层菜单。
 - [build 18 列表与比例验收](validation/task-list-refinement.md)：稳定滚动、手动整理、新 100% 基准与设置实时预览。
@@ -44,7 +45,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码与本机安装为 v1.0.0 build 29。D-76–D-77 收紧菜单宽度、字号和风格，常驻浮窗以固定原生画布和视口动画展开，显示方式切换淡出淡入。159 项测试及本轮真实包检查范围见新验收记录，完整连续动画与外接屏视觉未补称通过。D-73 按需加载、D-74 默认 7 天自动整理、D-75 实色同层菜单和跟随系统主题，以及既有拖动与比例保留。中英文 README 四模式图片仍对应 build 10。公开 Release 附件未变。
+当前源码与本机安装为 v1.0.0 build 30。D-78 只调整更多菜单为两列模式、横排主题和邻侧摆放，既有列表、动画和任务逻辑保留。159 项测试及当前真实菜单检查范围见 [本轮验收](validation/quick-menu-grid.md)；历史完整连续动画与跨屏验收不借用本轮结论。中英文 README 四模式图片仍对应 build 10。公开 Release 附件未变。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

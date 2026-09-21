@@ -21,6 +21,8 @@ final class MonitorMenuTests: XCTestCase {
         let large = presenter.makeMenu(store: store, compact: false, settings: { settingsOpened = true }, collapse: {})
         XCTAssertEqual(large.font, font)
         XCTAssertEqual(MonitorMenuContent.size(for: large), smallSize)
+        XCTAssertEqual(smallSize, CGSize(width: 208, height: 168))
+        XCTAssertEqual(MonitorMenuContent.itemGroups(for: large).map(\.count), [4, 3, 1])
         XCTAssertEqual(large.items.filter { !$0.isSeparatorItem && !$0.isSectionHeader }.count, 8)
         XCTAssertTrue(large.items.allSatisfy { $0.submenu == nil })
         XCTAssertNil(large.item(withTitle: "收回圆环"))
@@ -33,8 +35,16 @@ final class MonitorMenuTests: XCTestCase {
         large.performActionForItem(at: large.indexOfItem(withTitle: "常驻浮窗"))
         XCTAssertEqual(store.placement, .floating)
         let floating = presenter.makeMenu(store: store, compact: true, settings: {}, collapse: nil)
+        XCTAssertEqual(MonitorMenuContent.size(for: floating), CGSize(width: 208, height: 196))
+        XCTAssertEqual(MonitorMenuContent.itemGroups(for: floating).map(\.count), [4, 3, 1, 1])
         floating.performActionForItem(at: floating.indexOfItem(withTitle: "关闭浮窗"))
         XCTAssertEqual(store.placement, .orb)
+        store.setPlacement(.top)
+        var collapsed = false
+        let top = presenter.makeMenu(store: store, compact: false, settings: {}, collapse: { collapsed = true })
+        XCTAssertEqual(MonitorMenuContent.size(for: top), CGSize(width: 208, height: 196))
+        top.performActionForItem(at: top.indexOfItem(withTitle: "收起面板"))
+        XCTAssertTrue(collapsed)
     }
 
     @MainActor
@@ -62,16 +72,30 @@ final class MonitorMenuTests: XCTestCase {
     @MainActor
     func testMenuFitsVisibleScreenEvenBesideShortPanelAndScreenEdges() {
         let visible = CGRect(x: 1728, y: -236, width: 2560, height: 1353)
-        let menu = CGSize(width: 144, height: 226)
-        for x in [visible.minX, visible.midX, visible.midX + 0.5, visible.maxX - 28] {
-            for y in [visible.minY + 10, visible.midY, visible.maxY - 30] {
-                let anchor = MonitorMenuPresenter.popupOrigin(buttonFrame: CGRect(x: x, y: y, width: 28, height: 30),
+        let menu = CGSize(width: 208, height: 168)
+        for x in [visible.minX, visible.midX, visible.midX + 0.5, visible.maxX - 324] {
+            for y in [visible.minY + 10, visible.midY, visible.maxY - 72] {
+                let source = CGRect(x: x, y: y, width: 324, height: 72)
+                let anchor = MonitorMenuPresenter.popupOrigin(sourceFrame: source,
                                                               menuSize: menu, visible: visible)
                 let frame = CGRect(x: anchor.x, y: anchor.y - menu.height, width: menu.width, height: menu.height)
                 XCTAssertTrue(visible.insetBy(dx: 8, dy: 8).contains(frame))
-                XCTAssertEqual(anchor.x, floor(min(max(x, visible.minX + 8), visible.maxX - 8 - menu.width)))
+                XCTAssertFalse(frame.intersects(source))
+                if source.maxX + 8 + menu.width <= visible.maxX - 8 {
+                    XCTAssertEqual(frame.minX, floor(source.maxX + 8))
+                } else {
+                    XCTAssertEqual(frame.maxX, floor(source.minX - 8))
+                }
+                if source.maxY - menu.height >= visible.minY + 8, source.maxY <= visible.maxY - 8 {
+                    XCTAssertEqual(frame.maxY, floor(source.maxY))
+                }
             }
         }
+        let narrowScreen = CGRect(x: -640, y: -300, width: 640, height: 480)
+        let origin = MonitorMenuPresenter.popupOrigin(sourceFrame: CGRect(x: -500, y: -250, width: 324, height: 72),
+                                                      menuSize: menu, visible: narrowScreen)
+        XCTAssertTrue(narrowScreen.insetBy(dx: 8, dy: 8).contains(CGRect(x: origin.x, y: origin.y - menu.height,
+                                                                      width: menu.width, height: menu.height)))
     }
 
     @MainActor
@@ -94,6 +118,11 @@ final class MonitorMenuTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(60))
             let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: bitmap)
+            if let path = ProcessInfo.processInfo.environment["CODEX_TOP_MENU_SNAPSHOTS"] {
+                let folder = URL(fileURLWithPath: path)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try bitmap.representation(using: .png, properties: [:])?.write(to: folder.appendingPathComponent("menu-\(theme.rawValue).png"))
+            }
             let color = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 3)?.usingColorSpace(.sRGB))
             XCTAssertEqual(color.alphaComponent, 1, accuracy: 0.01)
             if theme == .dark { XCTAssertLessThan(color.redComponent, 0.15) }

@@ -24,7 +24,7 @@ import CodexTopCore
             ?? window.screen
         guard let screen else { return }
         let size = MonitorMenuContent.size(for: menu)
-        let point = Self.popupOrigin(buttonFrame: buttonFrame, menuSize: size, visible: screen.visibleFrame)
+        let point = Self.popupOrigin(sourceFrame: window.frame, menuSize: size, visible: screen.visibleFrame)
         let panel = MonitorMenuPanel(contentRect: CGRect(x: point.x, y: point.y - size.height, width: size.width, height: size.height),
                                      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Codex Top · 更多操作"
@@ -109,12 +109,14 @@ import CodexTopCore
         invoke(menu.items[index])
     }
 
-    static func popupOrigin(buttonFrame: CGRect, menuSize: CGSize, visible: CGRect) -> CGPoint {
+    static func popupOrigin(sourceFrame: CGRect, menuSize: CGSize, visible: CGRect) -> CGPoint {
         let area = visible.insetBy(dx: 8, dy: 8)
-        // Open to the right of the trigger; pin to the screen edge only when
-        // there is not enough room. This never changes the source window frame.
-        let x = min(max(buttonFrame.minX, area.minX), max(area.minX, area.maxX - menuSize.width))
-        let y = min(area.maxY, max(buttonFrame.minY - 4, area.minY + menuSize.height))
+        // Keep the monitor fully visible: open beside its right edge, or use
+        // the left side when needed. Only the menu is clamped to the screen.
+        let right = sourceFrame.maxX + 8, left = sourceFrame.minX - 8 - menuSize.width
+        let proposedX = right + menuSize.width <= area.maxX ? right : left >= area.minX ? left : right
+        let x = min(max(proposedX, area.minX), max(area.minX, area.maxX - menuSize.width))
+        let y = min(area.maxY, max(sourceFrame.maxY, area.minY + menuSize.height))
         // NSPanel rounds fractional frame edges outward. Normalize the origin
         // so a scaled anchor cannot add a point to the menu's fixed dimensions.
         return CGPoint(x: floor(x + 1e-8), y: floor(y + 1e-8))
