@@ -4,7 +4,7 @@
 
 A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
 
-The current source and installed build are **v1.0.0 build 31**. Light monitors now use the same opaque off-white surface as the menu. Dark, Light, and Follow System remain available, with existing sizing, typography, and animations unchanged. All 160 tests pass, and system light, manual light, and dark appearances were checked in the installed app; see the [validation record and limits](docs/validation/solid-light-theme.md). The two-column quick menu, seven-day automatic retirement, manual selection, and 80%–120% scaling remain available. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+The current source and installed build are **v1.0.0 build 35**. Orb appearance now offers Classic Ring and Fading Twin Arcs, preserving the original ring and removing the robot prototype. The new style keeps a 44pt circle and a stationary running count, with clearer fading arcs in both themes. Panel transitions, task lists, and all four display modes retain their existing behavior; see the [validation record and limits](docs/validation/twin-arc-orb.md). The two-column quick menu, seven-day automatic retirement, manual selection, and 80%–120% scaling remain available. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
 
 ## Install
 

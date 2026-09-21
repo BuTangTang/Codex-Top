@@ -196,6 +196,11 @@ struct SettingsView: View {
                     Text("跟随系统").tag(PanelTheme.system)
                 }.pickerStyle(.segmented)
                 Text("刘海、展开面板与浮窗使用同一主题。").font(.caption).foregroundStyle(.secondary)
+                Picker("圆环外观", selection: Binding(get: { store.orbAppearance }, set: { store.setOrbAppearance($0) })) {
+                    Text("经典圆环").tag(OrbAppearance.ring)
+                    Text("渐隐双弧").tag(OrbAppearance.twinArc)
+                }.pickerStyle(.segmented)
+                Text("用于圆环模式的收起入口，均保持 44pt；点击查看任务，拖动移动。").font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("显示比例")

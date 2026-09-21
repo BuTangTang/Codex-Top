@@ -71,6 +71,18 @@ import CodexTopCore
     /// Rendering always receives a concrete theme; the saved choice may follow macOS.
     var theme: PanelTheme { themeChoice == .system ? systemTheme : themeChoice }
     var placement: PanelPlacement { preferences.resolvedPlacement }
+    var orbAppearance: OrbAppearance { preferences.resolvedOrbAppearance }
+    var orbPhase: TaskPhase {
+        // A source warning can concern an unmonitored history entry. Individual
+        // unreadable records already carry .unknown; keep valid attention visible.
+        paused || loading || (sourceWarning != nil && tasks.isEmpty) ? .unknown : statusSummary.phase
+    }
+    var orbStatusLabel: String {
+        if paused { return "任务刷新已暂停" }
+        if loading { return "正在读取任务状态" }
+        if sourceWarning != nil && tasks.isEmpty { return "任务状态暂时无法更新" }
+        return orbPhase.label
+    }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
     var selected: [CodexTask] {
         graph.roots.filter { preferences.selectedIDs.contains($0.id) }.sorted {
@@ -271,6 +283,11 @@ import CodexTopCore
         save(); onModeChange?()
     }
     func setScale(_ value: Double) { preferences.uiScale = MonitorScale.renderingScale(for: value); save(); onChange?() }
+    func setOrbAppearance(_ value: OrbAppearance) {
+        guard orbAppearance != value else { return }
+        preferences.orbAppearance = value
+        save()
+    }
     func setVisibleTaskCount(_ value: Int) {
         preferences.visibleTaskCount = value
         preferences.visibleTaskCount = preferences.resolvedVisibleTaskCount

@@ -37,7 +37,7 @@ struct FloatingPanelView: View {
     }
 }
 
-/// The ring and list occupy the same NSPanel and the same interpolated surface.
+/// Both ring appearances and the list share one NSPanel and interpolated surface.
 /// At 44pt, a 22pt corner radius is a circle; the expanding surface becomes a rounded panel.
 private struct OrbPanelView: View {
     @ObservedObject var store: TaskStore
@@ -53,7 +53,13 @@ private struct OrbPanelView: View {
     var dragEnded: (CGPoint) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var attentionScale: CGFloat = 1
-    private var shouldBreathe: Bool { store.attentionCount > 0 && !state.expanded && !reduceMotion }
+    private var usesTwinArc: Bool { store.orbAppearance == .twinArc }
+    private var statusLabel: String { usesTwinArc ? store.orbStatusLabel : store.statusSummary.phase.label }
+    private var statusDetail: String {
+        if usesTwinArc && store.orbPhase == .unknown { return statusLabel }
+        return "\(statusLabel) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理"
+    }
+    private var shouldBreathe: Bool { !usesTwinArc && store.attentionCount > 0 && !state.expanded && !reduceMotion }
     private var showsAttention: Bool { store.attentionCount > 0 && !state.expanded }
     private var attentionTint: Color {
         (store.statusSummary.phase == .failed ? TaskPhase.failed : .waiting).tint(store.theme.colorScheme)
@@ -62,7 +68,7 @@ private struct OrbPanelView: View {
     var body: some View {
         ZStack(alignment: contentAlignment) {
             GlassFill()
-            attentionTint.opacity(showsAttention ? (store.theme == .light ? 0.04 : 0.16) : 0)
+            attentionTint.opacity(showsAttention && !usesTwinArc ? (store.theme == .light ? 0.04 : 0.16) : 0)
                 .allowsHitTesting(false)
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
@@ -75,7 +81,14 @@ private struct OrbPanelView: View {
                 .modifier(OrbRevealOpacity(progress: state.expanded ? 1 : 0, layer: .content))
                 .allowsHitTesting(state.expanded)
                 .accessibilityHidden(!state.expanded)
-            StatusRing(store: store, hovered: state.hovered, visible: !state.expanded)
+            Group {
+                if usesTwinArc {
+                    TwinArcOrb(phase: store.orbPhase, runningCount: store.paused || store.loading ? 0 : store.runningCount,
+                               visible: !state.expanded, hovered: state.hovered)
+                } else {
+                    StatusRing(store: store, hovered: state.hovered, visible: !state.expanded)
+                }
+            }
                 .frame(width: 44, height: 44)
                 .overlay {
                     WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded, enabled: !state.expanded)
@@ -83,16 +96,16 @@ private struct OrbPanelView: View {
                 .modifier(OrbRevealOpacity(progress: state.expanded ? 1 : 0, layer: .ring))
                 .allowsHitTesting(!state.expanded)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Codex Top 圆环，\(store.statusSummary.phase.label)，\(store.runningCount) 个运行中，\(store.attentionCount) 个需要处理")
+                .accessibilityLabel("Codex Top \(usesTwinArc ? "渐隐双弧" : "圆环")，\(statusDetail)")
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { openTasks() }
                 .accessibilityHidden(state.expanded)
-                .help("\(store.statusSummary.phase.label) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理\n点击展开，拖动移动，右键打开菜单")
+                .help("\(statusDetail)\n点击展开，拖动移动，右键打开菜单")
         }
         .frame(width: state.surfaceFrame.width, height: state.surfaceFrame.height,
                alignment: contentAlignment)
         .overlay(alignment: .topTrailing) {
-            if showsAttention {
+            if showsAttention && !usesTwinArc {
                 Text("!")
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundStyle(store.statusSummary.phase == .failed ? Color.white : Color.black)
@@ -107,10 +120,10 @@ private struct OrbPanelView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .circular)
                 .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
-                .opacity(store.theme == .light ? 1 : 0)
+                .opacity(store.theme == .light && (!usesTwinArc || state.expanded) ? 1 : 0)
                 .allowsHitTesting(false)
         }
-        .scaleEffect(state.expanded || reduceMotion ? 1 : attentionScale)
+        .scaleEffect(usesTwinArc || state.expanded || reduceMotion ? 1 : attentionScale)
         .position(x: state.surfaceFrame.midX, y: state.surfaceFrame.midY)
         .environment(\.colorScheme, store.theme == .light ? .light : .dark)
         .onExitCommand(perform: closeTasks)

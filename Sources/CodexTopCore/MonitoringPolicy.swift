@@ -6,6 +6,15 @@ public enum PanelTheme: String, Codable, CaseIterable, Sendable {
 public enum PanelPlacement: String, Codable, CaseIterable, Sendable {
     case top, floating, orb, menuBar
 }
+public enum OrbAppearance: String, Codable, CaseIterable, Sendable {
+    case ring, twinArc
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        // Preserve the rest of the preferences when replacing the retired prototype.
+        self = value == "robot" ? .twinArc : Self(rawValue: value) ?? .ring
+    }
+}
 
 public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var selectedIDs: Set<String> = []
@@ -23,6 +32,8 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var floatingY: Double = 0.7
     // Optional for compatibility with preferences written before themes were added.
     public var theme: PanelTheme?
+    // Missing in older preferences: keep the original ring until explicitly changed.
+    public var orbAppearance: OrbAppearance?
     public var placement: PanelPlacement?
     public var floatingReturnPlacement: PanelPlacement?
     // Persist the rendering factor so legacy 0.75 retains its exact size.
@@ -42,6 +53,7 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
         min(Self.visibleTaskCountRange.upperBound, max(Self.visibleTaskCountRange.lowerBound, visibleTaskCount ?? 4))
     }
     public var resolvedPlacement: PanelPlacement { placement ?? (floating ? .floating : .top) }
+    public var resolvedOrbAppearance: OrbAppearance { orbAppearance ?? .ring }
     public var resolvedUnpinnedPlacement: PanelPlacement {
         guard let previous = floatingReturnPlacement, previous != .floating else { return .top }
         return previous
