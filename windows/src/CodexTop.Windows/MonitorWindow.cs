@@ -212,7 +212,7 @@ public sealed class MonitorWindow : Window
             bool justCompleted = completionStarted is not null;
             if (justCompleted)
                 grid.Children.Add(new CompletionMark(Animate && justCompleted, completionStarted is { } started ? Stopwatch.GetElapsedTime(started) : TimeSpan.Zero, completionStarted, completionProgress));
-            else if (phase != Phase.Completed && rows.Any(r => r.Activity.Phase.IsActive() || r.Activity.Phase == Phase.Failed))
+            else
             {
                 var number = Ui.Text(Math.Min(rows.Count(r => r.Activity.Phase == Phase.Running), 100) is var count && count > 99 ? "99+" : count.ToString(), 15, dark);
                 number.HorizontalAlignment = HorizontalAlignment.Center; number.FontWeight = FontWeights.SemiBold; grid.Children.Add(number);

@@ -41,7 +41,12 @@ internal static class OrbFeedbackChecks
             SelectedIds = [id], CodexHome = root, CliPath = Path.Combine(root, "disabled-cli.exe"), X = 300, Y = 250
         });
         int checks = 0, failures = 0, turn = 0;
-        void Check(bool passed, string name) { checks++; Console.WriteLine((passed ? "PASS " : "FAIL ") + name); if (!passed) failures++; }
+        Func<string>? failureContext = null;
+        void Check(bool passed, string name)
+        {
+            checks++; Console.WriteLine((passed ? "PASS " : "FAIL ") + name);
+            if (!passed) { failures++; if (failureContext is not null) Console.WriteLine(failureContext()); }
+        }
         var tracker = new OrbCompletionTracker();
         TaskRow Row(string key, Phase phase)
         {
@@ -76,9 +81,11 @@ internal static class OrbFeedbackChecks
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         using var store = new MonitorStore(app.Dispatcher, root);
         var window = new MonitorWindow(store) { Title = "Codex Top · 圆环完成检查" };
+        // Diagnostics contain only this test's synthetic state and controls.
+        failureContext = () => $"Mode={store.Preferences.Placement}; width={window.Width}; visible={window.IsVisible}; rows={string.Join(',', store.Rows.Select(r => (r.Root.Id == id ? "primary" : "other") + ":" + r.Activity.Phase))}; text={string.Join('|', Descendants(window).OfType<TextBlock>().Select(t => t.Text))}";
         FrameworkElement? Marker() => Descendants(window).OfType<FrameworkElement>().FirstOrDefault(e => e.GetType().Name == "CompletionMark");
         string NoticeText() => string.Join(" ", Descendants(window.CompletionNotice.Child).OfType<TextBlock>().Select(t => t.Text));
-        bool EmptyCenter() => Marker() is null && !Descendants(window).OfType<TextBlock>().Any(t => t.Text is "0" or "✓");
+        bool ZeroCenter() => Marker() is null && Descendants(window).OfType<TextBlock>().Count(t => t.Text == "0") == 1;
         double Progress() => (double?)Marker()?.GetType().GetProperty("Progress")?.GetValue(Marker()) ?? 1;
         string Frame()
         {
@@ -100,11 +107,11 @@ internal static class OrbFeedbackChecks
             try
             {
                 await WaitFor(Phase.Completed);
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "startup completed history has an empty orb and no completion notice");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "startup completed history shows zero without a check or completion notice");
                 store.Preferences.SelectedIds.Clear(); store.Save(); window.UpdateLayout();
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "no selected tasks leaves an empty default orb");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "no selected tasks shows zero in the default orb");
                 store.Preferences.SelectedIds.Add(id); store.Save(); window.UpdateLayout();
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "selecting completed history does not show a check or notice");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "selecting completed history shows zero without a check or notice");
                 Append("task_started");
                 await WaitFor(Phase.Running);
                 Check(Descendants(window).OfType<TextBlock>().Any(t => t.Text == "1"), "running count is one");
@@ -129,9 +136,9 @@ internal static class OrbFeedbackChecks
                 Check(NativeWindow.Bounds(window) == before, "feedback keeps the native window bounds fixed");
                 CheckNotice(window, false, Check);
                 await Task.Delay(3300); window.UpdateLayout();
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "completion expires to an empty orb without a permanent check");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "completion expires to zero without a permanent check");
                 store.Preferences.Dark = true; store.Save(); window.UpdateLayout();
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "theme change does not replay historical completion");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "theme change keeps zero without replaying historical completion");
                 Append("task_started"); await WaitFor(Phase.Running);
                 Check(Marker() == null, "a new turn immediately restores the running count");
                 store.Preferences.ReduceMotion = true; store.Save();
@@ -185,7 +192,7 @@ internal static class OrbFeedbackChecks
                 Append("task_complete"); await WaitFor(Phase.Completed);
                 Check(!window.IsVisible && !window.CompletionNotice.IsOpen, "hidden tray mode does not open a stray desktop popup");
                 store.Preferences.SetPlacement(Placement.Orb); store.Save(); window.UpdateLayout();
-                Check(EmptyCenter() && !window.CompletionNotice.IsOpen, "returning from tray does not replay a past completion");
+                Check(ZeroCenter() && !window.CompletionNotice.IsOpen, "returning from tray keeps zero without replaying a past completion");
                 File.Delete(otherLog); // Only this test's synthetic file is removed.
                 Append("task_started"); await WaitFor(Phase.Running);
                 Check(store.Error is not null, "an unrelated unreadable task produces a partial source warning");

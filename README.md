@@ -8,7 +8,7 @@ macOS 当前源码与本机构建为 **v1.0.0 build 27**。任务列表按需加
 
 ## Windows 版本
 
-本分支新增独立的 **Windows 11 x64 开发预览 0.1.10**，使用 C# / WPF / .NET 10，提供桌面圆环、浮窗、系统托盘和账户额度。使用方式与构建步骤见 [Windows README](windows/README.md)，来源、平台差异和验证范围见 [Windows 集成说明](windows/docs/INTEGRATION.md)。当前提供源码，尚未发布 Windows 下载包；以下安装说明和截图均对应 macOS。
+本分支新增独立的 **Windows 11 x64 开发预览 0.1.11**，使用 C# / WPF / .NET 10，提供桌面圆环、浮窗、系统托盘和账户额度。使用方式与构建步骤见 [Windows README](windows/README.md)，来源、平台差异和验证范围见 [Windows 集成说明](windows/docs/INTEGRATION.md)。当前提供源码，尚未发布 Windows 下载包；以下安装说明和截图均对应 macOS。
 
 ## 安装
 
