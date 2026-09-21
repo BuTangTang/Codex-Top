@@ -47,7 +47,7 @@ final class TwinArcOrbView: NSView {
     static let rotationDuration: CFTimeInterval = 3.2
     static let rotationKey = "codexTop.twinArcRotation"
     private static let rotationEpoch = CACurrentMediaTime()
-    private static let lineWidth: CGFloat = 2.5
+    private static let lineWidth: CGFloat = 3
     private static let outerMargin: CGFloat = 2.2
 
     private let surface = CAShapeLayer()

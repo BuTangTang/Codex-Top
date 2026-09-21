@@ -505,7 +505,7 @@ PanelSurface 和刘海的浅色描边改为黑色 10% 透明度，保留原线�
 
 用户确认 D4 设计并指令实施，保留经典圆环，移除机器人。MonitorPreferences 新增可选 OrbAppearance（ring／twinArc），缺省解析为 ring；枚举解码时兼容旧 robot 字符串为 twinArc，未来未知字符串回退 ring，避免单个外观字段使整份偏好失效；编码只写当前枚举值。TaskStore 保存样式不触发窗口几何或模式回调。设置保留两段选择，更多菜单和 PanelPlacement 四模式不变。
 
-TwinArcOrb 独立封装新外观，以保持 StatusRing 和 NativeRunningArc 原有实现不变。44pt 圆面采用深色 #171B21／浅色 #FCFCFD，中心 17pt 等宽数字不随弧转动，99+ 在相同字号的固定区域内完整显示。两条 80°、2.5pt 宽、外缘内缩约 2.2pt 的渐隐圆头弧相隔 180°，运行蓝色为深主题 #479BFF／浅主题 #0876E5。单个原生 Core Animation 容器驱动 3.2 秒线性旋转，无逐帧 SwiftUI 状态或 Timer；数字、主题和悬停更新不能重新起转。运行数量不改变弧长。
+TwinArcOrb 独立封装新外观，以保持 StatusRing 和 NativeRunningArc 原有实现不变。44pt 圆面采用深色 #171B21／浅色 #FCFCFD，中心 17pt 等宽数字不随弧转动，99+ 在相同字号的固定区域内完整显示。两条 80°、3pt 宽、外缘内缩约 2.2pt 的渐隐圆头弧相隔 180°，运行蓝色为深主题 #479BFF／浅主题 #0876E5。单个原生 Core Animation 容器驱动 3.2 秒线性旋转，无逐帧 SwiftUI 状态或 Timer；数字、主题和悬停更新不能重新起转。运行数量不改变弧长。
 
 新外观状态来自现有 MonitorStatusSummary。暂停／首次读取，或来源读取失败且没有任务时使用 unknown；有有效任务时仍用关注摘要，单条记录失败沿用该任务的 unknown，不以未关注历史记录警告覆盖正常状态。提醒优先且仍保留运行数；全部完成依摘要而不是 completionSequence，其他运行不被局部完成事件覆盖。非运行、不可见、视图／窗口隐藏或退出，以及系统减少动态效果时停止旋转，恢复时接入共同单调相位。
 

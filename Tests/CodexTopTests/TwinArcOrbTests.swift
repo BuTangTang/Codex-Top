@@ -38,14 +38,14 @@ final class TwinArcOrbTests: XCTestCase {
         XCTAssertEqual(arcs.count, 2, "Only the two fixed arcs belong to the rotating container")
         for arc in arcs {
             let mask = try XCTUnwrap(arc.mask as? CAShapeLayer)
-            XCTAssertEqual(mask.lineWidth, 2.5)
+            XCTAssertEqual(mask.lineWidth, 3)
             XCTAssertEqual(mask.lineCap, .round)
             XCTAssertNil(mask.fillColor)
             let path = try XCTUnwrap(mask.path)
-            // A 2.5pt stroke leaves the same 2.2pt outer margin. Its centerline
-            // radius is 18.55pt; each arc spans 80 degrees around top or bottom.
-            XCTAssertEqual(path.boundingBoxOfPath.width, 2 * 18.55 * sin(.pi * 2 / 9), accuracy: 0.02)
-            XCTAssertEqual(path.boundingBoxOfPath.height, 18.55 * (1 - cos(.pi * 2 / 9)), accuracy: 0.02)
+            // A 3pt stroke leaves the same 2.2pt outer margin. Its centerline
+            // radius is 18.3pt; each arc spans 80 degrees around top or bottom.
+            XCTAssertEqual(path.boundingBoxOfPath.width, 2 * 18.3 * sin(.pi * 2 / 9), accuracy: 0.02)
+            XCTAssertEqual(path.boundingBoxOfPath.height, 18.3 * (1 - cos(.pi * 2 / 9)), accuracy: 0.02)
             let colors = try XCTUnwrap(arc.colors as? [CGColor])
             XCTAssertEqual(colors.count, 3)
             XCTAssertEqual(try XCTUnwrap(colors.last).alpha, 1)
