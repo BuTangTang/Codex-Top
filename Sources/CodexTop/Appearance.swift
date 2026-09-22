@@ -6,7 +6,7 @@ enum PanelMetrics {
     static let expandedWidth: CGFloat = 410
     static let floatingWidth: CGFloat = 360
     static let expandedRow: CGFloat = 54
-    static let finishedRow: CGFloat = 36
+    static let finishedRow: CGFloat = expandedRow
     static let expandedHeader: CGFloat = 48
     static let floatingHeader: CGFloat = 44
     static let footer: CGFloat = 42
@@ -207,6 +207,9 @@ struct ActivityIndicator: View {
                     // Keep the original circle radius while containing its 3pt stroke.
                     .padding(-1.5)
                     .allowsHitTesting(false)
+            } else if phase == .completed {
+                Circle().strokeBorder(tint, lineWidth: 2)
+                Image(systemName: "checkmark").font(.system(size: small ? 11 : 12, weight: .semibold)).foregroundStyle(tint)
             } else if phase == .waiting {
                 Circle().fill(tint.opacity(0.12))
                 Circle().fill(tint).padding(6)

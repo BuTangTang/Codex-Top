@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [build 39 手动收纳与圆环开合](validation/manual-finished.md)：本轮完成留在上方，右键收进已结束，新轮自动返回；修复圆环呼吸造成的隐藏列表重复布局。
 - [build 36 可选渐隐双弧](validation/twin-arc-orb.md)：保留经典圆环，新增 D4 双弧及固定运行数，移除机器人原型。
 - [build 31 统一浅色实色外观](validation/solid-light-theme.md)：监控、菜单及主题快照共用不透明浅白，保留三项主题和原有布局。
 - [build 30 双列快捷菜单](validation/quick-menu-grid.md)：四模式 2×2、主题横排、208pt 宽和固定字号；只调整菜单。
@@ -47,7 +48,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前源码与本机安装为 v1.0.0 build 36。D-80 保留经典圆环、新增渐隐双弧并移除机器人原型；既有窗口布局、开合动画和任务逻辑保持。构建与当前实际检查范围见 [本轮验收](validation/twin-arc-orb.md)；历史完整连续动画与跨屏验收不借用本轮结论。中英文 README 四模式图片仍对应 build 10。公开 Release 附件未变。
+当前源码与本机安装为 v1.0.0 build 39。D-81 完成任务保留上方并统一两行，手动收纳后新轮自动返回；D-82 修复经典圆环隐藏列表反复布局及呼吸背景裁切，保留既有开合曲线。185 项测试、通用包及真实窗口检查范围见 [本轮验收](validation/manual-finished.md)；连续 FPS 与用户最终手感仍待确认。中英文 README 四模式图片仍对应 build 10。公开 Release 附件未变。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

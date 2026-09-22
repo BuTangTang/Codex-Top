@@ -228,23 +228,27 @@ private struct MonitorTaskRow: View {
                 HStack(spacing: compact ? 11 : 14) {
                     ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? .regular : .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
-                        if !activity.phase.isFinished {
-                            HStack(spacing: 8) {
-                                HStack(spacing: 5) {
-                                    Text(activity.detail).lineLimit(1)
-                                    if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                activityStatus(activity)
-                            }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                        }
+                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        HStack(spacing: 8) {
+                            HStack(spacing: 5) {
+                                Text(activity.phase == .completed ? "本轮完成" : activity.detail)
+                                    .foregroundStyle(activity.phase == .completed ? activity.phase.tint(store.theme.colorScheme) : Palette.secondary(store.theme.colorScheme))
+                                    .lineLimit(1)
+                                if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            if activity.phase != .completed { activityStatus(activity) }
+                        }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    if activity.phase.isFinished { activityStatus(activity) }
                 }.padding(.horizontal, 16).frame(height: PanelMetrics.rowHeight(for: activity.phase)).contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
                 .accessibilityIdentifier("monitor-task-\(taskID)")
                 .contextMenu {
                     Button("打开任务") { store.openTask(task) }
+                    if store.isManuallyFinished(task) {
+                        Button("移回上方") { store.restoreFinishedTask(task.id) }
+                    } else if MonitoringPolicy.canFinish(task, graph: store.graph) {
+                        Button("收进已结束") { store.finishTask(task.id) }
+                    }
                     Divider()
                     Button("移出监控") { store.removeFromMonitoring(task.id) }
                 }

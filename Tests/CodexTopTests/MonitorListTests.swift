@@ -7,6 +7,110 @@ import CodexTopCore
 
 final class MonitorListTests: XCTestCase {
     @MainActor
+    func testCollapsedOrbDoesNotContinuouslyRelayoutOverflowingList() async throws {
+        let fixture = try makeFixture(count: 13, activeCount: 3, fileFinished: false)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let waitingLog = fixture.appendingPathComponent("0.jsonl")
+        let waitingData = try JSONSerialization.data(withJSONObject: ["type": "event_msg",
+            "timestamp": ISO8601DateFormatter().string(from: Date()), "payload": ["type": "request_user_input"]])
+        try (waitingData + Data([10])).write(to: waitingLog)
+        let file = PreferencesFile(url: fixture.appendingPathComponent("preferences.json"))
+        var preferences = try file.load()
+        preferences.uiScale = 0.7875; preferences.setPlacement(.orb)
+        try file.save(preferences)
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        let orb = OrbMorphState()
+        orb.expandedSize = CGSize(width: 324, height: 285)
+        let host = NSHostingView(rootView: FloatingPanelView(store: store, presentation: PanelPresentation(), resizeState: FloatingResizeState(),
+            orbState: orb, monitorState: MonitorPanelState(), pickTasks: {}, settings: {}, openTasks: {}, closeTasks: {},
+            finishedChanged: {}, dragStarted: { _ in }, dragMoved: { _ in }, dragEnded: { _ in }).windowTypography())
+        host.sizingOptions = []
+        let window = NSWindow(contentRect: CGRect(x: 300, y: 300, width: 44, height: 44),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        flushLayout(host)
+        try await Task.sleep(for: .milliseconds(200))
+        let scroll = try XCTUnwrap(findScroll(in: host))
+        final class Counter: @unchecked Sendable { var value = 0 }
+        let counter = Counter()
+        scroll.contentView.postsFrameChangedNotifications = true
+        let observer = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification,
+            object: scroll.contentView, queue: .main) { _ in counter.value += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        for _ in 0..<20 {
+            flushLayout(host)
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        print("Collapsed 105% overflow clip-frame updates: \(counter.value)")
+        XCTAssertLessThan(counter.value, 10, "A hidden task list must settle instead of repeatedly changing its clip frame")
+        // 呼吸收缩时仍须保持完整圆形，避免隐藏大列表撑大背景后切平圆环顶部。
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        for fraction in [0.08, 0.92] {
+            let color = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2,
+                y: Int(Double(bitmap.pixelsHigh) * fraction)))
+            XCTAssertGreaterThan(color.alphaComponent, 0.9, "Both poles of the breathing circle must stay filled")
+        }
+        XCTAssertFalse(window.isVisible)
+    }
+
+    @MainActor
+    func testManualFilingKeepsSelectionAndSurvivesRestartAndCanBeRestored() async throws {
+        let fixture = try makeFixture(count: 3, fileFinished: false)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let database = fixture.appendingPathComponent("state_5.sqlite")
+        let originalDatabase = try Data(contentsOf: database)
+        let originalLog = try Data(contentsOf: fixture.appendingPathComponent("1.jsonl"))
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        XCTAssertEqual(store.active.count, 3)
+        XCTAssertTrue(store.finished.isEmpty)
+        let originalIDs = store.preferences.selectedIDs
+        store.finishTask("synthetic-0")
+        XCTAssertTrue(store.finished.isEmpty, "A running task cannot be filed")
+        store.finishTask("synthetic-1")
+        XCTAssertEqual(store.finished.map(\.id), ["synthetic-1"])
+        XCTAssertEqual(store.preferences.selectedIDs, originalIDs)
+        XCTAssertTrue(store.preferences.excludedIDs.isEmpty)
+        let restarted = TaskStore(stateDirectory: fixture)
+        await restarted.refresh()
+        XCTAssertEqual(restarted.finished.map(\.id), ["synthetic-1"])
+        restarted.restoreFinishedTask("synthetic-1")
+        await restarted.refresh()
+        XCTAssertTrue(restarted.finished.isEmpty)
+        XCTAssertEqual(restarted.active.count, 3)
+        XCTAssertEqual(try Data(contentsOf: database), originalDatabase)
+        XCTAssertEqual(try Data(contentsOf: fixture.appendingPathComponent("1.jsonl")), originalLog)
+    }
+
+    @MainActor
+    func testFiledTaskReturnsAfterWholeRoundWhileAppWasClosed() async throws {
+        let fixture = try makeFixture(count: 2, fileFinished: false)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        store.finishTask("synthetic-1")
+        let log = fixture.appendingPathComponent("1.jsonl")
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        for (index, event) in ["task_started", "task_complete"].enumerated() {
+            let record: [String: Any] = ["type": "event_msg",
+                "timestamp": ISO8601DateFormatter().string(from: Date().addingTimeInterval(Double(index + 1))),
+                "payload": ["type": event, "turn_id": "second"]]
+            var data = try JSONSerialization.data(withJSONObject: record); data.append(10)
+            try handle.write(contentsOf: data)
+        }
+        try handle.close()
+        let restarted = TaskStore(stateDirectory: fixture)
+        await restarted.refresh()
+        XCTAssertTrue(restarted.finished.isEmpty)
+        XCTAssertEqual(restarted.active.count, 2)
+        XCTAssertNil(restarted.preferences.manuallyFinishedTasks?["synthetic-1"])
+    }
+
+    @MainActor
     func testFloatingViewportKeepsRunningRowAndMovesFooterWithItsHeight() async throws {
         let fixture = try makeFixture(count: 60)
         defer { try? FileManager.default.removeItem(at: fixture) }
@@ -136,7 +240,7 @@ final class MonitorListTests: XCTestCase {
             durations.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
             try await Task.sleep(for: .milliseconds(400))
             let scroll = try XCTUnwrap(findScroll(in: host))
-            XCTAssertEqual(try XCTUnwrap(scroll.documentView).frame.height, 54 + 299 * 36, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(scroll.documentView).frame.height, 300 * 54, accuracy: 1)
             XCTAssertEqual(scroll.contentView.bounds.origin.y, 0, accuracy: 1)
             orb.expanded = false
             orb.surfaceFrame = CGRect(x: 0, y: 0, width: 44, height: 44)
@@ -171,7 +275,7 @@ final class MonitorListTests: XCTestCase {
             durations.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
             try await Task.sleep(for: .milliseconds(80))
             let scroll = try XCTUnwrap(findScroll(in: host))
-            XCTAssertEqual(try XCTUnwrap(scroll.documentView).frame.height, 54 + 299 * 36, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(scroll.documentView).frame.height, 300 * 54, accuracy: 1)
             state.expandedFinished = false
             flushLayout(host)
             try await Task.sleep(for: .milliseconds(80))
@@ -280,7 +384,7 @@ final class MonitorListTests: XCTestCase {
         return view.subviews.compactMap { findScroll(in: $0) }.first
     }
 
-    private func makeFixture(count: Int, activeCount: Int = 1) throws -> URL {
+    private func makeFixture(count: Int, activeCount: Int = 1, fileFinished: Bool = true) throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("monitor-list-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let database = directory.appendingPathComponent("state_5.sqlite")
@@ -308,6 +412,14 @@ final class MonitorListTests: XCTestCase {
             let sql = "INSERT INTO threads VALUES('\(id)','合成任务 \(index)','/synthetic','\(log.path)',\(Int(now.timeIntervalSince1970)),\(Int(now.timeIntervalSince1970) - index),0)"
             XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK)
             preferences.selectedIDs.insert(id)
+            if fileFinished && index >= activeCount {
+                var task = CodexTask(id: id, title: "Synthetic", project: "Synthetic", createdAt: now,
+                                     updatedAt: now, rolloutURL: log)
+                task.activity = TaskActivity(phase: .completed)
+                task.activity.turnID = "synthetic-turn"
+                task.activity.finishedAt = now
+                MonitoringPolicy.finish(task, preferences: &preferences, graph: TaskGraph(tasks: [task]), now: now)
+            }
         }
         try PreferencesFile(url: directory.appendingPathComponent("preferences.json")).save(preferences)
         return directory

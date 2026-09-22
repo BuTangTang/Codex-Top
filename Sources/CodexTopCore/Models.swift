@@ -6,7 +6,7 @@ public enum TaskPhase: String, Codable, Sendable, CaseIterable {
         switch self {
         case .running: "运行中"
         case .waiting: "待处理"
-        case .completed: "已完成"
+        case .completed: "本轮完成"
         case .failed: "出错"
         case .stopped: "已停止"
         case .idle: "未运行"
@@ -33,6 +33,8 @@ public struct TaskActivity: Equatable, Sendable {
     public var detail: String = "尚无可识别的活动记录"
     public var lastEventAt: Date?
     public var startedAt: Date?
+    /// Timestamp of an explicit terminal event, unaffected by trailing usage records.
+    public var finishedAt: Date?
     public var waitingStartedAt: Date?
     public var turnID: String?
     public init(phase: TaskPhase = .unknown, detail: String = "尚无可识别的活动记录", lastEventAt: Date? = nil, startedAt: Date? = nil, waitingStartedAt: Date? = nil) {
