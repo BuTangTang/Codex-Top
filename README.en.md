@@ -28,7 +28,7 @@ These four images show **actual v1.0.0 build 10 windows on the Mac’s built-in 
 |---|---|
 | ![Expanded orb on the built-in display](docs/images/1.0.0-build10/orb-expanded-dark.jpg) | ![Menu bar panel on the built-in display](docs/images/1.0.0-build10/menubar-dark.jpg) |
 
-These images retain build 10’s original scale and layout. Current modes share equal-height two-line rows and a combined finished/usage footer. Completed turns stay visible until manually filed into Finished. The collapsed orb remains 44pt; all modes share one task selection and the same two header controls. See [capture provenance and validation scope](docs/validation/appearance-restore.md).
+These images retain build 10’s original scale and layout. Current modes share single-line finished rows, two-line active rows, and a combined finished/usage footer. The collapsed orb remains 44pt; all modes share one task selection and the same two header controls. See [capture provenance and validation scope](docs/validation/appearance-restore.md).
 
 ## Features
 
@@ -41,7 +41,7 @@ Four display modes share one set of monitored tasks:
 | Orb | Left-click to expand in place. Moving the pointer away keeps it open; click outside, choose “⋯ → Collapse to orb,” or press Escape to close. Right-click for the menu. |
 | Menu bar only | Status counts on a transparent background. Left-click to show/hide tasks; right-click for the menu. |
 
-- **Task selection:** Search, select multiple tasks, or select/deselect current results. Right-click to remove a task from monitoring; select it again to restore it. Newly created tasks join automatically when they start; manual exclusions take priority. Child tasks are grouped under their parent, attention comes first, and completed turns stay visible until manually filed into Finished. New activity brings filed tasks back automatically. Creating tasks, answering questions, and granting approvals still happen in Codex.
+- **Task selection:** Search, select multiple tasks, or select/deselect current results. Right-click to remove a task from monitoring; select it again to restore it. Newly created tasks join automatically when they start; manual exclusions take priority. Child tasks are grouped under their parent, attention comes first, and finished tasks can be collapsed. Creating tasks, answering questions, and granting approvals still happen in Codex.
 - **Status cues:** Blue running arcs share a rotation phase; newly shown or resumed arcs join the same rhythm. The orb's center shows the running count. The running label uses the theme's primary text color, while the arc stays blue. Attention adds a subtle tint and `!`: orange in the light theme, amber in dark, red for failures, and green for completion. Attention gently pulses; Reduce Motion keeps static cues.
 - **Fixed elapsed time:** The `mm:ss` next to a waiting label measures from the current turn's start to the start of the current wait. It stays fixed while awaiting an answer and is omitted when reliable timestamps are missing. It is not CPU time and does not subtract earlier waits in the same turn.
 - **Running timer:** Without a reliable record of the current turn's start, the timer shows `--:--` with an explanation on hover. A bounded search for explicit start records runs only for monitored tasks and their children, filling time fields after compatibility checks. Missing or uncertain evidence keeps the placeholder; app launch time, file modification time, and the latest output timestamp are not used to invent a duration.

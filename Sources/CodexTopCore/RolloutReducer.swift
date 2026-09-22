@@ -40,19 +40,14 @@ public struct RolloutReducer: Sendable {
                 if asynchronousQuestion { waiting(at, detail: "等待你的回答") }
                 else {
                     activity.phase = .completed; activity.detail = "本轮执行已结束"
-                    activity.finishedAt = at
-                    activity.turnID = payload["turn_id"] as? String ?? activity.turnID
                     activity.waitingStartedAt = nil
                 }
                 waitingCallIDs.removeAll()
             case "turn_aborted", "task_cancelled", "turn_cancelled":
                 activity.phase = .stopped; activity.detail = "本轮执行已停止"; waitingCallIDs.removeAll()
-                activity.finishedAt = at
-                activity.turnID = payload["turn_id"] as? String ?? activity.turnID
                 activity.waitingStartedAt = nil; asynchronousQuestion = false
             case "task_failed", "turn_failed":
                 activity.phase = .failed; activity.detail = "执行遇到问题，请回到 Codex 查看"; waitingCallIDs.removeAll()
-                activity.finishedAt = nil
                 activity.waitingStartedAt = nil; asynchronousQuestion = false
             case "request_user_input", "user_input_requested", "exec_approval_request", "apply_patch_approval_request":
                 waiting(at, detail: "等待你的输入或确认")
@@ -98,7 +93,6 @@ public struct RolloutReducer: Sendable {
     private mutating func active(_ at: Date?, detail: String) {
         if activity.phase.isFinished || activity.phase == .failed { activity.startedAt = at; activity.turnID = nil }
         activity.phase = .running; activity.detail = detail
-        activity.finishedAt = nil
         activity.waitingStartedAt = nil
     }
     private mutating func waiting(_ at: Date?, detail: String) {
@@ -109,7 +103,6 @@ public struct RolloutReducer: Sendable {
         }
         // A missing first timestamp stays unknown; a repeated wait must not invent a later anchor.
         activity.phase = .waiting; activity.detail = detail
-        activity.finishedAt = nil
     }
     fileprivate mutating func recoverTiming(from recovered: TaskActivity) {
         guard activity.startedAt == nil, activity.phase == .running || activity.phase == .waiting,

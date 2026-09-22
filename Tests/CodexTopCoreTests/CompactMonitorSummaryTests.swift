@@ -28,7 +28,7 @@ final class CompactMonitorSummaryTests: XCTestCase {
         let cases: [([TaskPhase], String, TaskPhase)] = [
             ([], "无任务", .idle),
             ([.idle], "未运行", .idle),
-            ([.completed, .completed], "本轮完成", .completed),
+            ([.completed, .completed], "已完成", .completed),
             ([.completed, .unknown], "状态未知", .unknown),
             ([.completed, .stopped], "已停止", .stopped)
         ]

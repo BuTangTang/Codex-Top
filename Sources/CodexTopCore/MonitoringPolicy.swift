@@ -43,8 +43,6 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var finishedRetentionDays: Int?
     public var automaticallyRemovedIDs: Set<String>?
     public var retentionProtectedIDs: Set<String>?
-    // Local filing decisions store only round metadata, never titles or message content.
-    public var manuallyFinishedTasks: [String: FinishedTaskRecord]?
     public static let finishedRetentionOptions = [0, 3, 7, 14, 30]
     public var resolvedFinishedRetentionDays: Int {
         let days = finishedRetentionDays ?? 7
@@ -76,62 +74,7 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     }
 }
 
-public struct FinishedTaskRecord: Codable, Equatable, Sendable {
-    public struct Round: Codable, Equatable, Sendable {
-        var turnID: String?
-        var startedAt: Date?
-        var finishedAt: Date?
-    }
-    var recordedAt: Date
-    var rounds: [String: Round]
-}
-
 public enum MonitoringPolicy {
-    public static func canFinish(_ root: CodexTask, graph: TaskGraph) -> Bool {
-        graph.activity(for: root).phase.isFinished && ([root] + (graph.children[root.id] ?? [])).allSatisfy {
-            $0.activity.phase.isFinished || $0.activity.phase == .idle
-        }
-    }
-    public static func isManuallyFinished(_ root: CodexTask, preferences: MonitorPreferences, graph: TaskGraph) -> Bool {
-        preferences.manuallyFinishedTasks?[root.id] != nil && canFinish(root, graph: graph)
-    }
-    public static func finish(_ root: CodexTask, preferences: inout MonitorPreferences, graph: TaskGraph, now: Date) {
-        guard preferences.selectedIDs.contains(root.id), canFinish(root, graph: graph) else { return }
-        let members = [root] + (graph.children[root.id] ?? [])
-        let rounds = Dictionary(uniqueKeysWithValues: members.map { task in
-            (task.id, FinishedTaskRecord.Round(turnID: task.activity.turnID,
-                startedAt: task.activity.startedAt, finishedAt: task.activity.finishedAt))
-        })
-        if preferences.manuallyFinishedTasks == nil { preferences.manuallyFinishedTasks = [:] }
-        preferences.manuallyFinishedTasks?[root.id] = FinishedTaskRecord(recordedAt: now, rounds: rounds)
-    }
-    private static func reconcileFinished(_ preferences: inout MonitorPreferences, graph: TaskGraph) {
-        guard var records = preferences.manuallyFinishedTasks else { return }
-        let monitored = preferences.selectedIDs.union(preferences.automaticallyRemovedIDs ?? [])
-        records = records.filter { monitored.contains($0.key) && !preferences.excludedIDs.contains($0.key) }
-        for root in graph.roots {
-            guard let record = records[root.id] else { continue }
-            let resumed = ([root] + (graph.children[root.id] ?? [])).contains { task in
-                let current = task.activity, previous = record.rounds[task.id]
-                if current.phase.isActive || current.phase == .failed { return true }
-                if let turn = current.turnID, let old = previous?.turnID, turn != old { return true }
-                // Explicit starts/ends also catch an entire new round between scans or restarts.
-                // Database timestamps, trailing usage events and file mtime are not evidence.
-                var dates = [(current.startedAt, previous?.startedAt)]
-                if current.turnID == nil || previous?.turnID == nil { dates.append((current.finishedAt, previous?.finishedAt)) }
-                for (date, old) in dates {
-                    if let date, date.timeIntervalSince1970.isFinite, date > (old ?? record.recordedAt) { return true }
-                }
-                return false
-            }
-            if resumed {
-                records.removeValue(forKey: root.id)
-                if preferences.automaticallyRemovedIDs?.remove(root.id) != nil,
-                   !preferences.excludedIDs.contains(root.id) { preferences.selectedIDs.insert(root.id) }
-            }
-        }
-        preferences.manuallyFinishedTasks = records
-    }
     public static func rootID(for id: String, tasks: [CodexTask]) -> String {
         TaskGraph(tasks: tasks).rootIDs[id] ?? id
     }
@@ -173,7 +116,6 @@ public enum MonitoringPolicy {
                 }
             }
         }
-        reconcileFinished(&preferences, graph: graph)
         applyRetention(&preferences, graph: graph, now: now)
     }
     private static func applyRetention(_ preferences: inout MonitorPreferences, graph: TaskGraph, now: Date) {
@@ -209,7 +151,7 @@ public enum MonitoringPolicy {
                     retired.remove(root.id)
                     if !preferences.excludedIDs.contains(root.id) { preferences.selectedIDs.insert(root.id) }
                 }
-            } else if expired && preferences.manuallyFinishedTasks?[root.id] != nil && preferences.retentionProtectedIDs?.contains(root.id) != true {
+            } else if expired && preferences.retentionProtectedIDs?.contains(root.id) != true {
                 preferences.selectedIDs.remove(root.id)
                 retired.insert(root.id)
             }
@@ -234,7 +176,6 @@ public enum MonitoringPolicy {
         protected.subtract(removed)
         preferences.retentionProtectedIDs = protected
         preferences.automaticallyRemovedIDs?.subtract(added.union(removed))
-        for id in added.union(removed) { preferences.manuallyFinishedTasks?.removeValue(forKey: id) }
     }
     public static func selectVisible(_ visible: Set<String>, selected: inout Set<String>) {
         if visible.isSubset(of: selected) { selected.subtract(visible) } else { selected.formUnion(visible) }

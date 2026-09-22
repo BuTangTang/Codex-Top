@@ -91,11 +91,8 @@ import CodexTopCore
             return $0.updatedAt > $1.updatedAt
         }
     }
-    var active: [CodexTask] { selected.filter { !isManuallyFinished($0) } }
-    var finished: [CodexTask] { selected.filter { isManuallyFinished($0) } }
-    func isManuallyFinished(_ task: CodexTask) -> Bool {
-        MonitoringPolicy.isManuallyFinished(task, preferences: preferences, graph: graph)
-    }
+    var active: [CodexTask] { selected.filter { !graph.activity(for: $0).phase.isFinished } }
+    var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished } }
     var statusSummary: MonitorStatusSummary { MonitorStatusSummary(phases: selected.map { graph.activity(for: $0).phase }) }
     var runningCount: Int { statusSummary.running }
     var attentionCount: Int { statusSummary.attention }
@@ -275,15 +272,6 @@ import CodexTopCore
         guard preferences.selectedIDs.contains(root) else { return }
         applySelection([], original: [root])
     }
-    func finishTask(_ id: String) {
-        guard let task = graph.roots.first(where: { $0.id == id }) else { return }
-        MonitoringPolicy.finish(task, preferences: &preferences, graph: graph, now: .now)
-        save(); onChange?()
-    }
-    func restoreFinishedTask(_ id: String) {
-        guard preferences.manuallyFinishedTasks?.removeValue(forKey: id) != nil else { return }
-        save(); onChange?()
-    }
     func setAutoMonitor(_ enabled: Bool) {
         MonitoringPolicy.setAutoMonitor(enabled, preferences: &preferences, tasks: tasks, now: .now)
         save(); updateRolloutWatches()
@@ -351,7 +339,6 @@ import CodexTopCore
             preferences.codexHome = url.path; preferences.initialized = false
             preferences.selectedIDs.removeAll(); preferences.excludedIDs.removeAll()
             preferences.automaticallyRemovedIDs = []; preferences.retentionProtectedIDs = []
-            preferences.manuallyFinishedTasks = [:]
             source = LocalCodexSource(root: url); tasks = []; graph = TaskGraph(tasks: []); quota = nil
             resetUsageSource()
             sourceWarning = nil; loading = true; save(); onChange?()

@@ -16,17 +16,12 @@ final class FinishedRetentionTests: XCTestCase {
         result.selectedIDs = ids; result.finishedRetentionDays = 7
         return result
     }
-    private func fileFinished(_ tasks: [CodexTask], preferences: inout MonitorPreferences) {
-        let graph = TaskGraph(tasks: tasks)
-        for root in graph.roots { MonitoringPolicy.finish(root, preferences: &preferences, graph: graph, now: now) }
-    }
     func testOnlyOldTerminalConversationsExpireAtBoundary() {
         let tasks = [task("old", phase: .completed, daysAgo: 8), task("boundary", phase: .stopped, daysAgo: 7),
                      task("recent", phase: .completed, daysAgo: 6.999), task("running", phase: .running, daysAgo: 20),
                      task("waiting", phase: .waiting, daysAgo: 20), task("unknown", phase: .unknown, daysAgo: 20),
                      task("failed", phase: .failed, daysAgo: 20), task("idle", phase: .idle, daysAgo: 20)]
         var p = preferences(Set(tasks.map(\.id)))
-        fileFinished(tasks, preferences: &p)
         MonitoringPolicy.reconcile(&p, tasks: tasks, now: now)
         XCTAssertEqual(p.automaticallyRemovedIDs, ["old", "boundary"])
         XCTAssertEqual(p.selectedIDs, ["recent", "running", "waiting", "unknown", "failed", "idle"])
@@ -39,21 +34,18 @@ final class FinishedRetentionTests: XCTestCase {
                       task("child", phase: .waiting, daysAgo: 10, parent: "root"),
                       task("child", phase: .unknown, daysAgo: 10, parent: "root")] {
             var p = preferences(["root"])
-            fileFinished([root], preferences: &p)
             MonitoringPolicy.reconcile(&p, tasks: [root, child], now: now)
             XCTAssertEqual(p.selectedIDs, ["root"])
         }
         var recentEvent = root
         recentEvent.activity.lastEventAt = now
         var p = preferences(["root"])
-        fileFinished([root], preferences: &p)
         MonitoringPolicy.reconcile(&p, tasks: [recentEvent], now: now)
         XCTAssertEqual(p.selectedIDs, ["root"], "An old creation or DB timestamp must not override recent activity")
     }
     func testRetirementPersistsAndResumedTasksReturnButManualExclusionsDoNot() throws {
         let old = task("old", phase: .completed, daysAgo: 8)
         var p = preferences(["old"])
-        fileFinished([old], preferences: &p)
         MonitoringPolicy.reconcile(&p, tasks: [old], now: now)
         p = try JSONDecoder().decode(MonitorPreferences.self, from: JSONEncoder().encode(p))
         MonitoringPolicy.reconcile(&p, tasks: [old], now: now)
@@ -72,7 +64,6 @@ final class FinishedRetentionTests: XCTestCase {
         let tasks = [task("restore", phase: .completed, daysAgo: 8), task("retired", phase: .stopped, daysAgo: 8),
                      task("manual", phase: .completed, daysAgo: 8)]
         var p = preferences(Set(tasks.map(\.id)))
-        fileFinished(tasks, preferences: &p)
         MonitoringPolicy.applySelection(["restore", "retired"], original: p.selectedIDs, preferences: &p)
         MonitoringPolicy.reconcile(&p, tasks: tasks, now: now)
         MonitoringPolicy.applySelection(["restore"], original: [], preferences: &p)
@@ -87,7 +78,6 @@ final class FinishedRetentionTests: XCTestCase {
         var old = task("old", phase: .completed, daysAgo: 8)
         old.createdAt = now.addingTimeInterval(-9 * 86_400)
         var p = preferences(["old"])
-        fileFinished([old], preferences: &p)
         p.autoMonitor = true; p.autoEnabledAt = now.addingTimeInterval(-10 * 86_400); p.autoBaselineIDs = []
         MonitoringPolicy.reconcile(&p, tasks: [old], now: now)
         let retired = p
@@ -108,12 +98,10 @@ final class FinishedRetentionTests: XCTestCase {
             missing.updatedAt = Date(timeIntervalSince1970: timestamp)
             missing.activity.lastEventAt = nil
             var p = preferences(["missing"])
-            fileFinished([missing], preferences: &p)
             MonitoringPolicy.reconcile(&p, tasks: [missing], now: now)
             XCTAssertEqual(p.selectedIDs, ["missing"])
             missing.parentID = "root"
             p = preferences(["root"])
-            fileFinished([task("root", phase: .completed, daysAgo: 20), missing], preferences: &p)
             MonitoringPolicy.reconcile(&p, tasks: [task("root", phase: .completed, daysAgo: 20), missing], now: now)
             XCTAssertEqual(p.selectedIDs, ["root"])
         }

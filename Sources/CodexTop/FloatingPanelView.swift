@@ -60,7 +60,6 @@ private struct OrbPanelView: View {
         return "\(statusLabel) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理"
     }
     private var shouldBreathe: Bool { !usesTwinArc && store.attentionCount > 0 && !state.expanded && !reduceMotion }
-    private var breathingScale: CGFloat { usesTwinArc || state.expanded || reduceMotion ? 1 : attentionScale }
     private var showsAttention: Bool { store.attentionCount > 0 && !state.expanded }
     private var attentionTint: Color {
         (store.statusSummary.phase == .failed ? TaskPhase.failed : .waiting).tint(store.theme.colorScheme)
@@ -68,16 +67,8 @@ private struct OrbPanelView: View {
     private var contentAlignment: Alignment { state.expansionDirection == .up ? .bottom : .top }
     var body: some View {
         ZStack(alignment: contentAlignment) {
-            // Breathing belongs to the visible orb, not the hidden NSScrollView.
-            // Scaling that scroll view continually retiled its overflowing content.
-            ZStack {
-                GlassFill()
-                attentionTint.opacity(showsAttention && !usesTwinArc ? (store.theme == .light ? 0.04 : 0.16) : 0)
-            }
-                // 背景按当前可见表面缩放，不能采用隐藏列表撑出的展开尺寸。
-                .frame(width: state.surfaceFrame.width, height: state.surfaceFrame.height)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .circular))
-                .scaleEffect(breathingScale)
+            GlassFill()
+            attentionTint.opacity(showsAttention && !usesTwinArc ? (store.theme == .light ? 0.04 : 0.16) : 0)
                 .allowsHitTesting(false)
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
@@ -103,7 +94,6 @@ private struct OrbPanelView: View {
                     WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded, enabled: !state.expanded)
                 }
                 .modifier(OrbRevealOpacity(progress: state.expanded ? 1 : 0, layer: .ring))
-                .scaleEffect(breathingScale)
                 .allowsHitTesting(!state.expanded)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Codex Top \(usesTwinArc ? "渐隐双弧" : "圆环")，\(statusDetail)")
@@ -122,8 +112,6 @@ private struct OrbPanelView: View {
                     .frame(width: 11, height: 11)
                     .background(attentionTint, in: Circle())
                     .padding(.top, 5).padding(.trailing, 5)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .scaleEffect(breathingScale)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -133,9 +121,9 @@ private struct OrbPanelView: View {
             RoundedRectangle(cornerRadius: 22, style: .circular)
                 .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
                 .opacity(store.theme == .light && (!usesTwinArc || state.expanded) ? 1 : 0)
-                .scaleEffect(breathingScale)
                 .allowsHitTesting(false)
         }
+        .scaleEffect(usesTwinArc || state.expanded || reduceMotion ? 1 : attentionScale)
         .position(x: state.surfaceFrame.midX, y: state.surfaceFrame.midY)
         .environment(\.colorScheme, store.theme == .light ? .light : .dark)
         .onExitCommand(perform: closeTasks)

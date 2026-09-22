@@ -62,7 +62,7 @@ struct TaskPickerView: View {
     private var filtered: [CodexTask] {
         store.graph.roots.filter { task in
             let phase = store.graph.activity(for: task).phase
-            let statusMatch = filter == "全部" || (filter == "运行中" && phase == .running) || (filter == "待处理" && [.waiting, .failed].contains(phase)) || (filter == "本轮结束" && phase.isFinished)
+            let statusMatch = filter == "全部" || (filter == "运行中" && phase == .running) || (filter == "待处理" && [.waiting, .failed].contains(phase)) || (filter == "已结束" && phase.isFinished)
             return statusMatch && (search.isEmpty || task.title.localizedCaseInsensitiveContains(search) || task.project.localizedCaseInsensitiveContains(search))
         }
     }
@@ -87,7 +87,7 @@ struct TaskPickerView: View {
                 .background(Palette.primary(store.theme.colorScheme).opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline(store.theme.colorScheme), lineWidth: 0.7)).padding(.horizontal, 22)
             HStack(spacing: 9) {
-                ForEach(["全部", "运行中", "待处理", "本轮结束"], id: \.self) { item in
+                ForEach(["全部", "运行中", "待处理", "已结束"], id: \.self) { item in
                     Button { filter = item } label: {
                         Text(item).font(PanelFonts.readable(14, scale: store.uiScale, weight: filter == item ? .medium : .regular, compact: compactTypography)).foregroundStyle(filter == item ? .white : Palette.primary(store.theme.colorScheme)).frame(maxWidth: .infinity).frame(height: 32)
                             .background(filter == item ? Palette.accent : Palette.primary(store.theme.colorScheme).opacity(0.045), in: Capsule())
@@ -247,7 +247,7 @@ struct SettingsView: View {
                         Text(days == 0 ? "关闭" : "\(days) 天无活动后").tag(days)
                     }
                 }
-                Text("仅整理你已手动收进“已结束”的任务，按最近活动计算。上方任务一直保留；再次运行会自动回来。通过＋重新加入后保留，关闭此项会恢复自动移出的任务。").font(.caption).foregroundStyle(.secondary)
+                Text("仅移出已停止、已完成的任务，按最近活动计算。再次运行会自动回来；通过＋重新加入后保留。关闭此项会恢复自动移出的任务。").font(.caption).foregroundStyle(.secondary)
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
