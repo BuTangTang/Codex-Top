@@ -7,8 +7,18 @@ public struct RolloutReducer: Sendable {
     public private(set) var quota: QuotaSnapshot?
     private var waitingCallIDs: Set<String> = []
     private var asynchronousQuestion = false
+    private var replyQuestions: [String: ReplyQuestion] = [:]
+    private var untrackedWait = false
+    private var turnEnded = false
+
+    /// 只保留问题编号、选项序号和提问时间，不保留提问或回答正文。
+    private struct ReplyQuestion: Sendable {
+        let askedAt: Date
+        let items: Set<Int>
+    }
     public init() {}
 
+    /// 按任务记录更新真实状态，并保存可供早期回复证据核对的问题元数据。
     public mutating func consume(_ line: Data) {
         guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let payload = value["payload"] as? [String: Any],
@@ -36,7 +46,9 @@ public struct RolloutReducer: Sendable {
                 activity.turnID = payload["turn_id"] as? String
                 waitingCallIDs.removeAll()
                 asynchronousQuestion = false
+                clearReplyQuestions()
             case "task_complete", "turn_complete":
+                turnEnded = true
                 if asynchronousQuestion { waiting(at, detail: "等待你的回答") }
                 else {
                     activity.phase = .completed; activity.detail = "本轮执行已结束"
@@ -46,13 +58,17 @@ public struct RolloutReducer: Sendable {
             case "turn_aborted", "task_cancelled", "turn_cancelled":
                 activity.phase = .stopped; activity.detail = "本轮执行已停止"; waitingCallIDs.removeAll()
                 activity.waitingStartedAt = nil; asynchronousQuestion = false
+                clearReplyQuestions()
             case "task_failed", "turn_failed":
                 activity.phase = .failed; activity.detail = "执行遇到问题，请回到 Codex 查看"; waitingCallIDs.removeAll()
                 activity.waitingStartedAt = nil; asynchronousQuestion = false
+                clearReplyQuestions()
             case "request_user_input", "user_input_requested", "exec_approval_request", "apply_patch_approval_request":
+                untrackedWait = true
                 waiting(at, detail: "等待你的输入或确认")
             case "user_message", "user_input", "approval_resolved":
                 active(at, detail: "收到输入，正在继续"); waitingCallIDs.removeAll(); asynchronousQuestion = false
+                clearReplyQuestions()
             case "agent_message", "agent_reasoning":
                 if activity.phase != .waiting && !activity.phase.isFinished { active(at, detail: "正在处理任务") }
             case "token_count":
@@ -60,7 +76,10 @@ public struct RolloutReducer: Sendable {
             case "item_completed":
                 if let item = payload["item"] as? [String: Any] {
                     let itemType = (item["type"] as? String ?? "").lowercased()
-                    if itemType == "usermessage" { active(at, detail: "收到输入，正在继续"); waitingCallIDs.removeAll(); asynchronousQuestion = false }
+                    if itemType == "usermessage" {
+                        active(at, detail: "收到输入，正在继续"); waitingCallIDs.removeAll(); asynchronousQuestion = false
+                        clearReplyQuestions()
+                    }
                     else if ["commandexecution", "filechange", "reasoning", "mcptoolcall"].contains(itemType), activity.phase != .waiting, !activity.phase.isFinished {
                         active(at, detail: itemType == "filechange" ? "正在修改文件" : "正在执行任务")
                     }
@@ -73,13 +92,18 @@ public struct RolloutReducer: Sendable {
                 // The response record can precede the corresponding UserMessage event.
                 active(at, detail: "收到输入，正在继续")
                 waitingCallIDs.removeAll(); asynchronousQuestion = false
+                clearReplyQuestions()
                 if let at { activity.lastEventAt = at }
             } else if type == "function_call" || type == "custom_tool_call" {
                 let name = payload["name"] as? String ?? ""
                 if name == "request_user_input" || name == "request_user_input_async" || name.hasSuffix("__request_user_input") {
                     waiting(at, detail: "等待你的回答")
-                    if name == "request_user_input_async" { asynchronousQuestion = true }
+                    if name == "request_user_input_async" {
+                        asynchronousQuestion = true
+                        rememberReplyQuestion(payload, at: at)
+                    }
                     else if let id = payload["call_id"] as? String { waitingCallIDs.insert(id) }
+                    else { untrackedWait = true }
                 } else if activity.phase != .waiting { active(at, detail: "正在执行任务") }
                 if let at { activity.lastEventAt = at }
             } else if type == "function_call_output" || type == "custom_tool_call_output" {
@@ -89,6 +113,62 @@ public struct RolloutReducer: Sendable {
                 if let at { activity.lastEventAt = at }
             }
         }
+    }
+
+    /// 仅可识别的活动轮次异步提问允许查询辅助证据；审批、结束和缺失元数据沿用原状态。
+    public var awaitingReplySince: Date? {
+        guard activity.phase == .waiting, asynchronousQuestion, !turnEnded, !untrackedWait,
+              waitingCallIDs.isEmpty, activity.turnID != nil, !replyQuestions.isEmpty else { return nil }
+        return replyQuestions.values.map(\.askedAt).min()
+    }
+
+    /// 用已核实的接收回执投影当前快照，不改写任务记录、计时锚点或归约器本身。
+    public func activity(acknowledging receipts: [QuestionReplyReceipt], for threadID: String, at now: Date) -> TaskActivity {
+        guard awaitingReplySince != nil, let turnID = activity.turnID else { return activity.effective(at: now) }
+        var latestReceipt: Date?
+        for (callID, question) in replyQuestions {
+            var answered: Set<Int> = []
+            for receipt in receipts where receipt.threadID == threadID && receipt.turnID == turnID
+                && receipt.receivedAt >= question.askedAt && receipt.receivedAt <= now {
+                guard let items = receipt.questionItems[callID], items.isSubset(of: question.items) else { continue }
+                answered.formUnion(items)
+                latestReceipt = max(latestReceipt ?? receipt.receivedAt, receipt.receivedAt)
+            }
+            // 多个提问或一组中的部分回答，不能把其余仍待答的问题一起清除。
+            guard answered == question.items else { return activity.effective(at: now) }
+        }
+        guard let latestReceipt else { return activity.effective(at: now) }
+        var projected = activity
+        projected.waitingStartedAt = nil
+        // 接收时间只判断辅助证据是否过期，不冒充模型活动时间或本轮开始时间。
+        let latestEvidence = max(activity.lastEventAt ?? latestReceipt, latestReceipt)
+        if now.timeIntervalSince(latestEvidence) > 900 {
+            projected.phase = .unknown
+            projected.detail = "已回复，较久未收到后续活动"
+        } else {
+            projected.phase = .running
+            projected.detail = "已回复，等待继续"
+        }
+        return projected
+    }
+
+    /// 从工具参数提取问题总数；格式未知时禁止提前解除等待。
+    private mutating func rememberReplyQuestion(_ payload: [String: Any], at: Date?) {
+        guard let id = payload["call_id"] as? String, !id.isEmpty, let at,
+              let arguments = payload["arguments"] as? String, let data = arguments.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let questions = value["questions"] as? [[String: Any]], !questions.isEmpty, questions.count <= 64 else {
+            untrackedWait = true
+            return
+        }
+        if replyQuestions[id] == nil { replyQuestions[id] = ReplyQuestion(askedAt: at, items: Set(questions.indices)) }
+    }
+
+    /// 明确的新轮次、正式用户输入或终止清除旧提问，避免回执跨轮次生效。
+    private mutating func clearReplyQuestions() {
+        replyQuestions.removeAll()
+        untrackedWait = false
+        turnEnded = false
     }
     private mutating func active(_ at: Date?, detail: String) {
         if activity.phase.isFinished || activity.phase == .failed { activity.startedAt = at; activity.turnID = nil }

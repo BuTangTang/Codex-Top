@@ -5,12 +5,20 @@ public actor LocalCodexSource {
     public let root: URL
     private var tails: [String: IncrementalRollout] = [:]
     private var recoveryCursor = 0
-    public init(root: URL) { self.root = root.standardizedFileURL.resolvingSymlinksInPath() }
+    private let replySource: DesktopReplyReceiptSource
+    private var receivedReplies: [String: QuestionReplyReceipt] = [:]
+
+    /// 数据库、历史和桌面接收证据使用同一根目录，切换数据源时不会串用回执。
+    public init(root: URL) {
+        self.root = root.standardizedFileURL.resolvingSymlinksInPath()
+        replySource = DesktopReplyReceiptSource(root: self.root)
+    }
     public static var defaultRoot: URL {
         if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty { return URL(fileURLWithPath: override, isDirectory: true) }
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
-    public func snapshot(now: Date = .now, recoverTimingFor rootIDs: Set<String> = []) throws -> SourceSnapshot {
+    /// 先读取正式任务状态，再为关注中的待答任务核实桌面已接收的回答；辅助通道失败不影响主数据源。
+    public func snapshot(now: Date = .now, recoverTimingFor rootIDs: Set<String> = []) async throws -> SourceSnapshot {
         let database = try databaseURL()
         var connection: OpaquePointer?
         guard sqlite3_open_v2(database.path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -81,6 +89,50 @@ public actor LocalCodexSource {
                 recoveryCursor = (first + distance + 1) % candidates.count
                 tails[task.id] = tail
                 if tail.isCaughtUp { tasks[index].activity = tail.reducer.activity.effective(at: now) }
+            }
+        }
+        let graph = TaskGraph(tasks: tasks)
+        let pending = Dictionary(uniqueKeysWithValues: tasks.compactMap { task -> (String, Date)? in
+            guard rootIDs.contains(graph.rootIDs[task.id] ?? task.id), task.activity.phase == .waiting,
+                  let tail = tails[task.id], tail.isCaughtUp, let since = tail.reducer.awaitingReplySince else { return nil }
+            return (task.id, since)
+        })
+        // 只缓存已核实的编号和时间；正式输入/新轮次清除问题后同步丢弃旧回执。
+        receivedReplies = receivedReplies.filter { _, reply in
+            pending[reply.threadID].map { reply.receivedAt >= $0 } ?? false
+        }
+        if !pending.isEmpty {
+            let knownReplies = Array(receivedReplies.values)
+            let needsReceipt = pending.filter { id, _ in
+                tails[id]?.reducer.activity(acknowledging: knownReplies, for: id, at: now).phase == .waiting
+            }
+            for reply in await replySource.receipts(for: needsReceipt, now: now) {
+                guard pending[reply.threadID].map({ reply.receivedAt >= $0 }) == true else { continue }
+                receivedReplies[reply.threadID + ":" + reply.clientID] = reply
+            }
+            if receivedReplies.count > 1_024 {
+                // 异常重复提交也不能让辅助缓存无限增长；被淘汰证据仍可由正式记录确认。
+                receivedReplies = Dictionary(uniqueKeysWithValues: receivedReplies.sorted {
+                    $0.value.receivedAt == $1.value.receivedAt ? $0.key < $1.key : $0.value.receivedAt > $1.value.receivedAt
+                }.prefix(1_024).map { ($0.key, $0.value) })
+            }
+            for index in tasks.indices where pending[tasks[index].id] != nil {
+                let task = tasks[index]
+                guard var tail = tails[task.id] else { continue }
+                // IPC 等待期间可能写入正式回复、停止或新问题，重新读取后才投影，正式事件始终优先。
+                do {
+                    bytes += try tail.refresh(url: task.rolloutURL)
+                    tails[task.id] = tail
+                    if tail.isCaughtUp {
+                        tasks[index].activity = tail.reducer.activity(acknowledging: Array(receivedReplies.values), for: task.id, at: now)
+                    } else {
+                        tasks[index].activity = TaskActivity(detail: "正在同步任务活动…")
+                    }
+                } catch {
+                    tasks[index].activity = TaskActivity(detail: "暂时无法读取任务记录")
+                    tails.removeValue(forKey: task.id)
+                    failures += 1
+                }
             }
         }
         let ids = Set(tasks.map(\.id)); tails = tails.filter { ids.contains($0.key) }

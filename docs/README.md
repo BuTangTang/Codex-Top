@@ -4,6 +4,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [已接收回答的状态同步](validation/accepted-question-replies.md)：修复回答已提交而仍长时间待处理的问题，保留现有界面。
 - [build 36 可选渐隐双弧](validation/twin-arc-orb.md)：保留经典圆环，新增 D4 双弧及固定运行数，移除机器人原型。
 - [build 31 统一浅色实色外观](validation/solid-light-theme.md)：监控、菜单及主题快照共用不透明浅白，保留三项主题和原有布局。
 - [build 30 双列快捷菜单](validation/quick-menu-grid.md)：四模式 2×2、主题横排、208pt 宽和固定字号；只调整菜单。
