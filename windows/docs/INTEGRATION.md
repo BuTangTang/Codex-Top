@@ -1,6 +1,6 @@
 # Windows 集成说明 / Windows integration notes
 
-以下记录初始 Windows 0.1.8 源码导入。当前 Windows 修订为 0.1.11，无运行任务时圆环显示 0；保留自动完成信息卡、短暂完成动效与上缘小感叹号修复；这些后续改动见 [PROJECT.md](PROJECT.md) 和 [VALIDATION.md](VALIDATION.md)，不属于最初逐字节导入的范围。
+以下记录初始 Windows 0.1.8 源码导入。当前 Windows 修订为 0.1.12，兼容 Windows 扩展任务路径，修复运行任务误判为未知；无运行任务时圆环显示 0；保留自动完成信息卡、短暂完成动效与上缘小感叹号修复；这些后续改动见 [PROJECT.md](PROJECT.md) 和 [VALIDATION.md](VALIDATION.md)，不属于最初逐字节导入的范围。
 
 ## 范围与来源
 

@@ -5,7 +5,7 @@ namespace CodexTop.Core;
 
 public sealed class LocalCodexSource(string root)
 {
-    public string Root { get; } = Path.GetFullPath(root);
+    public string Root { get; } = NormalizePath(root);
     private readonly Dictionary<string, IncrementalRollout> readers = [];
     private int recoveryCursor;
     public static string DefaultRoot => Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } path ? path : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
@@ -34,7 +34,7 @@ public sealed class LocalCodexSource(string root)
             var activity = new Activity();
             try
             {
-                path = Path.GetFullPath(path);
+                path = NormalizePath(path);
                 if (!IsInsideRoot(path)) throw new IOException("记录位于数据目录之外，未读取");
                 if (!readers.TryGetValue(id, out var reader)) readers[id] = reader = new();
                 bytes += reader.Refresh(path);
@@ -70,17 +70,27 @@ public sealed class LocalCodexSource(string root)
         var relative = Path.GetRelativePath(Root, path);
         if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar)) return false;
         // Resolve each junction/symlink so an apparent child cannot escape the selected root.
-        var resolved = Path.GetFullPath(new DirectoryInfo(Root).ResolveLinkTarget(true)?.FullName ?? Root);
-        var current = Root;
+        var resolved = NormalizePath(new DirectoryInfo(Root).ResolveLinkTarget(true)?.FullName ?? Root);
+        var current = resolved;
         foreach (var part in relative.Split(Path.DirectorySeparatorChar))
         {
             current = Path.Combine(current, part);
             FileSystemInfo entry = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
             var target = entry.ResolveLinkTarget(true);
-            if (target != null) current = target.FullName;
+            if (target != null) current = NormalizePath(target.FullName);
         }
         var finalRelative = Path.GetRelativePath(resolved, current);
         return !Path.IsPathRooted(finalRelative) && finalRelative != ".." && !finalRelative.StartsWith(".." + Path.DirectorySeparatorChar);
+    }
+    private static string NormalizePath(string path)
+    {
+        path = path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        // Codex may store extended Windows paths. Compare and read the same normalized
+        // filesystem path; keep device namespaces outside this compatibility mapping.
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) path = @"\\" + path[8..];
+        else if (path.StartsWith(@"\\?\", StringComparison.Ordinal) && path.Length >= 7 && char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] == '\\') path = path[4..];
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.StartsWith(@"\\.\", StringComparison.Ordinal)) throw new NotSupportedException("不支持设备路径");
+        return Path.GetFullPath(path);
     }
     private static DateTimeOffset Timestamp(string? value) => long.TryParse(value, out var ms) && ms >= 0 && ms <= 253402300799999 ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : DateTimeOffset.UnixEpoch;
     private static string CleanTitle(string? title) => string.IsNullOrWhiteSpace(title) ? "未命名任务" : string.Concat(title.Where(c => !char.IsControl(c))).Trim();

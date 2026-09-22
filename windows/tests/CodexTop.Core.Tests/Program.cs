@@ -50,6 +50,7 @@ Test("quota uses current codex bucket and preserves missing window", () => { usi
 Test("missing quota does not become 100 percent", () => { using var doc = JsonDocument.Parse("""{"rateLimits":{"primary":{"windowDurationMins":300}}}"""); bool failed = false; try { AccountUsageClient.Parse(doc.RootElement, origin); } catch (InvalidDataException) { failed = true; } Check(failed, "missing usage"); });
 Test("task deep link validates ID", () => { Check(Task("bad/id", Phase.Running).DeepLink == null && Task(Guid.NewGuid().ToString(), Phase.Running).DeepLink?.Scheme == "codex", "URI guard"); });
 
+LocalSourcePathChecks.Run(Test, Check);
 Console.WriteLine($"{passed} tests passed.");
 if (args.Contains("--live"))
 {

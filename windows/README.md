@@ -12,7 +12,7 @@
 
 [从源码构建](#从源码构建) · [问题反馈](https://github.com/BuTangTang/Codex-Top/issues) · [集成说明](docs/INTEGRATION.md) · [验证记录](docs/VALIDATION.md)
 
-当前版本：**0.1.11 开发预览**。基于 [BuTangTang/Codex-Top](https://github.com/BuTangTang/Codex-Top) 的产品设计与状态处理规则开发，程序内名称及可执行文件名为 **Codex Top / CodexTop.exe**。Windows 工程位于本仓库的 `windows/` 目录，独立构建；不代表已与 macOS build 27 完成功能对齐。与 OpenAI 没有官方关联。
+当前版本：**0.1.12 开发预览**。基于 [BuTangTang/Codex-Top](https://github.com/BuTangTang/Codex-Top) 的产品设计与状态处理规则开发，程序内名称及可执行文件名为 **Codex Top / CodexTop.exe**。Windows 工程位于本仓库的 `windows/` 目录，独立构建；不代表已与 macOS build 27 完成功能对齐。与 OpenAI 没有官方关联。
 
 ## 功能一览
 
@@ -35,7 +35,7 @@
 
 ### 2. 构建并启动
 
-当前分支提供源码，尚未发布 Windows 下载包。按下文[从源码构建](#从源码构建)并使用 `-Publish` 生成 Windows x64 便携包 `CodexTop-Windows-x64-0.1.11.zip`。
+当前分支提供源码，尚未发布 Windows 下载包。按下文[从源码构建](#从源码构建)并使用 `-Publish` 生成 Windows x64 便携包 `CodexTop-Windows-x64-0.1.12.zip`。
 
 解压整个压缩包，运行 **`CodexTop.exe`**。默认显示桌面圆环，右下角系统托盘也会出现程序图标。
 
@@ -213,6 +213,7 @@ docs/                     # 实现记录、验证证据与已知限制
 
 | 版本 | 主要变化 |
 | --- | --- |
+| 0.1.12 | 兼容 Windows 扩展格式的任务路径，修复运行任务误显示状态未知及圆环无运行反馈 |
 | 0.1.11 | 无运行任务时圆环中心显示 0，完成动效和信息卡结束后恢复数量 |
 | 0.1.10 | 默认圆环不显示对勾；任务完成时自动弹出任务名称，约 5 秒后恢复；支持展开浮窗、两屏边缘定位和深浅主题 |
 | 0.1.9 | 去除圆环上缘的小感叹号竖杠；增加一次性完成对勾描画与回弹，刷新时连续衔接 |

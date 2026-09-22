@@ -30,7 +30,7 @@ internal static class OrbFeedbackChecks
         try
         {
             var sql = "CREATE TABLE threads(id TEXT PRIMARY KEY,title TEXT,cwd TEXT,rollout_path TEXT,created_at INTEGER,updated_at INTEGER,archived INTEGER,source TEXT);" +
-                $"INSERT INTO threads VALUES('{id}','圆环完成提示检查','合成测试','{log.Replace("'", "''")}',{now.ToUnixTimeSeconds()},{now.ToUnixTimeSeconds()},0,'cli');" +
+                $"INSERT INTO threads VALUES('{id}','圆环完成提示检查','合成测试','{(@"\\?\" + log).Replace("'", "''")}',{now.ToUnixTimeSeconds()},{now.ToUnixTimeSeconds()},0,'cli');" +
                 $"INSERT INTO threads VALUES('{otherId}','另一项合成任务','合成测试','{otherLog.Replace("'", "''")}',{now.ToUnixTimeSeconds()},{now.ToUnixTimeSeconds()},0,'cli');";
             if (sqlite3_exec(db, sql, 0, 0, out var error) != 0) { sqlite3_free(error); throw new IOException("Cannot initialize synthetic fixture."); }
         }
