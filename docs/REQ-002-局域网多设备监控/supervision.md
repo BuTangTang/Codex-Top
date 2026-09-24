@@ -18,6 +18,8 @@ Happier 复用核验已收齐：UI 现有 Direct 输入门禁在缺 runner 时�
 
 ## 职责与写权
 
+2026-09-24 1.0.19收发验收后：提示修复4文件冻结，模拟器冷开首发和同轮追加后的真实回复／完成／提示移除已通过；1.0.18隔离连接断开与重连手动重发通过。最近会话自动发现已交回 **手机 UI 与交互**，该任务已明确回读完整目标和实际仓库并开始RED；唯一范围是browse下PhoneSessionsOverview、PhoneBrowseSourceOwner、DirectSessionsBrowseScreen、useDirectBrowseCandidates、phoneBrowseAggregation及同目录专项。只复用LIST，不改布局、三态事实、接口或Codex记录。内部integration_review仅只读提出分页窗口及竞态建议，已冻结；内部notification_path只查官方IP证书支持。主管完成服务器只读端口／健康预检，公网配置、构建、部署及PVTC仍未修改。
+
 2026-09-24 冷开首次发送修复：117已证明持续订阅时双向消息/真实运行到完成，但冷开历史仍被unknown一票拦截。**电脑端会话与项目接入**独占 `desktopControlV1.ts` 协议schema与测试、`desktopControlSnapshot`、`desktopSessionControl`、`desktopIpc`控制读取活性检查及对应测试；**手机 UI 与交互**独占 `SessionView`、`useDirectSessionControl`及对应专项。冻结契约为现有控制快照可选 `textSendMode: start | steer`：仅当前原owner runtime/尾轮一致且无未确认提交时声明；旧无字段不放行。点击前新读取、服务端发出前再核对，单飞与原意图/回执保留，不自动换模式重发；不触碰生命周期首包保护、不新增端点。内部三路已冻结，不并写这些文件；主管先装新UI再换隔离CLI，负责实际冷开、收发和状态验收。
 
 2026-09-24 1.0.16 真实验收返工：A+B/C/CLI首批均已冻结并进入新包，主管实际发现输入框极窄与输入触发React递归白屏。**手机 UI 与交互**仅重新取得 AgentInput、AgentInputSubmitButton及对应测试写权，处理Yoga布局和手机多余action；内部 `account_finish` 独占原生useTextInputCaretRect及同域测试，按构建sourcemap定位修复重复测量更新；内部 `ui_finish` 独占mobileWorkspaceExperience两owner、旧settings/session工作台入口及对应导航测试，在原生phone走已有经典对话，不改持久偏好或其他平台。**电脑端会话与项目接入**仅只读核对用户追加最近对话自动发现、真实项目归属，不实施尚在讨论的分组方案。其余源码冻结，构建、依赖、设备与文档仍由主管独占。旧294/106等源码回归不能代替新版输入/键盘验收。

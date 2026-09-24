@@ -97,7 +97,7 @@ codex_top_maint deploy
 
 验收顺序：回环 /ready、管理员预建两份独立测试账号、两端登录及 A/B 归属隔离、原会话查看/收发/审批、HTTPS/WebSocket、手机通知，并对照 PVTC。开户沿用服务端 scripts/createPasswordAccount.ts 的受限 stdin 输入，由账号 owner 提供已验证命令；不把密码放入参数，不新增开户服务。原 server 在 /data/handy-master-secret.txt 生成主密钥，随数据持久化；不额外设置 HANDY_MASTER_SECRET。
 
-正式入口仍需独立域名、DNS、证书、安全组及代理归属。建立独立 HTTPS virtual host 指向回环端口，支持 WebSocket/长连接；先用隔离入口验证。不得覆盖归属不明的 PVTC 代理配置。预检通过不代表 HTTPS 可用。
+正式入口需要系统信任的证书、安全组及明确的代理归属。用户确认没有域名后，候选方案改为受信任的公网IP证书，并验证短有效期证书的自动续期；不以自签证书或跳过校验替代。独立HTTPS入口须支持WebSocket/长连接，先用隔离入口验证；不得覆盖PVTC代理配置。预检通过不代表HTTPS可用，具体实施记录见REQ-002/M4。
 
 ## 4. 备份与完整回滚
 
@@ -114,13 +114,36 @@ codex_top_maint rollback --archive /opt/codex-top/backups/SNAPSHOT.tar.age --ide
 
 ## 5. HTTPS 与自有推送缺口
 
-HTTPS 缺域名、证书、DNS/安全组和代理归属确认。推送还需：
+用户没有域名，也没有现成Expo/Firebase项目。HTTPS仍待IP证书签发、验证端口安全组、代理隔离和自动续期的实际验证。推送还需：
 
 - 自有 Expo/EAS 项目及 owner、正式 Android package/签名；构建明确设置 EXPO_PUBLIC_EAS_PROJECT_ID（或当前 app config 支持的 EAS project ID），避免上游默认项目。
 - 对应 Firebase 项目、匹配包名的 google-services.json、上传到自有 EAS 的 FCM v1 服务账号凭据；秘密只用受限渠道传输。
 - Expo/FCM 网络、手机 GMS/后台权限、小米锁屏送达与点击正确会话，分别验收。佳明（Garmin）已暂缓，当前验收不包含手表振动。
 
 当前发送实现未接入 Expo enhanced push security access token，不加入无效 EXPO_ACCESS_TOKEN 并声称完成。若选择该模式，由源码 owner 增加支持；本包不修改推送协议或手机 UI。
+
+无域名候选采用固定 `caddy:2.11.4-alpine` 和独立TCP 443，以TLS-ALPN-01签发Let's Encrypt公网IP证书。以下仅为已核对官方支持的配置草案，尚未做容器、签发或手机TLS验收，不直接加入现有单服务Compose。代理到业务容器的网络连接、资源限制和启停边界须与现有维护脚本一起验证。
+
+```caddyfile
+{
+    auto_https disable_redirects
+    default_sni {$PUBLIC_IP}
+}
+
+https://{$PUBLIC_IP} {
+    tls {
+        issuer acme https://acme-v02.api.letsencrypt.org/directory {
+            profile shortlived
+            disable_http_challenge
+        }
+    }
+    reverse_proxy {$CODEXTOP_UPSTREAM}
+}
+```
+
+`PUBLIC_IP`为实际受控公网IPv4，`CODEXTOP_UPSTREAM`为隔离网络内可访问的本项目业务目标。显式ACME issuer避免IP站点默认使用本地CA；`default_sni`处理不发送SNI的IP客户端。只映射TCP 443并关闭HTTP验证和HTTP自动跳转，不接管宿主80或PVTC端口。持久化可写`/data`及`/config`，保护ACME私钥；证书只有160小时，必须实际验证Caddy自动续期及失败监测。443当前无监听只证明宿主端口空闲，仍须检查安全组、TLS-ALPN透传和ACME出站连通。
+
+版本与配置依据：[Caddy 2.11.4依赖](https://github.com/caddyserver/caddy/blob/v2.11.4/go.mod)、[CertMagic 0.25.3的IP与profile支持](https://github.com/caddyserver/certmagic/blob/v0.25.3/acmeissuer.go)、[TLS指令](https://caddyserver.com/docs/caddyfile/directives/tls)、[全局选项](https://caddyserver.com/docs/caddyfile/options)、[Let’s Encrypt IP证书](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability)。
 
 ## 验证与参考
 
