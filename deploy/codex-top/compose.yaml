@@ -46,6 +46,48 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+  https:
+    image: ${CODEX_TOP_HTTPS_IMAGE:?填写已验证且预装的 Caddy 镜像摘要}
+    restart: unless-stopped
+    init: true
+    # 固定镜像已通过此 UID/capability 组合的隔离运行；公网证书需另验。
+    user: "1000:1000"
+    ports:
+      - "0.0.0.0:443:443/tcp"
+    environment:
+      PUBLIC_IP: ${CODEX_TOP_PUBLIC_IP:?仅由 manage.py 从 PUBLIC_URL 派生}
+      XDG_DATA_HOME: /data
+      XDG_CONFIG_HOME: /config
+    labels:
+      io.codex-top.caddyfile-sha256: ${CODEX_TOP_CADDYFILE_SHA256:?仅由 manage.py 派生配置指纹}
+    volumes:
+      - "/opt/codex-top/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "/opt/codex-top/https/data:/data"
+      - "/opt/codex-top/https/config:/config"
+    networks:
+      - private
+    cpus: ${CODEX_TOP_HTTPS_CPUS:?填写代理 CPU 上限}
+    mem_limit: ${CODEX_TOP_HTTPS_MEMORY:?填写代理内存上限}
+    memswap_limit: ${CODEX_TOP_HTTPS_MEMORY:?填写代理内存上限}
+    pids_limit: ${CODEX_TOP_HTTPS_PIDS:?填写代理进程数上限}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CODEX_TOP_HTTPS_LOG_SIZE:?填写代理日志大小上限}
+        max-file: ${CODEX_TOP_HTTPS_LOG_FILES:?填写代理日志份数}
+    # 仅验证进程的本地管理接口；不代表证书已签发或公网 TLS 可用。
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 networks:
   private:
     name: codex-top-private

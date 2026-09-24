@@ -18,6 +18,16 @@ Happier 复用核验已收齐：UI 现有 Direct 输入门禁在缺 runner 时�
 
 ## 职责与写权
 
+2026-09-24 双服务部署收口：原云端任务六文件及独立复核任务的验收文档均已交回主管，代码写权冻结。38项维护检查、原P1复现复核通过；主管完成独立Linux真实age、远端配置/权限与资源受限预检，已启动两个正式容器并验证公网可信HTTPS ready。PVTC Web首页200、11个邻居前后摘要相同，未操作PVTC。原账号任务仅只读回交开户stdin原始密码、云端A/B新隔离CLI home及手机现有登录入口，不开户、不改源码、不控制设备。下一步由主管实际进行云端账号隔离和手机原Desktop收发，D-10仍延后。
+
+2026-09-24 HTTPS接入批次：服务端三文件修复已交回，21项专项和全源noEmit通过；主管核对后启动隔离镜像重建，Linux服务端编译已通过，系统包仍在下载。**云端中转与部署**获得主仓`deploy/codex-top`下compose.yaml、Caddyfile（新增）、.env.example、manage.py、test_manage.py、README.md六文件写权；沿现有维护入口增加同一项目的https角色，独立443及持久化TLS状态，保护PVTC端口／网络，业务回滚保留当前证书。README原有主管未提交修改须保留；其余文档归主管，不并写。实现与合成测试可执行，Docker、签发、远端与设备仍只由主管负责，未部署或宣称HTTPS通过。
+
+2026-09-24 镜像编译返工：实际隔离构建exit1后，内部integration_review只读核对依赖与SDK公开类型；**云端中转与部署**仅获companion的`apps/server/package.json`、`sources/app/monitoring/sentry.ts`和`sentryLogRedaction.ts`写权，补自身测试依赖并从同一Node SDK取得类型，运行既有专项和noEmit。原Docker三文件及其余源码冻结，不升级依赖、删除编译范围或放宽类型。主管独占重新构建和真实容器验收；两份ignored验收脚本已静态交回，主管补本轮进程上限，尚未执行。用户确认先功能验收、明确汇报，再进入界面整理。
+
+2026-09-24 1.0.20实际验收返工与服务端构建批次：手机自动列表8文件61项通过并安装后，实际定位约35秒跨端时钟偏差会让合法状态变unknown、最新候选排序下沉。**电脑端会话与项目接入**只读复现已收口，无CLI改动；**手机 UI 与交互**重新独占原browse文件和必要同目录专项，在唯一LIST owner留存本机观测时间，分开处理电脑事实年龄和手机缓存年龄，不新增接口、全局校时或D-10布局。原手机任务已完成时间域、回拨和深睡边界返工并交回8文件，77项与UI noEmit通过；内部integration_review最终只读复核后冻结。主管构建安装1.0.21，实测±35秒下原任务自动运行/完成首行与一条回复；后台深页复验期间页面意外切换，先暂停设备点击，等待用户操作状态说明。
+
+**云端中转与部署**并行准备companion根Dockerfile的server-only target及确需的单个工作区准备脚本/专项，只安装server与五个共享包的闭包，保留既有target行为、Node/tsx和SQLite启动。该任务不写主仓部署维护包、不改应用业务、不构建或操作Docker；主管准备独立codextop-build虚拟机（2CPU/4GiB、12GiB数据盘、无目录挂载/SSH agent/默认上下文切换），默认Colima既有容器基线仅只读保存，PVTC服务器不编译。目标3文件与37项专项已交回冻结，主管修复用户授权的Docker域名分流后，Alpine和Node22的amd64拉取及运行通过，开始独立镜像构建。原云端任务另提供只读的SQLite就绪、非root、stdin开户与停启持久化验收模板，尚未执行。尚未获得服务端镜像或Linux业务验收。
+
 2026-09-24 1.0.19收发验收后：提示修复4文件冻结，模拟器冷开首发和同轮追加后的真实回复／完成／提示移除已通过；1.0.18隔离连接断开与重连手动重发通过。最近会话自动发现已交回 **手机 UI 与交互**，该任务已明确回读完整目标和实际仓库并开始RED；唯一范围是browse下PhoneSessionsOverview、PhoneBrowseSourceOwner、DirectSessionsBrowseScreen、useDirectBrowseCandidates、phoneBrowseAggregation及同目录专项。只复用LIST，不改布局、三态事实、接口或Codex记录。内部integration_review仅只读提出分页窗口及竞态建议，已冻结；内部notification_path只查官方IP证书支持。主管完成服务器只读端口／健康预检，公网配置、构建、部署及PVTC仍未修改。
 
 2026-09-24 冷开首次发送修复：117已证明持续订阅时双向消息/真实运行到完成，但冷开历史仍被unknown一票拦截。**电脑端会话与项目接入**独占 `desktopControlV1.ts` 协议schema与测试、`desktopControlSnapshot`、`desktopSessionControl`、`desktopIpc`控制读取活性检查及对应测试；**手机 UI 与交互**独占 `SessionView`、`useDirectSessionControl`及对应专项。冻结契约为现有控制快照可选 `textSendMode: start | steer`：仅当前原owner runtime/尾轮一致且无未确认提交时声明；旧无字段不放行。点击前新读取、服务端发出前再核对，单飞与原意图/回执保留，不自动换模式重发；不触碰生命周期首包保护、不新增端点。内部三路已冻结，不并写这些文件；主管先装新UI再换隔离CLI，负责实际冷开、收发和状态验收。

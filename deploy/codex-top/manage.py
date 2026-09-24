@@ -7,6 +7,8 @@ import datetime
 from decimal import Decimal
 import fcntl
 import io
+import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -20,6 +22,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 ROOT = Path('/opt/codex-top')
@@ -29,7 +32,12 @@ NETWORK = 'codex-top-private'
 PREFIX = 'CODEX_TOP_'
 FIELDS = ('ROOT IMAGE PORT PUBLIC_URL CPUS MEMORY PIDS LOG_SIZE LOG_FILES '
           'MIN_FREE_MEMORY_BYTES MIN_FREE_DISK_BYTES BACKUP_MAX_BYTES BACKUP_MAX_COUNT '
-          'BACKUP_RECIPIENT WAIT_SECONDS STOP_SECONDS').split()
+          'BACKUP_RECIPIENT WAIT_SECONDS STOP_SECONDS HTTPS_IMAGE HTTPS_CPUS HTTPS_MEMORY '
+          'HTTPS_PIDS HTTPS_LOG_SIZE HTTPS_LOG_FILES').split()
+ROLES = ('server', 'https')
+HTTPS_FIELDS = tuple(key for key in FIELDS if key.startswith('HTTPS_'))
+# 白名单固定本批已审 Caddyfile；模板变更必须与维护校验共同审查，不能自证任意上游合法。
+CADDYFILE_SHA256 = 'd8d49d4a6ba8df8429973f5485be94a88e179d1b8e536f1c22a65883447e2cbc'
 
 
 def require(condition, message):
@@ -59,7 +67,7 @@ def compose_cli():
 
 
 def parse_env(text):
-    """解析无秘密的显式配置；拒绝 shell 展开、重复项、未知项和空值。"""
+    """只接收无秘密的显式配置；代理 IP 从唯一 HTTPS IPv4 origin 派生。"""
     values = {}
     for line in text.splitlines():
         line = line.strip()
@@ -68,29 +76,51 @@ def parse_env(text):
         key, sep, value = line.partition('=')
         require(sep and key in [PREFIX + k for k in FIELDS] and key not in values,
                 '配置存在未知项或重复项')
-        require(value and not any(c.isspace() or c in '\"\'`$\\#' for c in value),
+        require(value and not any(c.isspace() or c in "\"'$\\#" or ord(c) == 96 for c in value),
                 '配置需填写无引号、无插值的单个值：' + key)
         values[key] = value
     require(set(values) == {PREFIX + k for k in FIELDS}, '配置必填项不完整')
     cfg = {k: values[PREFIX + k] for k in FIELDS}
     require(cfg['ROOT'] == str(ROOT), '数据根目录必须为 /opt/codex-top')
-    require(re.fullmatch(r'(?:sha256:|[a-zA-Z0-9._:/-]+@sha256:)[0-9a-f]{64}', cfg['IMAGE']),
-            '镜像必须使用已预装的 sha256 ID 或仓库摘要，不能使用浮动标签')
-    for key in ('PORT', 'PIDS', 'LOG_FILES', 'MIN_FREE_MEMORY_BYTES', 'MIN_FREE_DISK_BYTES',
-                'BACKUP_MAX_BYTES', 'BACKUP_MAX_COUNT', 'WAIT_SECONDS', 'STOP_SECONDS'):
+    for key in ('IMAGE', 'HTTPS_IMAGE'):
+        require(re.fullmatch(r'(?:sha256:|[a-zA-Z0-9._:/-]+@sha256:)[0-9a-f]{64}', cfg[key]),
+                key + ' 必须为已预装 sha256 ID 或仓库摘要')
+    for key in ('PORT', 'PIDS', 'LOG_FILES', 'HTTPS_PIDS', 'HTTPS_LOG_FILES',
+                'MIN_FREE_MEMORY_BYTES', 'MIN_FREE_DISK_BYTES', 'BACKUP_MAX_BYTES',
+                'BACKUP_MAX_COUNT', 'WAIT_SECONDS', 'STOP_SECONDS'):
         require(re.fullmatch(r'[1-9][0-9]*', cfg[key]), key + ' 必须为正整数')
-    require(1024 <= int(cfg['PORT']) <= 65535, '宿主端口需在 1024..65535 内')
-    require(re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', cfg['CPUS']) and float(cfg['CPUS']) > 0,
-            'CPU 上限必须大于 0')
-    for key in ('MEMORY', 'LOG_SIZE'):
+    require(1024 <= int(cfg['PORT']) <= 65535, '业务回环端口需在 1024..65535 内')
+    for key in ('CPUS', 'HTTPS_CPUS'):
+        require(re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', cfg[key]) and Decimal(cfg[key]) > 0,
+                key + ' 必须大于 0')
+    for key in ('MEMORY', 'LOG_SIZE', 'HTTPS_MEMORY', 'HTTPS_LOG_SIZE'):
         require(re.fullmatch(r'[1-9][0-9]*[kKmMgG]', cfg[key]), key + ' 需为整数加 k/m/g')
-    origin = urlsplit(cfg['PUBLIC_URL'])
-    require(origin.scheme == 'https' and origin.hostname and not origin.username
-            and not origin.password and not origin.path and not origin.query and not origin.fragment,
-            'PUBLIC_URL 必须是 HTTPS origin，无账号、路径和末尾斜杠')
+    public_ip(cfg)
     require(re.fullmatch(r'age1[0-9a-z]+', cfg['BACKUP_RECIPIENT']), '需填写 age 公钥 recipient')
     return cfg
 
+
+def public_ip(cfg):
+    """要求唯一 origin 为规范的 https://IPv4；443 固定，不接受另一份 IP 配置。"""
+    origin = urlsplit(cfg['PUBLIC_URL'])
+    address = ipaddress.IPv4Address(origin.hostname or '')
+    require(cfg['PUBLIC_URL'] == 'https://' + str(address), 'PUBLIC_URL 必须为 https://IPv4，无端口或路径')
+    return str(address)
+
+
+def caddy_digest(release):
+    """为固定 Caddyfile 生成 Compose 配置标签，内容变化时让代理重建并重新绑定文件。"""
+    return hashlib.sha256(release['caddyfile'].encode()).hexdigest()
+
+
+def expected_mounts(role):
+    """只定义业务与代理这两个角色的固定挂载；代理不接触业务库或宿主 socket。"""
+    require(role in ROLES, '未知服务角色')
+    if role == 'server':
+        return {'/data': (str(ROOT / 'data'), False)}
+    return {'/etc/caddy/Caddyfile': (str(ROOT / 'Caddyfile'), True),
+            '/data': (str(ROOT / 'https/data'), False),
+            '/config': (str(ROOT / 'https/config'), False)}
 
 def env_text(cfg):
     """把已验证配置写成确定顺序，不存放账号、密码或服务主密钥。"""
@@ -99,65 +129,88 @@ def env_text(cfg):
 
 @contextlib.contextmanager
 def compose_command(release):
-    """为当前命令生成私有配置快照，防止调用期间 .env 改写影响后续步骤。"""
+    """命令使用私有 Compose 快照；IP/配置指纹只能由已审 release 派生，不接收环境覆盖。"""
     with tempfile.TemporaryDirectory(prefix='codex-top-config-') as directory:
         directory = Path(directory)
-        (directory / '.env').write_text(env_text(release['config']))
+        derived = ('CODEX_TOP_PUBLIC_IP=' + public_ip(release['config']) + '\n'
+                   'CODEX_TOP_CADDYFILE_SHA256=' + caddy_digest(release) + '\n')
+        (directory / '.env').write_text(env_text(release['config']) + derived)
         (directory / 'compose.yaml').write_text(release['compose'])
         yield compose_cli() + ['--project-name', PROJECT, '--env-file', directory / '.env',
                                '-f', directory / 'compose.yaml']
 
-
 def validate_release(release):
-    """核对渲染产物及配置中的精确配额，拒绝服务、权限或资源预算偏离。"""
+    """精确校验两个固定角色、端口/挂载/配额及模板，拒绝第三服务和不受控代理配置。"""
+    require(isinstance(release, dict) and release.get('schema') == 2,
+            '仅接受两服务 schema=2 快照；旧快照需单独审核迁移')
+    require(set(release['config']) == set(FIELDS), '归档配置字段不完整或含额外项')
     cfg = parse_env(env_text(release['config']))
+    require(isinstance(release['caddyfile'], str) and caddy_digest(release) == CADDYFILE_SHA256
+            and release['caddyfile'] == (HERE / 'Caddyfile').read_text(), 'Caddyfile 不符合当前已审固定模板')
     with compose_command(release) as command:
         model = json.loads(run(command + ['config', '--format', 'json']), parse_float=Decimal)
     require(set(model) <= {'services', 'networks', 'name'}
-            and set(model['services']) == {'server'} and model['name'] == PROJECT,
-            'Compose 只能含 codex-top 的单个 server')
-    server = model['services']['server']
-    allowed = {'image', 'user', 'init', 'restart', 'ports', 'environment', 'volumes', 'networks',
-               'cpus', 'mem_limit', 'memswap_limit', 'pids_limit', 'security_opt', 'cap_drop',
-               'logging', 'healthcheck', 'command', 'entrypoint'}
-    require(not (set(server) - allowed), 'Compose 含不允许的服务属性')
-    require(server['image'] == cfg['IMAGE'] and server['user'] == '1000:1000'
-            and not server.get('command') and not server.get('entrypoint'), '镜像或非 root 入口不符')
-    ports, mounts = server['ports'], server['volumes']
-    require(len(ports) == 1 and ports[0]['host_ip'] == '127.0.0.1'
-            and str(ports[0]['published']) == cfg['PORT'] and ports[0]['target'] == 3005
-            and ports[0].get('protocol', 'tcp') == 'tcp', '只允许指定回环端口')
-    require(len(mounts) == 1 and mounts[0]['type'] == 'bind'
-            and mounts[0]['source'] == str(ROOT / 'data') and mounts[0]['target'] == '/data',
-            '只允许独立 data 挂载')
-    require(set(server['networks']) == {'private'} and set(model['networks']) == {'private'}
-            and model['networks']['private']['name'] == NETWORK
-            and model['networks']['private'].get('driver') == 'bridge'
-            and not model['networks']['private'].get('ipam')
-            and not model['networks']['private'].get('external'), '必须使用独立网络')
-    require(server['cap_drop'] == ['ALL'] and server['security_opt'] == ['no-new-privileges:true'],
-            '权限约束缺失')
-    # Compose 将 k/m/g 规范化为二进制字节数；CPU 用十进制比较，避免浮点容差放宽预算。
-    memory_bytes = int(cfg['MEMORY'][:-1]) * {'k': 1024, 'm': 1024 ** 2, 'g': 1024 ** 3}[cfg['MEMORY'][-1].lower()]
-    require(Decimal(str(server['cpus'])) == Decimal(cfg['CPUS'])
-            and server['pids_limit'] == int(cfg['PIDS'])
-            and Decimal(str(server['mem_limit'])) == memory_bytes
-            and Decimal(str(server['memswap_limit'])) == memory_bytes,
-            '渲染后的 CPU、内存/交换或 PIDs 配额与已审配置不一致')
-    require(server['logging']['driver'] == 'json-file'
-            and server['logging']['options'] == {'max-file': cfg['LOG_FILES'], 'max-size': cfg['LOG_SIZE']},
-            '日志上限必须明确')
-    env = server['environment']
-    require(env == {'NODE_ENV': 'production', 'PORT': '3005', 'PUBLIC_URL': cfg['PUBLIC_URL'],
-                    'HAPPIER_SERVER_FLAVOR': 'light', 'HAPPIER_DB_PROVIDER': 'sqlite',
-                    'HAPPIER_SERVER_LIGHT_DATA_DIR': '/data', 'HAPPIER_SQLITE_AUTO_MIGRATE': '1',
-                    'RUN_MIGRATIONS': '1', 'HAPPIER_FEATURE_AUTH_LOGIN__PASSWORD_ENABLED': 'true',
-                    'HAPPIER_FEATURE_AUTH_LOGIN__KEY_CHALLENGE_ENABLED': 'true',
-                    'AUTH_ANONYMOUS_SIGNUP_ENABLED': 'false', 'AUTH_SIGNUP_PROVIDERS': '',
-                    'AUTH_REQUIRED_LOGIN_PROVIDERS': ''},
-            '服务模式、注册策略或主密钥持久化不符')
+            and set(model['services']) == set(ROLES) and model['name'] == PROJECT,
+            'Compose 只能含 codex-top 的 server/https')
+    require(set(model['networks']) == {'private'}, '只能使用独立网络')
+    network = model['networks']['private']
+    require(network['name'] == NETWORK and network.get('driver') == 'bridge'
+            and not network.get('ipam') and not network.get('external') and not network.get('internal'),
+            '必须使用本项目普通 bridge，允许代理 ACME 出站')
+    server_env = {'NODE_ENV': 'production', 'PORT': '3005', 'PUBLIC_URL': cfg['PUBLIC_URL'],
+                  'HAPPIER_SERVER_FLAVOR': 'light', 'HAPPIER_DB_PROVIDER': 'sqlite',
+                  'HAPPIER_SERVER_LIGHT_DATA_DIR': '/data', 'HAPPIER_SQLITE_AUTO_MIGRATE': '1',
+                  'RUN_MIGRATIONS': '1', 'HAPPIER_FEATURE_AUTH_LOGIN__PASSWORD_ENABLED': 'true',
+                  'HAPPIER_FEATURE_AUTH_LOGIN__KEY_CHALLENGE_ENABLED': 'true',
+                  'AUTH_ANONYMOUS_SIGNUP_ENABLED': 'false', 'AUTH_SIGNUP_PROVIDERS': '',
+                  'AUTH_REQUIRED_LOGIN_PROVIDERS': ''}
+    for role in ROLES:
+        service = model['services'][role]
+        prefix = '' if role == 'server' else 'HTTPS_'
+        allowed = {'image', 'user', 'init', 'restart', 'ports', 'environment', 'volumes', 'networks',
+                   'cpus', 'mem_limit', 'memswap_limit', 'pids_limit', 'security_opt', 'cap_drop',
+                   'cap_add', 'logging', 'healthcheck', 'command', 'entrypoint', 'labels'}
+        require(not (set(service) - allowed), role + ' 含不允许的属性')
+        require(service['image'] == cfg[prefix + 'IMAGE'] and service['user'] == '1000:1000'
+                and service.get('init') is True and service.get('restart') == 'unless-stopped'
+                and not service.get('command') and not service.get('entrypoint'), role + ' 镜像或入口不符')
+        ports = service['ports']
+        host_ip, published, target = ('127.0.0.1', cfg['PORT'], 3005) if role == 'server' else ('0.0.0.0', '443', 443)
+        require(len(ports) == 1 and ports[0]['host_ip'] == host_ip
+                and str(ports[0]['published']) == published and ports[0]['target'] == target
+                and ports[0].get('protocol', 'tcp') == 'tcp', role + ' 端口边界不符')
+        expected = expected_mounts(role)
+        mounts = service['volumes']
+        require(len(mounts) == len(expected) and {mount['target'] for mount in mounts} == set(expected),
+                role + ' 挂载数量或目标不符')
+        for mount in mounts:
+            source, readonly = expected[mount['target']]
+            require(mount['type'] == 'bind' and mount['source'] == source
+                    and bool(mount.get('read_only')) == readonly, role + ' 挂载越界')
+        require(set(service['networks']) == {'private'}, role + ' 连接了其他网络')
+        require(service['cap_drop'] == ['ALL'] and service['security_opt'] == ['no-new-privileges:true']
+                and service.get('cap_add', []) == ([] if role == 'server' else ['NET_BIND_SERVICE']),
+                role + ' 权限约束缺失')
+        memory = cfg[prefix + 'MEMORY']
+        size = int(memory[:-1]) * {'k': 1024, 'm': 1024 ** 2, 'g': 1024 ** 3}[memory[-1].lower()]
+        require(Decimal(str(service['cpus'])) == Decimal(cfg[prefix + 'CPUS'])
+                and service['pids_limit'] == int(cfg[prefix + 'PIDS'])
+                and Decimal(str(service['mem_limit'])) == size
+                and Decimal(str(service['memswap_limit'])) == size, role + ' 精确配额不符')
+        require(service['logging']['driver'] == 'json-file'
+                and service['logging']['options'] == {'max-file': cfg[prefix + 'LOG_FILES'],
+                                                       'max-size': cfg[prefix + 'LOG_SIZE']},
+                role + ' 日志上限不符')
+        expected_env = server_env if role == 'server' else {
+            'PUBLIC_IP': public_ip(cfg), 'XDG_DATA_HOME': '/data', 'XDG_CONFIG_HOME': '/config'}
+        require(service['environment'] == expected_env, role + ' 环境变量越界')
+        labels = {} if role == 'server' else {'io.codex-top.caddyfile-sha256': caddy_digest(release)}
+        require(service.get('labels', {}) == labels, role + ' 配置标签不符')
+        health = (['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:3005/ready'] if role == 'server'
+                  else ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:2019/config/'])
+        require(service['healthcheck']['test'] == health and not service['healthcheck'].get('disable'),
+                role + ' 健康检查不符')
     return model
-
 
 def private_path(path):
     """拒绝根目录或现有子路径的符号链接，避免写出项目边界。"""
@@ -172,36 +225,61 @@ def inspect_containers():
     return json.loads(run(['docker', 'inspect'] + ids)) if ids else []
 
 
-def own_container(containers):
-    """核对项目名没有被其他服务占用，且既有实例仅挂载本项目数据。"""
-    own = [c for c in containers if c['Config'].get('Labels', {}).get('com.docker.compose.project') == PROJECT]
-    require(len(own) <= 1, '项目名已被多个容器使用，需人工核对')
-    for item in own:
-        require(item['Config']['Labels'].get('com.docker.compose.service') == 'server', '项目名冲突')
+def own_containers(containers):
+    """逐个验证同项目角色的用户、端口、挂载和网络，拒绝标签相同但实际越界的容器。"""
+    result = {}
+    for item in containers:
+        labels = item['Config'].get('Labels') or {}
+        if labels.get('com.docker.compose.project') != PROJECT:
+            continue
+        role = labels.get('com.docker.compose.service')
+        require(role in ROLES and role not in result, '项目角色冲突或重复实例')
+        require(item['Config'].get('User') == '1000:1000', '既有容器不是已审非 root 用户')
+        bindings = item['HostConfig'].get('PortBindings') or {}
+        port_key = '3005/tcp' if role == 'server' else '443/tcp'
+        require(set(bindings) == {port_key} and len(bindings[port_key] or []) == 1, '既有容器端口数量不符')
+        binding = bindings[port_key][0]
+        host_ip = '127.0.0.1' if role == 'server' else '0.0.0.0'
+        require(binding.get('HostIp') == host_ip and str(binding.get('HostPort', '')).isdigit(),
+                '既有容器端口地址不符')
+        port = int(binding['HostPort'])
+        require((role == 'server' and 1024 <= port <= 65535) or (role == 'https' and port == 443),
+                '既有容器端口范围不符')
+        expected = expected_mounts(role)
         mounts = item['Mounts']
-        require(len(mounts) == 1 and mounts[0]['Source'] == str(ROOT / 'data')
-                and mounts[0]['Destination'] == '/data', '既有容器数据挂载不属于本部署')
+        require(len(mounts) == len(expected) and {mount['Destination'] for mount in mounts} == set(expected),
+                '既有容器挂载目标不属于本部署')
+        for mount in mounts:
+            source, readonly = expected[mount['Destination']]
+            require(mount.get('Type') == 'bind' and mount['Source'] == source
+                    and mount.get('RW') is (not readonly), '既有容器数据挂载不属于本部署')
         require(set(item['NetworkSettings']['Networks']) <= {NETWORK}, '既有容器连接了其他网络')
-    return own[0] if own else None
+        result[role] = item
+    return result
 
+
+def own_container(containers):
+    """保留业务角色读取入口，仍先核验同项目所有角色。"""
+    return own_containers(containers).get('server')
 
 def neighbors(containers):
-    """仅提取其他容器的状态用于前后比较，不记录环境、名称或业务内容。"""
+    """只排除已通过归属验证的两个角色；其余容器保留匿名前后对照。"""
+    owned_ids = {item['Id'] for item in own_containers(containers).values()}
     return {c['Id']: {'image': c['Image'], 'running': c['State']['Running'],
                      'started': c['State']['StartedAt'], 'restarts': c['RestartCount'],
                      'health': c['State'].get('Health', {}).get('Status'),
                      'ports': c['HostConfig'].get('PortBindings')}
-            for c in containers if c['Config'].get('Labels', {}).get('com.docker.compose.project') != PROJECT}
-
+            for c in containers if c['Id'] not in owned_ids}
 
 def host_guard():
-    """检查固定 Linux 安装位置和本地 Docker；恢复不依赖失败版本镜像仍然存在。"""
+    """检查固定 Linux 安装位置、本地 Docker 及业务/TLS 私有目录，不自动修复权限。"""
     require(platform.system() == 'Linux' and os.geteuid() == 0, '实际操作需在目标 Linux 上通过 sudo 执行')
     require(not os.environ.get('DOCKER_HOST') and not os.environ.get('DOCKER_CONTEXT'),
             '拒绝环境指定的 Docker 远端；在目标主机运行')
     context = json.loads(run(['docker', 'context', 'inspect']))[0]
     require(context['Endpoints']['docker']['Host'] == 'unix:///var/run/docker.sock', '只允许本机系统 Docker')
-    for path in (ROOT, ROOT / '.env', ROOT / 'data', ROOT / 'backups', ROOT / 'state'):
+    for path in (ROOT, ROOT / '.env', ROOT / 'data', ROOT / 'backups', ROOT / 'state',
+                 ROOT / 'Caddyfile', ROOT / 'https/data', ROOT / 'https/config'):
         private_path(path)
     require(ROOT.is_dir() and ROOT.stat().st_uid == 0 and stat.S_IMODE(ROOT.stat().st_mode) == 0o700,
             '根目录需 root 持有且权限 700')
@@ -209,51 +287,57 @@ def host_guard():
             '.env 需 root 持有且权限 600')
     require((ROOT / 'data').is_dir() and (ROOT / 'data').stat().st_uid == 1000
             and stat.S_IMODE((ROOT / 'data').stat().st_mode) == 0o700, 'data 需 UID 1000 持有且权限 700')
+    for directory in (ROOT / 'https/data', ROOT / 'https/config'):
+        require(directory.is_dir() and directory.stat().st_uid == 1000
+                and stat.S_IMODE(directory.stat().st_mode) == 0o700, 'TLS 目录需 UID 1000 持有且权限 700')
     require(shutil.which('age'), '目标主机需预装 age；本工具不自动安装软件')
 
 
 def preflight(release):
-    """只读检查预装镜像、余量和独立端口；不拉取、构建或变更主机。"""
+    """只读核对双镜像、合计预算、回环/443 端口和网络端点；不拉取、不签发。"""
     cfg = release['config']
-    # 加密空输入只验证公钥可用，不创建备份，也不输出密文或私钥。
     run(['age', '-a', '-r', cfg['BACKUP_RECIPIENT']], input_text='')
-    image = json.loads(run(['docker', 'image', 'inspect', cfg['IMAGE']]))[0]
-    release['image_id'] = image['Id']
-    require(image['Config']['User'] in ('node', '1000', '1000:1000'), '镜像不是预期非 root server target')
-    require(image['Config']['Cmd'] == ['run-server'], '镜像入口不是根 Dockerfile 的 server target')
-    origin = urlsplit(cfg['PUBLIC_URL']).hostname
-    require(not origin.endswith(('.invalid', '.example')) and origin != 'localhost', '正式环境需确认独立 HTTPS 域名')
+    for role in ROLES:
+        key = 'IMAGE' if role == 'server' else 'HTTPS_IMAGE'
+        image = json.loads(run(['docker', 'image', 'inspect', cfg[key]]))[0]
+        release['image_id' if role == 'server' else 'https_image_id'] = image['Id']
+        if role == 'server':
+            require(image['Config']['User'] in ('node', '1000', '1000:1000')
+                    and image['Config']['Cmd'] == ['run-server'], '镜像不是预期非 root server target')
+        else:
+            require(image['Config']['Cmd'] == ['caddy', 'run', '--config', '/etc/caddy/Caddyfile', '--adapter', 'caddyfile'],
+                    '代理镜像入口不符；UID/capability 仍需真实镜像验收')
+    require(ipaddress.IPv4Address(public_ip(cfg)).is_global, '正式入口需可公开路由的受控 IPv4')
     memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
     available = int(memory['MemAvailable'].split()[0]) * 1024
     model = validate_release(release)
-    limit = int(model['services']['server']['mem_limit'])
-    require(available >= limit + int(cfg['MIN_FREE_MEMORY_BYTES']), '可用内存不足以保留指定余量')
-    require(float(cfg['CPUS']) <= (os.cpu_count() or 1), 'CPU 配额超过本机总 CPU 数')
+    limits = sum(int(model['services'][role]['mem_limit']) for role in ROLES)
+    require(available >= limits + int(cfg['MIN_FREE_MEMORY_BYTES']), '两服务合计内存不足以保留余量')
+    require(Decimal(cfg['CPUS']) + Decimal(cfg['HTTPS_CPUS']) <= (os.cpu_count() or 1),
+            '两服务合计 CPU 配额超过本机总数')
     require(shutil.disk_usage(ROOT).free >= int(cfg['MIN_FREE_DISK_BYTES']), '磁盘余量不足')
-    print('主机余量：可用内存 %d 字节；可用磁盘 %d 字节；CPU %d；1 分钟负载 %.2f。'
-          % (available, shutil.disk_usage(ROOT).free, os.cpu_count() or 1, os.getloadavg()[0]))
     containers = inspect_containers()
-    own = own_container(containers)
-    for item in containers:
-        for bindings in (item['HostConfig'].get('PortBindings') or {}).values():
-            for binding in bindings or []:
-                require(binding['HostPort'] != cfg['PORT'] or item is own, '宿主端口已被其他容器占用')
-    own_binding = (own or {}).get('HostConfig', {}).get('PortBindings') or {}
-    using_port = any(b.get('HostPort') == cfg['PORT'] for rows in own_binding.values() for b in (rows or []))
-    if not (own and own['State']['Running'] and using_port):
-        with socket.socket() as probe:
-            probe.bind(('127.0.0.1', int(cfg['PORT'])))
-    network_ids = run(['docker', 'network', 'ls', '--filter', 'name=^' + NETWORK + '$', '-q']).split()
-    for network_id in network_ids:
+    owned = own_containers(containers)
+    for role, address, port in (('server', '127.0.0.1', cfg['PORT']), ('https', '0.0.0.0', '443')):
+        own = owned.get(role)
+        for item in containers:
+            for bindings in (item['HostConfig'].get('PortBindings') or {}).values():
+                for binding in bindings or []:
+                    require(binding['HostPort'] != port or item is own, '宿主端口被其他容器占用：' + port)
+        bindings = (own or {}).get('HostConfig', {}).get('PortBindings') or {}
+        using = any(binding.get('HostPort') == port for rows in bindings.values() for binding in (rows or []))
+        if not (own and own['State']['Running'] and using):
+            with socket.socket() as probe:
+                probe.bind((address, int(port)))
+    for network_id in run(['docker', 'network', 'ls', '--filter', 'name=^' + NETWORK + '$', '-q']).split():
         network = json.loads(run(['docker', 'network', 'inspect', network_id]))[0]
         require((network.get('Labels') or {}).get('com.docker.compose.project') == PROJECT
-                and set(network.get('Containers') or {}) <= ({own['Id']} if own else set()),
+                and set(network.get('Containers') or {}) <= {item['Id'] for item in owned.values()},
                 '专用网络已被其他容器或项目占用')
     return containers
 
-
 def save_release(release):
-    """原子记录当前安装尝试的镜像与配置；此记录不表示功能验收通过。"""
+    """原子保存分角色发布进度；业务安装尝试和代理版本记录均不表示功能验收通过。"""
     state = ROOT / 'state'
     state.mkdir(mode=0o700, exist_ok=True)
     temporary = state / 'release.json.tmp'
@@ -274,38 +358,104 @@ def load_release():
     return release
 
 
-def stop(release):
-    """仅停止本项目 server，并确认容器已经退出再读写 SQLite 数据。"""
-    own_container(inspect_containers())
+def with_current_proxy(release, current):
+    """合成目标业务与已记录代理的两角色快照；不改输入，也不允许混用不同 origin。"""
+    require(release['config']['PUBLIC_URL'] == current['config']['PUBLIC_URL'],
+            'PUBLIC_URL 与当前 HTTPS 入口不一致；入口迁移需单独处理')
+    model = validate_release(release)
+    current_model = validate_release(current)
+    combined = dict(release, config=dict(release['config']))
+    combined['config'].update({key: current['config'][key] for key in HTTPS_FIELDS})
+    combined['https_image_id'] = current['https_image_id']
+    combined['caddyfile'] = current['caddyfile']
+    model['services']['https'] = current_model['services']['https']
+    combined['compose'] = json.dumps(model, default=str)
+    validate_release(combined)
+    return combined
+
+
+def stop(release, role='server'):
+    """只停止已验证的单角色；退出并确认原实例后才允许读取对应持久数据。"""
+    require(role in ROLES, '未知服务角色')
+    original = own_containers(inspect_containers()).get(role)
+    if not original:
+        return
     with compose_command(release) as command:
-        run(command + ['stop', '--timeout', release['config']['STOP_SECONDS'], 'server'])
-    own = own_container(inspect_containers())
-    require(not own or not own['State']['Running'], 'server 尚未停止，拒绝继续')
+        run(command + ['stop', '--timeout', release['config']['STOP_SECONDS'], role])
+    current = own_containers(inspect_containers()).get(role)
+    require(current and current['Id'] == original['Id'] and not current['State']['Running'],
+            role + ' 未确认原实例停止，拒绝继续')
+
+def materialize_https_config(release):
+    """把已验证的非秘密模板原子写到长期固定路径，不绑定会删除的临时目录。"""
+    target = ROOT / 'Caddyfile'
+    private_path(target)
+    if target.is_file() and target.read_text() == release['caddyfile']:
+        require(stat.S_IMODE(target.stat().st_mode) == 0o644, 'Caddyfile 需 644 以供容器 UID1000 只读')
+        return
+    temporary = ROOT / 'Caddyfile.tmp'
+    private_path(temporary)
+    with temporary.open('w') as output:
+        output.write(release['caddyfile'])
+        output.flush()
+        os.fsync(output.fileno())
+    os.chmod(temporary, 0o644)
+    temporary.replace(target)
 
 
-def start(release):
-    """仅使用预装镜像启动单服务并等待健康；失败保持停止，禁止自动退旧镜像。"""
-    own_container(inspect_containers())
-    save_release(release)
+def start(release, role='server', restore_https=False):
+    """按角色推进记录并启动；业务尝试保留当前代理，显式空 TLS 灾备使用完整归档版本。"""
+    require(role in ROLES, '未知服务角色')
+    owned = own_containers(inspect_containers())
+    if role == 'server':
+        recorded = release
+        proxy = owned.get('https')
+        if proxy and not restore_https:
+            current = load_release()
+            require(proxy['Image'] == current['https_image_id'], '当前代理与发布记录不一致，拒绝启动业务')
+            require((ROOT / 'Caddyfile').read_text() == current['caddyfile'], '当前代理配置文件与记录不一致')
+            recorded = with_current_proxy(release, current)
+        if restore_https:
+            require(not proxy or not proxy['State']['Running'], 'TLS 灾备要求代理尚未运行或已停止')
+        # 新业务可能已经迁移数据，因此启动前记录本次业务尝试；尚未操作的代理保持原版本。
+        save_release(recorded)
+    if role == 'https':
+        server = owned.get('server')
+        require(server and server['Image'] == release['image_id']
+                and server['State']['Running'] and server['State'].get('Health', {}).get('Status') == 'healthy',
+                'server 尚未 ready，拒绝启动 HTTPS')
+        materialize_https_config(release)
     try:
         with compose_command(release) as command:
             run(command + ['up', '--no-build', '--pull', 'never', '--no-deps', '--wait',
-                           '--wait-timeout', release['config']['WAIT_SECONDS'], 'server'])
-        own = own_container(inspect_containers())
-        require(own and own['Image'] == release['image_id']
-                and own['State'].get('Health', {}).get('Status') == 'healthy', '启动后镜像或健康不符')
+                           '--wait-timeout', release['config']['WAIT_SECONDS'], role])
+        own = own_containers(inspect_containers()).get(role)
+        image_id = release['image_id' if role == 'server' else 'https_image_id']
+        require(own and own['Image'] == image_id and own['State']['Running']
+                and own['State'].get('Health', {}).get('Status') == 'healthy', role + ' 启动后镜像或健康不符')
+        if role == 'https':
+            save_release(release)
     except Exception:
-        stop(release)
+        stop(release, role)
+        if role == 'https':
+            proxy = own_containers(inspect_containers()).get('https')
+            original = owned.get('https')
+            # 命令报错可能发生在替换之后；只在确认新实例及目标镜像时记录它，不把未替换的旧代理写成新版本。
+            if (proxy and proxy['Image'] == release['https_image_id']
+                    and (not original or proxy['Id'] != original['Id'])):
+                save_release(release)
         raise
 
-
 def data_budget(cfg):
-    """保守估算完整快照空间，拒绝链接和特殊文件；绝不自动删除旧备份。"""
+    """业务与 TLS 一起计入完整快照预算；拒绝链接/特殊文件，满额不自动删除。"""
     total, count = 0, 0
-    for path in [ROOT / 'data'] + list((ROOT / 'data').rglob('*')):
-        require(not path.is_symlink() and (path.is_file() or path.is_dir()), 'data 含链接或特殊文件')
-        total += path.stat().st_size
-        count += 1
+    for directory in (ROOT / 'data', ROOT / 'https/data', ROOT / 'https/config'):
+        private_path(directory)
+        require(directory.is_dir(), '备份目录不完整')
+        for path in [directory] + list(directory.rglob('*')):
+            require(not path.is_symlink() and (path.is_file() or path.is_dir()), '快照含链接或特殊文件')
+            total += path.stat().st_size
+            count += 1
     estimate = total * 2 + count * 8192 + 1024 * 1024
     backups = ROOT / 'backups'
     backups.mkdir(mode=0o700, exist_ok=True)
@@ -314,7 +464,6 @@ def data_budget(cfg):
     require(len(files) < int(cfg['BACKUP_MAX_COUNT']), '备份数量到达上限，需先人工转存')
     require(sum(p.stat().st_size for p in files) + estimate <= int(cfg['BACKUP_MAX_BYTES']), '备份容量不足')
     require(shutil.disk_usage(ROOT).free >= estimate + int(cfg['MIN_FREE_DISK_BYTES']), '备份后磁盘余量不足')
-
 
 def verify_data(directory):
     """仅在停止服务或恢复暂存目录内校验完整 SQLite 和非空主密钥。"""
@@ -327,25 +476,56 @@ def verify_data(directory):
         require(connection.execute('PRAGMA integrity_check').fetchall() == [('ok',)], 'SQLite 完整性检查失败')
 
 
-def resume_backup_service(release, original):
-    """重查归属、原容器 ID/镜像及运行状态；只恢复同一已停止实例，未知状态拒绝操作。"""
-    current = own_container(inspect_containers())
-    require(current and current['Id'] == original['Id'] and current['Image'] == release['image_id'],
-            '原备份容器已缺失或身份/镜像改变，拒绝自动恢复')
-    if not current['State']['Running']:
-        start(release)
+def resume_backup_service(release, original, role='server'):
+    """只恢复停止前同一 ID/镜像实例，直接 docker start，绝不以 up 重建替代实例。"""
+    current = own_containers(inspect_containers()).get(role)
+    image_id = release['image_id' if role == 'server' else 'https_image_id']
+    require(current and current['Id'] == original['Id'] and current['Image'] == image_id,
+            role + ' 原实例或镜像改变，拒绝自动恢复')
+    if current['State']['Running']:
+        return
+    run(['docker', 'start', original['Id']])
+    deadline = time.monotonic() + int(release['config']['WAIT_SECONDS'])
+    while True:
+        current = own_containers(inspect_containers()).get(role)
+        require(current and current['Id'] == original['Id'] and current['Image'] == image_id
+                and current['State']['Running'], role + ' 恢复时实例或运行状态改变')
+        health = current['State'].get('Health', {}).get('Status')
+        if health == 'healthy':
+            return
+        require(health != 'unhealthy' and time.monotonic() < deadline, role + ' 恢复后健康检查失败')
+        time.sleep(1)
 
+
+def resume_backup_roles(release, original, resume_server):
+    """先恢复原代理续期，再按请求恢复业务；一方失败仍尝试恢复另一原实例。"""
+    failures = []
+    for role in ('https', 'server'):
+        item = original.get(role)
+        if not item or not item['State']['Running'] or (role == 'server' and not resume_server):
+            continue
+        try:
+            resume_backup_service(release, item, role)
+        except Exception as error:
+            failures.append((role, error))
+    if failures:
+        raise RuntimeError('无法安全恢复原服务：' + ','.join(role for role, _ in failures)) from failures[0][1]
 
 def backup(release, policy, resume):
-    """停止和归档均纳入失败恢复；重新核实原实例后才恢复，禁止误启替代容器。"""
-    own = own_container(inspect_containers())
-    require(own and own['Image'] == release['image_id'], '容器与已记录镜像不匹配，拒绝生成误标备份')
-    was_running = own['State']['Running']
+    """短停两服务归档业务/TLS；升级快照也恢复原代理，异常只恢复原来运行的实例。"""
+    validate_release(release)
+    original = own_containers(inspect_containers())
+    require('server' in original, '缺少业务容器，拒绝生成误标备份')
+    for role, item in original.items():
+        require(item['Image'] == release['image_id' if role == 'server' else 'https_image_id'],
+                role + ' 容器与记录镜像不匹配')
+    require((ROOT / 'Caddyfile').read_text() == release['caddyfile'], '持久 Caddyfile 与发布记录不一致')
     data_budget(policy)
     output = ROOT / 'backups' / (datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '.tar.age')
     partial = output.with_suffix('.partial')
     try:
-        # stop 内部可能已成功停止，但在后续 inspect 失败；也必须进入恢复分支。
+        # 停入口后停业务；任一步实际已停止但命令/inspect报错，也必须进入原实例恢复分支。
+        stop(release, 'https')
         stop(release)
         data_budget(policy)
         verify_data(ROOT / 'data')
@@ -354,7 +534,8 @@ def backup(release, policy, resume):
                                        stdout=encrypted, stderr=subprocess.DEVNULL)
             try:
                 with tarfile.open(fileobj=process.stdin, mode='w|') as archive:
-                    archive.add(ROOT / 'data', arcname='data')
+                    for name in ('data', 'https/data', 'https/config'):
+                        archive.add(ROOT / name, arcname=name)
                     content = json.dumps(release).encode()
                     metadata = tarfile.TarInfo('release.json')
                     metadata.size, metadata.mode = len(content), 0o600
@@ -368,28 +549,27 @@ def backup(release, policy, resume):
         partial.replace(output)
     except Exception as backup_error:
         partial.unlink(missing_ok=True)
-        if was_running:
-            try:
-                resume_backup_service(release, own)
-            except Exception as recovery_error:
-                raise RuntimeError('备份失败且无法安全恢复原服务，请人工核对：' + str(recovery_error)) from backup_error
-        raise
-    if resume and was_running:
-        resume_backup_service(release, own)
+        try:
+            resume_backup_roles(release, original, resume_server=True)
+        except Exception as recovery_error:
+            raise RuntimeError('备份失败且无法安全恢复原服务') from recovery_error
+        raise backup_error
+    # 升级时只让 server 保持停止；代理继续续期和响应维护期的上游不可达。
+    resume_backup_roles(release, original, resume_server=resume)
     print('加密备份：' + str(output))
     return output
 
-
 def unpack(archive, directory, max_bytes):
-    """逐项恢复到新目录；拒绝逃逸路径、链接、特殊文件、重复项及超额展开。"""
+    """只解出业务、两个 TLS 子目录及版本记录；完整校验发生在停止现有服务之前。"""
     seen, total = set(), 0
     for member in archive:
         path = PurePosixPath(member.name)
-        require(not path.is_absolute() and '..' not in path.parts and path.parts
-                and (path.parts[0] == 'data' or member.name == 'release.json'), '备份含越界路径')
+        allowed = (path.parts and (path.parts[0] == 'data'
+                   or path.parts[:2] in (('https', 'data'), ('https', 'config'))
+                   or (member.name == 'https' and member.isdir()) or member.name == 'release.json'))
+        require(not path.is_absolute() and '..' not in path.parts and allowed, '备份含越界路径')
         require(path not in seen and (member.isfile() or member.isdir()), '备份含重复项、链接或特殊文件')
         seen.add(path)
-        # 元数据也占用磁盘与内存，避免大量空文件绕过展开预算。
         require(member.size >= 0, '归档成员大小无效')
         total += member.size + 8192
         require(total <= max_bytes, '备份展开超过容量预算')
@@ -401,13 +581,13 @@ def unpack(archive, directory, max_bytes):
             with target.open('xb') as out, archive.extractfile(member) as source:
                 shutil.copyfileobj(source, out)
             os.chmod(target, 0o600)
-    require((directory / 'data').is_dir() and (directory / 'release.json').is_file(), '备份缺少完整数据或版本记录')
+    require(all((directory / name).is_dir() for name in ('data', 'https/data', 'https/config'))
+            and (directory / 'release.json').is_file(), '备份缺少完整业务/TLS数据或版本记录')
     verify_data(directory / 'data')
 
-
 def rollback(args, policy):
-    """先解密并验证完整备份，再隔离当前数据并恢复；新增数据不自动合并或删除。"""
-    require(args.accept_data_loss, '回滚会退回备份时间点，需显式 --accept-data-loss')
+    """先完整认证备份；业务回滚保留当前 TLS/代理，显式灾备只接受空且静止的 TLS 目录。"""
+    require(args.accept_data_loss, '回滚需显式 --accept-data-loss')
     identity = Path(args.identity)
     require(identity.is_file() and not identity.is_symlink()
             and stat.S_IMODE(identity.stat().st_mode) & 0o077 == 0, 'age 私钥需为受限普通文件')
@@ -422,7 +602,7 @@ def rollback(args, policy):
         try:
             with tarfile.open(fileobj=process.stdout, mode='r|') as archive:
                 unpack(archive, temp, max_bytes)
-            # 完整消费密文，确保 age 尾部认证错误不能被 tar 的结束标记掩盖。
+            # 消费密文尾部，不能以 tar 结束标记代替 age 认证成功。
             while process.stdout.read(65536):
                 pass
             require(process.wait() == 0, 'age 解密/认证失败；未停止现有服务')
@@ -433,22 +613,59 @@ def rollback(args, policy):
                 process.wait()
         release = json.loads((temp / 'release.json').read_text())
         validate_release(release)
-        recorded_image = release['image_id']
+        restore_https = getattr(args, 'restore_https_state', False)
+        if restore_https:
+            require(release['config']['PUBLIC_URL'] == policy['PUBLIC_URL'], '灾备 PUBLIC_URL 与当前入口不一致')
+            for directory in (ROOT / 'https/data', ROOT / 'https/config'):
+                private_path(directory)
+                require(directory.is_dir() and not any(directory.iterdir()), '显式 TLS 灾备要求两个目录为空')
+            proxy = own_containers(inspect_containers()).get('https')
+            require(not proxy or not proxy['State']['Running'], 'TLS 灾备要求代理尚未运行或已停止')
+        else:
+            current = load_release()
+            current_proxy = own_containers(inspect_containers()).get('https')
+            require(not current_proxy or current_proxy['Image'] == current['https_image_id'],
+                    '当前代理与发布记录不一致，拒绝业务回滚')
+            require((ROOT / 'Caddyfile').read_text() == current['caddyfile'], '当前代理配置文件与记录不一致')
+            require(release['config']['PUBLIC_URL'] == current['config']['PUBLIC_URL'],
+                    '归档 PUBLIC_URL 与当前 HTTPS 入口不一致')
+            release = with_current_proxy(release, current)
+        validate_release(release)
+        recorded = (release['image_id'], release['https_image_id'])
         preflight(release)
-        require(release['image_id'] == recorded_image, '备份镜像与预装镜像不一致')
+        require((release['image_id'], release['https_image_id']) == recorded, '归档/当前代理镜像与预装镜像不一致')
         stop(release)
+        if restore_https:
+            # 停止边界后先重查两个目录，再替换任何业务数据；不覆盖检查后出现的内容。
+            require(all(not any((ROOT / name).iterdir()) for name in ('https/data', 'https/config')),
+                    'TLS 目录不再为空，停止恢复')
         quarantine = ROOT / ('data-before-rollback-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
         (ROOT / 'data').rename(quarantine)
         (temp / 'data').rename(ROOT / 'data')
-        for path in [ROOT / 'data'] + list((ROOT / 'data').rglob('*')):
-            os.chown(path, 1000, 1000)
-        start(release)
-        print('原数据保留于：' + str(quarantine))
-        print('回滚使用备份配置；下次发布前需人工同步 .env 中的目标镜像和资源。')
-
+        directories = [ROOT / 'data']
+        if restore_https:
+            # 不覆盖已有 TLS；停服边界后再次确认，任何意外内容都保留而不删除。
+            for name in ('https/data', 'https/config'):
+                target = ROOT / name
+                require(not any(target.iterdir()), 'TLS 目录不再为空，停止恢复')
+                target.rmdir()
+                (temp / name).rename(target)
+                directories.append(target)
+        for directory in directories:
+            for path in [directory] + list(directory.rglob('*')):
+                os.chown(path, 1000, 1000)
+        try:
+            start(release, restore_https=restore_https)
+            if restore_https:
+                start(release, 'https')
+        except Exception:
+            stop(release)
+            raise
+        print('原业务数据保留于：' + str(quarantine))
+        print('业务恢复完成；TLS签发/信任需另验。下次发布前同步 .env 中镜像及资源。')
 
 def main():
-    """统一命令入口；实际操作加独占锁，始终对照其他容器并只停止本服务。"""
+    """唯一维护入口；使用同一独占锁管理两角色，外部容器变化时停止两角色并报告。"""
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['check', 'preflight', 'deploy', 'backup', 'rollback'])
@@ -456,20 +673,23 @@ def main():
     parser.add_argument('--archive')
     parser.add_argument('--identity')
     parser.add_argument('--accept-data-loss', action='store_true')
+    parser.add_argument('--restore-https-state', action='store_true',
+                        help='仅灾备：TLS目录必须为空且代理未运行；恢复归档代理和TLS状态')
     args = parser.parse_args()
+    require(not args.restore_https_state or args.action == 'rollback', 'TLS 灾备选项仅适用于 rollback')
     cfg = parse_env(Path(args.env).read_text())
-    release = {'config': cfg, 'compose': (HERE / 'compose.yaml').read_text()}
+    release = {'schema': 2, 'config': cfg, 'compose': (HERE / 'compose.yaml').read_text(),
+               'caddyfile': (HERE / 'Caddyfile').read_text()}
     validate_release(release)
     if args.action == 'check':
-        print('静态配置通过；未连接 Docker daemon。')
+        print('静态配置通过；未连接 Docker daemon，也未验证 Caddy 运行或证书。')
         return
     require(Path(args.env) == ROOT / '.env' and HERE == ROOT, '实际操作只允许已安装的 /opt/codex-top 包')
     host_guard()
-    # 备份和回滚读取已安装/归档版本；不要求待发布的新镜像仍然可用。
     before = preflight(release) if args.action in ('preflight', 'deploy') else inspect_containers()
-    own_container(before)
+    own_containers(before)
     if args.action == 'preflight':
-        print('主机预检通过；HTTPS、账号、推送和业务闭环仍需实际验收。')
+        print('主机预检通过；受信任IP证书、续期、WebSocket和手机仍需实际验收。')
         return
     lock_path = ROOT / '.operation.lock'
     private_path(lock_path)
@@ -489,22 +709,27 @@ def main():
                 require(args.archive and args.identity, '回滚必须指定 --archive 和 --identity')
                 rollback(args, cfg)
             else:
-                own = own_container(before)
-                if own or any((ROOT / 'data').iterdir()):
+                owned = own_containers(before)
+                if owned or any((ROOT / 'data').iterdir()):
                     backup(load_release(), cfg, resume=False)
-                start(release)
-                print('server 健康检查通过；不代表手机业务或公网验收完成。')
+                try:
+                    start(release)
+                    start(release, 'https')
+                except Exception:
+                    stop(release)
+                    raise
+                print('两服务进程健康；不代表公网IP证书、续期、WebSocket或手机业务通过。')
         finally:
             after = neighbors(inspect_containers())
             after_path.write_text(json.dumps(after))
             if neighbors(before) != after:
-                stop(release)
+                for role in ('https', 'server'):
+                    stop(release, role)
                 raise RuntimeError('其他容器状态与操作前不同，已停止 Codex Top；请人工核对 PVTC 基线')
-
 
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, OSError, ValueError, KeyError, tarfile.TarError) as error:
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError, tarfile.TarError, sqlite3.DatabaseError) as error:
         print('停止：' + str(error), file=sys.stderr)
         sys.exit(1)

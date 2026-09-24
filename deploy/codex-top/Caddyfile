@@ -1,0 +1,15 @@
+{
+    admin localhost:2019
+    auto_https disable_redirects
+    default_sni {$PUBLIC_IP}
+}
+
+https://{$PUBLIC_IP} {
+    tls {
+        issuer acme https://acme-v02.api.letsencrypt.org/directory {
+            profile shortlived
+            disable_http_challenge
+        }
+    }
+    reverse_proxy server:3005
+}
