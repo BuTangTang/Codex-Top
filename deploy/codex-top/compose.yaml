@@ -1,0 +1,52 @@
+# 只管理 Codex Top；资源和宿主端口须在部署主机检查后填写。
+name: codex-top
+services:
+  server:
+    image: ${CODEX_TOP_IMAGE:?填写已验证的镜像版本或摘要}
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:${CODEX_TOP_PORT:?填写经检查空闲的宿主端口}:3005"
+    environment:
+      NODE_ENV: production
+      PORT: "3005"
+      PUBLIC_URL: ${CODEX_TOP_PUBLIC_URL:?填写本项目独立的 HTTPS origin}
+      HAPPIER_SERVER_FLAVOR: light
+      HAPPIER_DB_PROVIDER: sqlite
+      HAPPIER_SERVER_LIGHT_DATA_DIR: /data
+      HAPPIER_SQLITE_AUTO_MIGRATE: "1"
+      RUN_MIGRATIONS: "1"
+      HAPPIER_FEATURE_AUTH_LOGIN__PASSWORD_ENABLED: "true"
+      HAPPIER_FEATURE_AUTH_LOGIN__KEY_CHALLENGE_ENABLED: "true"
+      AUTH_ANONYMOUS_SIGNUP_ENABLED: "false"
+      AUTH_SIGNUP_PROVIDERS: ""
+      AUTH_REQUIRED_LOGIN_PROVIDERS: ""
+    volumes:
+      - "/opt/codex-top/data:/data"
+    networks:
+      - private
+    cpus: ${CODEX_TOP_CPUS:?依据宿主余量填写 CPU 上限}
+    mem_limit: ${CODEX_TOP_MEMORY:?依据宿主余量填写内存上限}
+    # 等于内存上限，禁止用宿主 swap 隐性扩大本服务预算。
+    memswap_limit: ${CODEX_TOP_MEMORY:?依据宿主余量填写内存上限}
+    pids_limit: ${CODEX_TOP_PIDS:?填写进程数上限}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CODEX_TOP_LOG_SIZE:?填写单文件日志上限}
+        max-file: ${CODEX_TOP_LOG_FILES:?填写日志文件保留数量}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3005/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+networks:
+  private:
+    name: codex-top-private
+    driver: bridge

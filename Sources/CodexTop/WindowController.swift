@@ -66,6 +66,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
 
 @MainActor final class WindowController: NSObject, NSWindowDelegate {
     let store: TaskStore
+    private let mobileAccount = MobileAccountStore()
     var orbContextMenu: NSMenu?
     var statusAnchorProvider: (() -> CGRect?)?
     private let top = UtilityPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -113,9 +114,11 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var chosen: DisplayChoice? {
         displays.first { $0.id == store.preferences.preferredDisplay } ?? displays.first(where: \.isPrimary) ?? displays.first
     }
+    /// 初始化原有监控窗口，并独立恢复本产品的手机连接状态。
     init(store: TaskStore) {
         self.store = store
         super.init()
+        if !store.demo { mobileAccount.refresh(connectIfNeeded: true) }
         floatingPresentation.placement = store.placement
         topState.placement = store.placement
         for panel in [top, floating] {
@@ -199,6 +202,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             }.store(in: &menuObservations)
         }
     }
+    /// 重排现有窗口时复用同一个账号状态，防止设置重建丢失连接中的请求。
     func layout(recoverFloating: Bool, bringAuxiliaryToChosen: Bool = false) {
         modeTransition.finish()
         floatingResize.finish()
@@ -219,7 +223,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
             floatingResize.resize(to: WindowGeometry.floating(size: floatingSize, visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), animated: false)
         }
-        if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography()) }
+        if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, mobileAccount: mobileAccount, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography()) }
         for window in [picker, settings].compactMap({ $0 }) {
             let frame = WindowGeometry.recoverUtilityWindow(window.frame, visibleFrames: displays.map { $0.screen.visibleFrame },
                                                             preferredVisible: chosen.screen.visibleFrame, forcePreferred: bringAuxiliaryToChosen)
@@ -792,6 +796,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         window.contentView = NSHostingView(rootView: TaskPickerView(store: store, close: { [weak self] in self?.picker?.close(); self?.picker = nil }).windowTypography())
         picker = window; NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil)
     }
+    /// 在原设置窗口显示手机连接入口，保持已有屏幕选择和监控窗口生命周期。
     func showSettings() {
         // Resolve the pointer's display before activation can change the main screen.
         let pointer = NSEvent.mouseLocation
@@ -803,7 +808,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if let settings { window = settings }
         else {
             window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610), screen: target)
-            window.contentView = NSHostingView(rootView: SettingsView(store: store, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, mobileAccount: mobileAccount, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
             window.delegate = self
             settings = window
         }

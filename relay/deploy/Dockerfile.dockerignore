@@ -1,0 +1,8 @@
+# 构建上下文为 relay；仅中转源码与健康检查进入镜像。
+**
+!server.py
+!store.py
+!deploy/
+!deploy/healthcheck.py
+!deploy/Dockerfile
+!deploy/Dockerfile.dockerignore

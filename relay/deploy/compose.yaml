@@ -1,0 +1,41 @@
+# 独立项目名、网络和卷；不引用任何 PVTC 服务、路径或端口。
+name: codextop-relay
+services:
+  relay:
+    image: codextop-relay:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "127.0.0.1:18766:18766"
+    volumes:
+      - relay_data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    networks: [relay_private]
+    cpus: "0.50"
+    mem_limit: 256m
+    pids_limit: 64
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    healthcheck:
+      test: [CMD, python, /app/healthcheck.py]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+volumes:
+  relay_data:
+networks:
+  relay_private:
+    internal: true

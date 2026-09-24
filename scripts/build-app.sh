@@ -4,20 +4,42 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 configuration="${CONFIGURATION:-release}"
-version="${VERSION:-1.0.0}"
+# 原生包与连接组件共用默认版本；显式覆盖时两步须传相同的构建参数。
+version="${VERSION:-$(plutil -extract version raw -o - scripts/build-version.json)}"
+build_number="${CODEX_TOP_BUILD_NUMBER:-$(plutil -extract buildNumber raw -o - scripts/build-version.json)}"
 app_name="Codex Top"
 bundle_id="dev.butang.codextop"
 demo=false
+with_connection=false
+universal=false
 build_args=(-c "$configuration")
 for option in "$@"; do
   case "$option" in
     --demo) app_name="Codex Top Demo"; bundle_id="dev.butang.codextop.demo"; demo=true ;;
-    --universal) build_args+=(--arch arm64 --arch x86_64) ;;
+    --with-connection) with_connection=true ;;
+    --universal) universal=true; build_args+=(--arch arm64 --arch x86_64) ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
-if [[ ! "$version" =~ ^[0-9A-Za-z.-]+$ ]]; then
-  printf 'VERSION must contain only letters, numbers, dots or hyphens.\n' >&2; exit 2
+# 连接组件当前只按本机构建，不能把单架构组件宣称为通用安装包。
+if [[ "$with_connection" == true && "$universal" == true ]]; then
+  printf 'Universal connection packages require a verified component for both architectures.\n' >&2; exit 2
+fi
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ || ! "$build_number" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'Use a semantic VERSION and a positive CODEX_TOP_BUILD_NUMBER.\n' >&2; exit 2
+fi
+# 在覆盖已有构建目录前拒绝陈旧组件，避免 native build 与后台运行版本脱节。
+if [[ "$with_connection" == true ]]; then
+  connection_payload="$repo_root/.local/connection-payload"
+  if [[ ! -x "$connection_payload/codex-top-bridge" ]]; then
+    printf 'Build the connection component with scripts/build-connection.mjs first.\n' >&2; exit 1
+  fi
+  component_version="$(plutil -extract buildVersion raw -o - "$connection_payload/package-dist/.build-manifest.json" 2>/dev/null)" || {
+    printf 'The connection component has no verified build version. Rebuild it first.\n' >&2; exit 1
+  }
+  if [[ "$component_version" != "$version+codextop.$build_number" ]]; then
+    printf 'The connection component does not match this app version/build. Rebuild it first.\n' >&2; exit 1
+  fi
 fi
 swift build "${build_args[@]}"
 bin_path="$(swift build "${build_args[@]}" --show-bin-path)"
@@ -25,6 +47,15 @@ app_path="$repo_root/dist/$app_name.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 install -m 755 "$bin_path/CodexTop" "$app_path/Contents/MacOS/CodexTop"
 install -m 644 LICENSE "$app_path/Contents/Resources/LICENSE"
+# 手机连接版从已验证的托管 payload 装入组件，不依赖用户安装 Node 或包管理器。
+if [[ "$with_connection" == true ]]; then
+  mkdir -p "$app_path/Contents/Resources/connection"
+  # payload 的唯一生产者会重建目录；打包时完整复制，避免混用上一批依赖。
+  rsync -a --delete "$connection_payload/" "$app_path/Contents/Resources/connection/"
+else
+  # 这里只清理本脚本拥有的构建目录，避免普通包夹带上一次的连接组件。
+  rm -rf "$app_path/Contents/Resources/connection"
+fi
 icon_work="$(mktemp -d "$repo_root/dist/.app-icon.XXXXXX")"
 trap 'rm -rf "$icon_work"' EXIT
 iconset="$icon_work/AppIcon.iconset"
@@ -46,7 +77,7 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
-<key>CFBundleVersion</key><string>40</string>
+<key>CFBundleVersion</key><string>$build_number</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

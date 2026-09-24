@@ -150,6 +150,7 @@ struct TaskPickerView: View {
 
 struct SettingsView: View {
     @ObservedObject var store: TaskStore
+    @ObservedObject var mobileAccount: MobileAccountStore
     var displays: [DisplayChoice]
     var recoverWindows: () -> Void
     @State private var loginStatus: SMAppService.Status = .notRegistered
@@ -251,6 +252,7 @@ struct SettingsView: View {
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
+            if !store.demo { MobileAccountSection(account: mobileAccount) }
             Section("账户额度") { UsageSettingsContent(store: store) }
             Section("数据与启动") {
                 HStack {
