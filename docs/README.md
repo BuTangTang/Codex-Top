@@ -4,9 +4,10 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 
 - [English project README](../README.en.md)
 - [当前状态与续做记录](STATUS.md)：接续开发先读这里。
+- [手机 UI 简化设计与实施交接](design/mobile-ui-2026-09-25/README.md)：2026-09-25 已接收，已进入单列表、开放正文和稳定刷新实施；设计图不作为运行验收。
 - [已接收回答的状态同步](validation/accepted-question-replies.md)：修复回答已提交而仍长时间待处理的问题，保留现有界面。
 - [REQ-002 多电脑 Codex 会话、手机通知与对话](REQ-002-局域网多设备监控/requirement.md)：依据需求 v0.10、[设计 v0.2](REQ-002-局域网多设备监控/detailed-design.md)及[五组 tasks](REQ-002-局域网多设备监控/tasks/progress.md)实施并进行本机联调，原生新建按 D-05 暂缓。D-06独立手机UI、D-07仅简体中文的[本批验证](validation/codextop-mobile-ui-2026-09-24.md)已记录，当前 APK 尚未通过整体视觉验收。[首页精简讨论](REQ-002-局域网多设备监控/homepage-revision-draft.md)、[原六页提示词](REQ-002-局域网多设备监控/assets/ui-2026-09-24/prompts.md)、[简化账号设置图](REQ-002-局域网多设备监控/assets/design-v0.2/prompts.md)和[手机验收记录](validation/happier-mobile.md)保留依据；[主管记录](REQ-002-局域网多设备监控/supervision.md)顶部为当前写权，旧实施及[开源调研](REQ-002-局域网多设备监控/opensource-research.md)为历史参考。
-- [REQ-002 独立部署包审查](validation/codextop-deploy-package-2026-09-24.md)：24项本地检查及两项故障修复复核通过；未构建镜像或部署，真实恢复和公网验收待完成。
+- [REQ-002 独立部署与公网验证](validation/codextop-deploy-package-2026-09-24.md)：业务与 HTTPS 容器已独立部署，云端登录、长连接、账号隔离和公网消息往返已验证；手机指定路径的状态和前后台恢复已复验，服务恢复、推送与小米验收仍未完成。
 - [build 36 可选渐隐双弧](validation/twin-arc-orb.md)：保留经典圆环，新增 D4 双弧及固定运行数，移除机器人原型。
 - [build 31 统一浅色实色外观](validation/solid-light-theme.md)：监控、菜单及主题快照共用不透明浅白，保留三项主题和原有布局。
 - [build 30 双列快捷菜单](validation/quick-menu-grid.md)：四模式 2×2、主题横排、208pt 宽和固定字号；只调整菜单。
