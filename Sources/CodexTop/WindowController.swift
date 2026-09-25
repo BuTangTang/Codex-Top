@@ -67,6 +67,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
 @MainActor final class WindowController: NSObject, NSWindowDelegate {
     let store: TaskStore
     private let mobileAccount = MobileAccountStore()
+    private let settingsDisplays = SettingsView.DisplayState()
     var orbContextMenu: NSMenu?
     var statusAnchorProvider: (() -> CGRect?)?
     private let top = UtilityPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -202,13 +203,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             }.store(in: &menuObservations)
         }
     }
-    /// 重排现有窗口时复用同一个账号状态，防止设置重建丢失连接中的请求。
+    /// 重排现有窗口时仅刷新显示器选项，保留设置视图、分类与账号输入状态。
     func layout(recoverFloating: Bool, bringAuxiliaryToChosen: Bool = false) {
         modeTransition.finish()
         floatingResize.finish()
         themeReveal.cancel()
         cancelHoverTransitions()
         displays = DisplayChoice.available()
+        // 更新可观察的数据即可保留原 NSHostingView；外接屏变化不会让账号页跳回首页。
+        settingsDisplays.choices = displays
         guard let chosen else { return }
         positioning = true; defer { positioning = false }
         topHovered = false
@@ -223,7 +226,6 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
             floatingResize.resize(to: WindowGeometry.floating(size: floatingSize, visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), animated: false)
         }
-        if let settings { settings.contentView = NSHostingView(rootView: SettingsView(store: store, mobileAccount: mobileAccount, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography()) }
         for window in [picker, settings].compactMap({ $0 }) {
             let frame = WindowGeometry.recoverUtilityWindow(window.frame, visibleFrames: displays.map { $0.screen.visibleFrame },
                                                             preferredVisible: chosen.screen.visibleFrame, forcePreferred: bringAuxiliaryToChosen)
@@ -807,8 +809,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let window: NSWindow
         if let settings { window = settings }
         else {
-            window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 500, height: 610), screen: target)
-            window.contentView = NSHostingView(rootView: SettingsView(store: store, mobileAccount: mobileAccount, displays: displays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
+            window = makeWindow(title: "Codex Top · 设置", size: CGSize(width: 820, height: 650), screen: target)
+            // 双栏保持可读宽度，详情区独立滚动；窗口仍可自由放大。
+            window.contentMinSize = NSSize(width: 740, height: 480)
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, mobileAccount: mobileAccount, displayState: settingsDisplays, recoverWindows: { [weak self] in self?.recoverWindows() }).windowTypography())
             window.delegate = self
             settings = window
         }

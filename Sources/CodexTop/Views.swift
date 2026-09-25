@@ -149,17 +149,73 @@ struct TaskPickerView: View {
 }
 
 struct SettingsView: View {
+    /// 显示器变化通过独立状态更新，不重建设置视图或持久化页面中的输入。
+    @MainActor final class DisplayState: ObservableObject {
+        @Published var choices: [DisplayChoice] = []
+
+        /// 由设置窗口持有；首次窗口布局会填入当前可用显示器。
+        init() {}
+    }
+
+    /// 分类只组织现有设置，不改变各项偏好和账号状态的管理方式。
+    private enum Category: String, CaseIterable, Identifiable {
+        case appearance, tasks, mobile, usage, system
+
+        var id: String { rawValue }
+
+        /// 使用与当前设置内容对应的中文分类名。
+        var title: String {
+            switch self {
+            case .appearance: "显示与外观"
+            case .tasks: "任务监控"
+            case .mobile: "账号与连接"
+            case .usage: "账户额度"
+            case .system: "数据与启动"
+            }
+        }
+
+        /// 分类图标统一使用系统符号，跟随系统文字渲染与明暗模式。
+        var symbol: String {
+            switch self {
+            case .appearance: "display"
+            case .tasks: "checklist"
+            case .mobile: "iphone"
+            case .usage: "chart.bar"
+            case .system: "gearshape"
+            }
+        }
+    }
+
     @ObservedObject var store: TaskStore
     @ObservedObject var mobileAccount: MobileAccountStore
-    var displays: [DisplayChoice]
+    @ObservedObject var displayState: DisplayState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var recoverWindows: () -> Void
+    // 分类仅属于当前设置窗口，不新增持久化偏好或影响监控列表。
+    @State private var selectedCategory: Category = .appearance
     @State private var loginStatus: SMAppService.Status = .notRegistered
     @State private var loginError: String?
+
+    /// 演示环境保留原有边界，不展示真实账号连接入口。
+    private var categories: [Category] {
+        Category.allCases.filter { !store.demo || $0 != .mobile }
+    }
+
+    /// 原生列表负责鼠标与方向键选择，拒绝空选择以保持右侧内容与高亮一致。
+    private var categorySelection: Binding<Category?> {
+        Binding(get: { selectedCategory }, set: { category in
+            if let category { selectedCategory = category }
+        })
+    }
+
+    /// 回读系统登录项授权结果，不在切换分类时重复注册登录项。
     private func refreshLoginStatus() {
         let current: SMAppService.Status = store.demo ? .notRegistered : SMAppService.mainApp.status
         if current != loginStatus { loginError = nil }
         loginStatus = current
     }
+
+    /// 继续使用原有系统登录项入口，并保留失败后的说明与状态回读。
     private func setLoginEnabled(_ enabled: Bool) {
         guard !store.demo else { return }
         loginError = nil
@@ -171,8 +227,88 @@ struct SettingsView: View {
         }
         refreshLoginStatus()
     }
+
+    /// 左侧分类保持在窗口内，只有右侧当前分类的系统表单独立滚动。
     var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text(selectedCategory.title)
+                    .font(.title2.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 22)
+                    .padding(.bottom, 16)
+                Divider()
+                ZStack {
+                    categoryForm
+                        .id(selectedCategory)
+                        .transition(.opacity)
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: selectedCategory)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .tint(Palette.accent)
+        .environment(\.colorScheme, store.theme == .light ? .light : .dark)
+        .onAppear { refreshLoginStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
+    }
+
+    /// 系统侧栏保留原生选中与键盘焦点反馈，不使用点击手势代替可选择列表。
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable().frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+                Text("Codex Top").font(.headline)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+            List(selection: categorySelection) {
+                ForEach(categories) { category in
+                    Label(category.title, systemImage: category.symbol)
+                        .padding(.vertical, 5)
+                        .tag(category)
+                        .accessibilityLabel(category.title)
+                        .accessibilityIdentifier("settings-category-\(category.rawValue)")
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .accessibilityLabel("设置分类")
+        }
+        .frame(width: 190)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// 每次选择只挂载对应表单；离开账号页面仍触发原组件的密码清理。
+    private var categoryForm: some View {
         Form {
+            switch selectedCategory {
+            case .appearance:
+                appearanceSettings
+            case .tasks:
+                taskSettings
+            case .mobile:
+                if !store.demo { MobileAccountSection(account: mobileAccount) }
+            case .usage:
+                Section("账户额度") { UsageSettingsContent(store: store) }
+            case .system:
+                systemSettings
+            }
+        }
+        .formStyle(.grouped)
+        .accessibilityIdentifier("settings-detail-\(selectedCategory.rawValue)")
+    }
+
+    /// 保留显示位置、主题、比例与演示动画的既有控件及绑定。
+    @ViewBuilder private var appearanceSettings: some View {
             Section("显示位置") {
                 Picker("显示方式", selection: Binding(get: { store.placement }, set: { store.setPlacement($0) })) {
                     Text("刘海模式").tag(PanelPlacement.top)
@@ -182,8 +318,8 @@ struct SettingsView: View {
                 }.pickerStyle(.segmented)
                 Picker("刘海显示器", selection: Binding(get: { store.preferences.preferredDisplay ?? "" }, set: { store.setDisplay($0) })) {
                     Text("自动 · 系统主显示器").tag("")
-                    ForEach(displays) { display in Text(display.name).tag(display.id) }
-                    if let saved = store.preferences.preferredDisplay, !displays.contains(where: { $0.id == saved }) {
+                    ForEach(displayState.choices) { display in Text(display.name).tag(display.id) }
+                    if let saved = store.preferences.preferredDisplay, !displayState.choices.contains(where: { $0.id == saved }) {
                         Text("已断开的显示器 · 暂用主屏").tag(saved)
                     }
                 }
@@ -233,6 +369,10 @@ struct SettingsView: View {
                     Button("恢复示例状态") { store.previewDemoPhase(nil) }
                 }
             }
+    }
+
+    /// 任务分类只移动原有监控偏好，不改变任务状态和刷新行为。
+    private var taskSettings: some View {
             Section("任务") {
                 Picker("可见任务数", selection: Binding(get: { store.preferences.resolvedVisibleTaskCount }, set: { store.setVisibleTaskCount($0) })) {
                     ForEach(MonitorPreferences.visibleTaskCountRange, id: \.self) { count in
@@ -252,8 +392,10 @@ struct SettingsView: View {
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
             }
-            if !store.demo { MobileAccountSection(account: mobileAccount) }
-            Section("账户额度") { UsageSettingsContent(store: store) }
+    }
+
+    /// 数据目录、登录启动及恢复默认仍调用原有入口，提示完整保留。
+    @ViewBuilder private var systemSettings: some View {
             Section("数据与启动") {
                 HStack {
                     Text("Codex 数据目录"); Spacer(); Button("选择…") { store.chooseRoot() }.disabled(store.demo)
@@ -274,8 +416,5 @@ struct SettingsView: View {
                 if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(.orange) }
                 Button("备份并恢复默认设置") { store.restorePreferences() }
             }
-        }.formStyle(.grouped).environment(\.colorScheme, store.theme == .light ? .light : .dark)
-            .onAppear { refreshLoginStatus() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 }

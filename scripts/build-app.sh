@@ -86,6 +86,10 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
 <key>CodexTopDemo</key><$demo/>
 </dict></plist>
 PLIST
+# 自用发布可提供默认服务地址；开源构建不内置部署地址，已有用户配置始终优先。
+if [[ -n "${CODEX_TOP_DEFAULT_SERVER_URL:-}" ]]; then
+  plutil -insert CodexTopConnectionServer -string "$CODEX_TOP_DEFAULT_SERVER_URL" "$app_path/Contents/Info.plist"
+fi
 plutil -lint "$app_path/Contents/Info.plist"
 codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none "$app_path"
 codesign --verify --strict "$app_path"

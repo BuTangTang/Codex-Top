@@ -12,10 +12,12 @@ import CodexTopCore
     private let defaults: UserDefaults
     private var operation: Task<Void, Never>?
 
-    /// 只恢复非秘密服务地址；登录状态在启动后通过统一组件验证。
+    /// 优先恢复用户保存的服务地址；首次安装使用发布包指定地址，登录仍由组件核实。
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        serverAddress = defaults.string(forKey: "codexTopConnectionServer") ?? ""
+        let saved = defaults.string(forKey: "codexTopConnectionServer")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // 发布地址只提供表单初值，不覆盖既有配置，也不代表账号已登录。
+        serverAddress = saved.isEmpty ? (Bundle.main.object(forInfoDictionaryKey: "CodexTopConnectionServer") as? String ?? "") : saved
     }
 
     var hasLogin: Bool { session != nil || loginNeedsVerification }

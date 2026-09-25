@@ -15,6 +15,39 @@ final class MobileAccountClientTests: XCTestCase, @unchecked Sendable {
         XCTAssertNotEqual(local.environment["HAPPIER_ACTIVE_SERVER_ID"], try MobileAccountConfiguration(serverAddress: "https://example.com", home: home, executable: nil).environment["HAPPIER_ACTIVE_SERVER_ID"])
     }
 
+    /// 同一规范化地址跨配置实例与产品目录保持身份，避免重启后改用另一份凭据。
+    func testServerIdentityIsStableForCanonicalAddress() throws {
+        let expected = "codextop_100680ad546ce6a577f42f52df33b4cfdca756859e664b8d7de329b"
+        for (index, address) in ["https://example.com", "https://example.com/", "  https://example.com/\n"].enumerated() {
+            let configuration = try MobileAccountConfiguration(
+                serverAddress: address,
+                home: URL(fileURLWithPath: "/tmp/synthetic-codextop-\(index)"),
+                executable: nil
+            )
+            XCTAssertEqual(configuration.environment["HAPPIER_ACTIVE_SERVER_ID"], expected)
+        }
+    }
+
+    /// 对齐连接组件的文件系统标识契约，且不同服务地址与端口不能共享账号目录。
+    func testServerIdentityFitsCliFilesystemContractAndSeparatesServices() throws {
+        let addresses = ["https://example.com", "https://other.example.com", "https://example.com:8443", "http://127.0.0.1:3009", "http://127.0.0.1:3010"]
+        var identities = Set<String>()
+        for address in addresses {
+            let configuration = try MobileAccountConfiguration(
+                serverAddress: address,
+                home: URL(fileURLWithPath: "/tmp/synthetic-codextop"),
+                executable: nil,
+                allowLoopback: true
+            )
+            let identity = try XCTUnwrap(configuration.environment["HAPPIER_ACTIVE_SERVER_ID"])
+            // CLI isServerIdFilesystemSafe 只接受 1...64 个 ASCII 字母、数字、点、下划线和短横线。
+            XCTAssertLessThanOrEqual(identity.utf8.count, 64)
+            XCTAssertNotNil(identity.range(of: "^[A-Za-z0-9._-]{1,64}$", options: .regularExpression))
+            XCTAssertTrue(identity.hasPrefix("codextop_"))
+            XCTAssertTrue(identities.insert(identity).inserted, "Different services must keep separate identities")
+        }
+    }
+
     /// 真实子进程捕获合成输入，验证密码只经过 stdin 且状态经过协议解码。
     func testLoginUsesStdinAndStatusUsesVerifiedIdentity() async throws {
         let root = try fixture(script: #"""

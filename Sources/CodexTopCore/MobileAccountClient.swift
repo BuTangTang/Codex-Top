@@ -29,7 +29,8 @@ public struct MobileAccountConfiguration: Sendable {
         let fingerprint = SHA256.hash(data: Data(serverURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         result["HAPPIER_HOME_DIR"] = home.path
         result["HAPPIER_SERVER_URL"] = serverURL.absoluteString
-        result["HAPPIER_ACTIVE_SERVER_ID"] = "codextop_" + fingerprint
+        // CLI 的服务标识最多 64 字符；9 字符前缀加 55 位摘要，避免被忽略并回退到另一身份。
+        result["HAPPIER_ACTIVE_SERVER_ID"] = "codextop_" + fingerprint.prefix(55)
         result["HAPPIER_NO_BROWSER"] = "1"
         result["HAPPIER_PRODUCT_MODE"] = "codextop"
         return result
