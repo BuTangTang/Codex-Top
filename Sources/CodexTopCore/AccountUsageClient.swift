@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import AppKit
 
 /// One isolated, read-only account connection at a time. Create a new instance
 /// when the selected Codex directory changes; caches never span directories.
@@ -65,13 +66,24 @@ public actor AccountUsageClient {
         }
     }
 
+    /// 从按官方 bundle ID 定位的应用读取内置 CLI；缺失、目录或不可执行文件都不能作为启动入口。
+    static func findBundledExecutable(in applicationURL: URL?) -> URL? {
+        guard let applicationURL else { return nil }
+        let executable = applicationURL.appendingPathComponent("Contents/Resources/codex")
+        let manager = FileManager.default
+        var isDirectory = ObjCBool(false)
+        guard manager.fileExists(atPath: executable.path, isDirectory: &isDirectory), !isDirectory.boolValue,
+              manager.isExecutableFile(atPath: executable.path) else { return nil }
+        return executable
+    }
+
+    /// 优先使用官方桌面应用内置 CLI；仅额度查询保留已有独立 CLI 和 PATH 后备。
     private static func findExecutable() -> URL? {
+        if let bundled = findBundledExecutable(in: NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")) {
+            return bundled
+        }
         let manager = FileManager.default
         var candidates = [
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Codex.app/Contents/Resources/codex").path,
-            manager.homeDirectoryForCurrentUser.appendingPathComponent("Applications/ChatGPT.app/Contents/Resources/codex").path,
             "/opt/homebrew/bin/codex", "/usr/local/bin/codex"
         ]
         candidates += (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":")

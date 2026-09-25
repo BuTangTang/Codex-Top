@@ -3,6 +3,49 @@ import Foundation
 @testable import CodexTopCore
 
 final class MobileAccountClientTests: XCTestCase, @unchecked Sendable {
+    /// GUI 的 PATH 没有 Codex 时使用官方应用内的可执行程序，继承的连接身份和路径不能污染结果。
+    func testConnectionEnvironmentUsesBundledCodexWithoutShellPath() throws {
+        let root = try fixture(script: "exit 0")
+        let application = root.appendingPathComponent("Renamed Desktop.app")
+        let codex = application.appendingPathComponent("Contents/Resources/codex")
+        try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "synthetic executable".write(to: codex, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: codex.path)
+        let configuration = try MobileAccountConfiguration(serverAddress: "https://example.com", home: root, executable: nil)
+        let environment = configuration.environment(inheriting: [
+            "PATH": "/usr/bin:/bin", "LANG": "zh_CN.UTF-8",
+            "HAPPIER_CODEX_APP_SERVER_BIN": "/synthetic/untrusted-codex",
+            "HAPPIER_CODEX_PATH": "/synthetic/other-codex", "HAPPY_CODEX_TUI_BIN": "/synthetic/legacy-codex",
+            "HAPPIER_HOME_DIR": "/synthetic/other-account", "HAPPIER_SERVER_URL": "https://other.example.com",
+            "HAPPIER_PRIVATE_VALUE": "synthetic-private-value", "HAPPY_PRIVATE_VALUE": "synthetic-private-value"
+        ], codexApplicationURL: application)
+
+        XCTAssertEqual(environment["HAPPIER_CODEX_APP_SERVER_BIN"], codex.path)
+        XCTAssertEqual(environment["PATH"], "/usr/bin:/bin")
+        XCTAssertEqual(environment["LANG"], "zh_CN.UTF-8")
+        XCTAssertEqual(environment["HAPPIER_HOME_DIR"], root.path)
+        XCTAssertEqual(environment["HAPPIER_SERVER_URL"], "https://example.com")
+        for key in ["HAPPIER_CODEX_PATH", "HAPPY_CODEX_TUI_BIN", "HAPPIER_PRIVATE_VALUE", "HAPPY_PRIVATE_VALUE"] {
+            XCTAssertNil(environment[key])
+        }
+    }
+
+    /// 未定位应用、包内程序缺失或不可执行时不注入路径，也不恢复被清理的继承 override。
+    func testConnectionEnvironmentOmitsMissingOrNonExecutableBundledCodex() throws {
+        let root = try fixture(script: "exit 0")
+        let application = root.appendingPathComponent("Synthetic Desktop.app")
+        let codex = application.appendingPathComponent("Contents/Resources/codex")
+        let configuration = try MobileAccountConfiguration(serverAddress: "https://example.com", home: root, executable: nil)
+        let inherited = ["PATH": "/usr/bin:/bin", "HAPPIER_CODEX_APP_SERVER_BIN": "/synthetic/untrusted-codex"]
+        for bundle in [nil, application] as [URL?] {
+            XCTAssertNil(configuration.environment(inheriting: inherited, codexApplicationURL: bundle)["HAPPIER_CODEX_APP_SERVER_BIN"])
+        }
+        try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "synthetic non-executable".write(to: codex, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: codex.path)
+        XCTAssertNil(configuration.environment(inheriting: inherited, codexApplicationURL: application)["HAPPIER_CODEX_APP_SERVER_BIN"])
+    }
+
     /// 服务配置拒绝明文公网、内嵌凭据和查询串，开发回环须明确允许。
     func testServiceValidationKeepsCredentialsOffUntrustedAddresses() throws {
         let home = URL(fileURLWithPath: "/tmp/synthetic-codextop")

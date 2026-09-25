@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Darwin
+import AppKit
 
 /// Codex Top 产品账号的配置；不读取或改写 Codex 的认证文件。
 public struct MobileAccountConfiguration: Sendable {
@@ -25,7 +26,17 @@ public struct MobileAccountConfiguration: Sendable {
 
     /// 为连接组件固定独立目录和服务身份，避免继承其他会话的认证环境。
     var environment: [String: String] {
-        var result = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("HAPPIER_") && !$0.key.hasPrefix("HAPPY_") }
+        environment(inheriting: ProcessInfo.processInfo.environment,
+                    codexApplicationURL: NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex"))
+    }
+
+    /// 使用已定位的官方应用构造连接环境；可注入合成目录验证，不启动或改写 Codex。
+    func environment(inheriting inherited: [String: String], codexApplicationURL: URL?) -> [String: String] {
+        var result = inherited.filter { !$0.key.hasPrefix("HAPPIER_") && !$0.key.hasPrefix("HAPPY_") }
+        // 先清理继承配置，再交给连接组件既有的可执行路径入口；GUI 启动不依赖交互 shell 的 PATH。
+        if let codex = AccountUsageClient.findBundledExecutable(in: codexApplicationURL) {
+            result["HAPPIER_CODEX_APP_SERVER_BIN"] = codex.path
+        }
         let fingerprint = SHA256.hash(data: Data(serverURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         result["HAPPIER_HOME_DIR"] = home.path
         result["HAPPIER_SERVER_URL"] = serverURL.absoluteString
