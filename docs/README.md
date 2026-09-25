@@ -1,6 +1,6 @@
 # 文档入口
 
-本批状态与导航验收见[手机状态读取修复](validation/mobile-state-recovery.md)：覆盖历史／运行状态、未加载任务打开、最近数量设置和电脑／项目子页面。源码、安装和实际验收分别记录。
+本批本地正文缓存、安装包瘦身及连接修复见[本批验收](validation/mobile-cache-size.md)。此前历史状态、最近数量和项目子页面见[手机状态读取修复](validation/mobile-state-recovery.md)。源码、安装和实际验收分别记录。
 
 Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列表置顶悬浮。
 
@@ -54,7 +54,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前本机安装为 v1.0.0 build 48，最新账号／顶栏进展见[本批验收](validation/mobile-header-account.md)，此前连接与手机验证见[状态修复验收](validation/mobile-state-recovery.md)。build 43 的 Mac 双栏设置、build 36 的经典圆环与渐隐双弧继续保留；历史跨屏和动画结论不代替本批验收。中英文 README 四模式图片仍对应 build 10，公开 Release 附件未变。
+当前本机安装为 v1.0.0 build 50，最新缓存／瘦身及连接边界见[本批验收](validation/mobile-cache-size.md)，此前账号／顶栏见[前批验收](validation/mobile-header-account.md)，此前连接与手机验证见[状态修复验收](validation/mobile-state-recovery.md)。build 43 的 Mac 双栏设置、build 36 的经典圆环与渐隐双弧继续保留；历史跨屏和动画结论不代替本批验收。中英文 README 四模式图片仍对应 build 10，公开 Release 附件未变。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
