@@ -1,5 +1,9 @@
 # 手机多电脑对话主管记录
 
+2026-09-28 D-22本地同步分工：code52七文件已阶段提交推送；anchor_finish交回Sync同步恢复及既有测试两文件（95项与邻接36项通过）。lifecycle_increment_review独占手机全局发现provider、原首页／browse快照、Sync预取入口及相关测试；desktop_bridge独占LINK／LIST协议、原机器RPC、Codex候选版本与三个既有测试，共六文件。契约为LINK可选openExisting（默认旧打开行为）、LIST明确linkWithoutOpening能力、候选可选transcriptVersion；手机缺能力不自动关联，沿原消息同步和缓存，不增加follow。主管独占设备、构建、需求及提交，源代码通过与实际未打开缓存验收分别记录。
+
+2026-09-28 code52候选写权：原输入实施仅可写MultiTextInput原生／Web、SessionView、既有sessionComposerSendCoordinator四源文件及其三个既有专项。原本地pending承接之后，核对文本currentness已清及当前输入仍匹配，再沿现有ref派发RN清空；保留原生计数拒绝，Web行为保持，不引入队列、计时器或确认状态。独立审查只读；主管独占noEmit、构建、设备、文档和提交。候选／合成结果不代表真实续写已解决。
+
 2026-09-28 code51：本批10个产品／测试文件完成独立增量审查并冻结，主管完成普通包构建、签名覆盖和真实软键盘验证；连续输入仍失败，未把优化当根因修复。两路仅只读核对原消息承接与原生清空边界，不改状态owner或扩队列。设备、构建、总文档与提交仍由主管独占。
 
 2026-09-28 code50交回：两内部作者按授权修改原焦点2文件、原锚点4文件，正式RED/GREEN及独立反向审查后冻结，主管统一noEmit、构建、安装和真实软键盘验收。续写失败后，原输入任务仅查私有反例／最小候选，迁移和ACK丢失支线暂停；锚点任务仅只读核查键盘变化与退出保护，另一任务只读追清空调用顺序。均无新的生产写权，设备、文档与提交由主管独占。未发布验收通过结论；[证据](../validation/mobile-cache-size.md#code50-软键盘连续输入复验2026-09-28)。
