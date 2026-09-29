@@ -1,5 +1,9 @@
 # 文档入口
 
+原生手机端逐项状态见[当前验收核对](validation/native-acceptance-2026-09-30.md)。
+
+当前版本与逐项证据统一维护在上述验收核对中；本入口不重复维护容易过期的安装包编号。
+
 本批本地正文缓存、安装包瘦身及连接修复见[本批验收](validation/mobile-cache-size.md)。此前历史状态、最近数量和项目子页面见[手机状态读取修复](validation/mobile-state-recovery.md)。源码、安装和实际验收分别记录。
 
 Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列表置顶悬浮。
@@ -54,7 +58,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前本机安装为 Mac v1.0.0 build 63（有效reader目标复用；两轮恢复首发475／507ms，详见本批验收），模拟器普通验证包为 Android1.0.62/code63（在线627ms到原记录；布局交接已修正，冷入正文提前一个采样区间，暖返及即时首屏仍未通过；前台主动缓存保持，首拖跳位、长消息裁切、连续输入及完整稳定性仍未通过），最新缓存／瘦身及连接边界见[本批验收](validation/mobile-cache-size.md)，此前账号／顶栏见[前批验收](validation/mobile-header-account.md)，此前连接与手机验证见[状态修复验收](validation/mobile-state-recovery.md)。build 43 的 Mac 双栏设置、build 36 的经典圆环与渐隐双弧继续保留；历史跨屏和动画结论不代替本批验收。中英文 README 四模式图片仍对应 build 10，公开 Release 附件未变。
+当前安装及逐项验收以[状态入口](STATUS.md)和[原生手机端验收核对](validation/native-acceptance-2026-09-30.md)为准。本批为 Mac build 68 与原生 Telegram Android 适配包，当前包在线发送已回归；实体手机、合盖恢复、真实审批等仍未完成。历史包和旧 React Native 手机端结果不得替代当前验收。公开 Release 附件未由本批验证更新。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 
