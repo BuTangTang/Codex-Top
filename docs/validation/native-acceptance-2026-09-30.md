@@ -50,3 +50,7 @@ APK 74,078,240 字节（约70.6 MiB），模拟器安装哈希已回读。与3a3
 ## 后台边界核实
 
 2026-09-30 后台同步缺口核实：原生CodexRuntime的scheduleListRefresh在mainInterfacePaused时跳过列表刷新，prefetchDialogs同样只在前台请求；ApplicationLoader.startPushService在Codex模式直接返回。原KeepAliveJob仅保持短期执行窗口、NotificationsService仅启动初始化，不能直接当成Codex消息同步或可靠推送。故当前证据仅支持应用前台未开详情预取、恢复前台/进程重启后补齐，不支持系统后台持续接收。详细设计已禁止用无期限后台轮询冒充可靠推送，本轮不为消除缺口盲目启用上游服务。ADB仍仅模拟器，已询问实体手机接入；自有推送条件和真实审批仍待完成。无生产代码、构建、提交推送。
+
+## 源码保存
+
+2026-09-30 Android源码阶段保存：原生参考仓库本地提交f1e71c0，70文件，包含Codex适配、原版入口删减、中文/品牌资源与合成测试。现有12组JVM测试全通过；SessionStoreFileTest依赖Android系统，不计入这12组，历史设备证据另保留。仅去除build.gradle末尾多余空行，未新构建或替换已验b8c9bb44包。Android工作区已清洁；远程仍为Telegram上游，未向该远程推送，也未创建发布或上传APK。Happier连接组件改动仍未提交，整体功能缺口不变。
