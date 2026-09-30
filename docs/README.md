@@ -2,7 +2,7 @@
 
 2026-09-30 手机端[需求 v0.11](REQ-002-局域网多设备监控/requirement.md#当前手机端需求汇总)与[详细设计 v0.3](REQ-002-局域网多设备监控/detailed-design.md)均已获用户在对应审核邀请后回复“下一步”确认。已完成[原生增量任务拆分](REQ-002-局域网多设备监控/tasks/progress.md)，用户随后明确“开始执行”，当前第一批实施中，后续按依赖推进。
 
-原生手机端逐项状态见[当前验收核对](validation/native-acceptance-2026-09-30.md)。本批三栏、状态与交互集成见[v0.3实施验收](validation/native-v03-20260930.md)：缓存与显示修正已装模拟器并完成有限检查，实体机待重连安装，最新包发送及未预期切页仍保留验收缺口。
+原生手机端逐项状态见[当前验收核对](validation/native-acceptance-2026-09-30.md)。本批三栏、状态与交互集成见[v0.3实施验收](validation/native-v03-20260930.md)：Mac71已安装，真实机器RPC提问与额度读取已验证，Q／L Android已构建安装到模拟器，完整手机界面验收待补；图片文件F1继续接入。实体机待重连，最新包发送及此前未预期切页仍保留验收缺口。
 
 当前批次版本与证据以v0.3实施验收为准；逐项未完成范围同时保留在验收核对中。本入口不重复维护容易过期的安装包编号。
 
@@ -60,7 +60,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Windows 版完整开发提示词](handoff/windows-implementation-prompts.md)
 - [独立额度与流量核对](validation/account-refresh-traffic.md)
 
-当前安装及逐项验收以[状态入口](STATUS.md)和[原生手机端验收核对](validation/native-acceptance-2026-09-30.md)为准。本批为 Mac build 68 与原生 Telegram Android 适配包，当前包在线发送已回归；实体手机、合盖恢复、真实审批等仍未完成。历史包和旧 React Native 手机端结果不得替代当前验收。公开 Release 附件未由本批验证更新。
+当前安装及逐项验收以[状态入口](STATUS.md)和[v0.3实施验收](validation/native-v03-20260930.md)为准。历史包和旧 React Native 手机端结果不得替代当前验收；实体手机、合盖恢复、真实审批等未完成项仍保留。公开 Release 附件未由本批验证更新。
 
 - [beta.2 最终测试、实际截图与分发校验](validation/beta2.md)
 

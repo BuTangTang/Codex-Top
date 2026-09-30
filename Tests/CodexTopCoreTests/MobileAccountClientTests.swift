@@ -3,6 +3,21 @@ import Foundation
 @testable import CodexTopCore
 
 final class MobileAccountClientTests: XCTestCase, @unchecked Sendable {
+    /// 当前官方应用改用嵌套 CLI 包，GUI 无交互 PATH 时仍应将真实入口交给同一连接组件。
+    func testConnectionEnvironmentUsesNestedOfficialCodexCLI() throws {
+        let root = try fixture(script: "exit 0")
+        let application = root.appendingPathComponent("Renamed Official.app")
+        let codex = application.appendingPathComponent("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
+        try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "synthetic executable".write(to: codex, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: codex.path)
+        let configuration = try MobileAccountConfiguration(serverAddress: "https://example.com", home: root, executable: nil)
+        let environment = configuration.environment(inheriting: ["PATH": "/usr/bin:/bin"], codexApplicationURL: application)
+        XCTAssertEqual(environment["HAPPIER_CODEX_APP_SERVER_BIN"], codex.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: codex.path)
+        XCTAssertNil(configuration.environment(inheriting: ["PATH": "/usr/bin:/bin"], codexApplicationURL: application)["HAPPIER_CODEX_APP_SERVER_BIN"])
+    }
+
     /// GUI 的 PATH 没有 Codex 时使用官方应用内的可执行程序，继承的连接身份和路径不能污染结果。
     func testConnectionEnvironmentUsesBundledCodexWithoutShellPath() throws {
         let root = try fixture(script: "exit 0")

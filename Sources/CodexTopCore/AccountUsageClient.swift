@@ -69,12 +69,15 @@ public actor AccountUsageClient {
     /// 从按官方 bundle ID 定位的应用读取内置 CLI；缺失、目录或不可执行文件都不能作为启动入口。
     static func findBundledExecutable(in applicationURL: URL?) -> URL? {
         guard let applicationURL else { return nil }
-        let executable = applicationURL.appendingPathComponent("Contents/Resources/codex")
         let manager = FileManager.default
-        var isDirectory = ObjCBool(false)
-        guard manager.fileExists(atPath: executable.path, isDirectory: &isDirectory), !isDirectory.boolValue,
-              manager.isExecutableFile(atPath: executable.path) else { return nil }
-        return executable
+        // 新版将 CLI 放入嵌套应用；仍只从官方 bundle 定位，不依赖应用显示名或交互 shell。
+        for path in ["Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "Contents/Resources/codex"] {
+            let executable = applicationURL.appendingPathComponent(path)
+            var isDirectory = ObjCBool(false)
+            if manager.fileExists(atPath: executable.path, isDirectory: &isDirectory), !isDirectory.boolValue,
+               manager.isExecutableFile(atPath: executable.path) { return executable }
+        }
+        return nil
     }
 
     /// 优先使用官方桌面应用内置 CLI；仅额度查询保留已有独立 CLI 和 PATH 后备。
