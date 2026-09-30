@@ -1,5 +1,23 @@
 # 手机多电脑对话主管记录
 
+2026-09-30 第一批交接：S/U代码已交回，主管完成Mac70与Android274a48c2构建安装及模拟器三轮发送验证，实体机账号保留。当前代码写权已收回；新增电脑/项目持久缓存、首页无变化仍刷新问题处于方案讨论，未开始修改；Q/F/L保持后续依赖。详见[本批验收](../validation/native-v03-20260930.md)。
+
+## 当前实施写权（2026-09-30）
+
+用户明确“开始执行”。已通过工具向原“手机 UI 与交互续接”（01a0d4cd-cd68-7002-80b6-1f1828ed68e2）授予原生 U1/U2 的 MainTabsActivity、LaunchActivity、SettingsActivity、DialogsActivity、DialogCell、ChatActivity、ChatAvatarContainer 及必要原UI资源；另已批准原 GlassTabView 设备枚举和 LoginActivity 登录成功单一路由进入同底栏，不改认证或登录外观。向“电脑端会话与项目接入”（01a0cd1b-7d1f-7481-ac2f-c7825bfac5e7）授予 M2-S 的既有 Direct 协议／候选／RPC／状态及 Android CodexRuntime、DesktopConnection、SessionStatus、DialogStore 同域写权。两任务已回读运行中，不并写；其他文件先交主管。子任务不得设备、服务、打包、提交推送。主管独占设备／构建／文档，内部 Q0/F0/L0 只读准备无产品写权。旧包与用户数据保留，任务切片完成后交回再续下一批。
+
+## 当前批次：v0.3 任务拆分（2026-09-30）
+
+用户在明确设计审核邀请后回复“下一步”，记录需求 v0.11／设计 v0.3 已通过，当前仅完成 tasks；本批无产品编码指令、构建或设备操作。主管统一写 REQ、任务表、STATUS 和本记录；三路内部协作只读复核 UI 切片、提问／附件契约及额度来源，均已完成，不具有产品写权，也没有启动可见实施任务。
+
+实施规划见[当前任务总表](tasks/progress.md)：M2 持有桌面／机器协议与 Android 接入层的唯一整合职责，M3 持有原生页面和交互，M5 由主管统一构建、设备与实际验收。契约核对和无新接口依赖的 UI 可并行；共享协议、`CodexRuntime/DesktopConnection`、`ChatActivity`、`SettingsActivity` 逐项交接。已有同类可见任务在获得实施指令后先回读状态与写权再复用，不依据下方旧记录恢复工作。
+
+源码基线：Codex Top `main/f2d7a8c`、Telegram Android `dc28c18`、Happier `2a84c29a5`。保留用户 `AGENTS.md` 和 Happier 两份既有 UI 同步改动；不修改认证／Codex 数据，不推 Telegram／Happier 上游。M1 登录、M4 云服务不新增本批任务，其既有验收缺口保留；D-05 新建继续暂缓。
+
+## 历史分派与写权记录
+
+以下为发生时记录，旧负责人、任务标识、文件写权及运行状态均不自动延续至本批。
+
 2026-09-28 D-22本地同步分工：code52七文件已阶段提交推送；anchor_finish交回Sync同步恢复及既有测试两文件（95项与邻接36项通过）。lifecycle_increment_review独占手机全局发现provider、原首页／browse快照、Sync预取入口及相关测试；desktop_bridge独占LINK／LIST协议、原机器RPC、Codex候选版本与三个既有测试，共六文件。契约为LINK可选openExisting（默认旧打开行为）、LIST明确linkWithoutOpening能力、候选可选transcriptVersion；手机缺能力不自动关联，沿原消息同步和缓存，不增加follow。主管独占设备、构建、需求及提交，源代码通过与实际未打开缓存验收分别记录。
 
 2026-09-28 code52候选写权：原输入实施仅可写MultiTextInput原生／Web、SessionView、既有sessionComposerSendCoordinator四源文件及其三个既有专项。原本地pending承接之后，核对文本currentness已清及当前输入仍匹配，再沿现有ref派发RN清空；保留原生计数拒绝，Web行为保持，不引入队列、计时器或确认状态。独立审查只读；主管独占noEmit、构建、设备、文档和提交。候选／合成结果不代表真实续写已解决。

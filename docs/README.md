@@ -1,6 +1,8 @@
 # 文档入口
 
-原生手机端逐项状态见[当前验收核对](validation/native-acceptance-2026-09-30.md)。
+2026-09-30 手机端[需求 v0.11](REQ-002-局域网多设备监控/requirement.md#当前手机端需求汇总)与[详细设计 v0.3](REQ-002-局域网多设备监控/detailed-design.md)均已获用户在对应审核邀请后回复“下一步”确认。已完成[原生增量任务拆分](REQ-002-局域网多设备监控/tasks/progress.md)，用户随后明确“开始执行”，当前第一批实施中，后续按依赖推进。
+
+原生手机端逐项状态见[当前验收核对](validation/native-acceptance-2026-09-30.md)。本批三栏、状态与交互集成见[v0.3实施验收](validation/native-v03-20260930.md)。
 
 当前版本与逐项证据统一维护在上述验收核对中；本入口不重复维护容易过期的安装包编号。
 
@@ -13,7 +15,7 @@ Codex Top：把 Codex 任务放在 Mac 屏幕顶部，也可以将同一份列�
 - [Mac 双栏设置与正式连接](validation/settings-sidebar.md)：build 43 已安装，五分类、键盘切换、明暗排版和正式账号回读通过；控制读取及部分实际验收仍有缺项。
 - [手机 UI 简化设计与实施交接](design/mobile-ui-2026-09-25/README.md)：2026-09-25 已接收，已进入单列表、开放正文和稳定刷新实施；设计图不作为运行验收。
 - [已接收回答的状态同步](validation/accepted-question-replies.md)：修复回答已提交而仍长时间待处理的问题，保留现有界面。
-- [REQ-002 多电脑 Codex 会话、手机通知与对话](REQ-002-局域网多设备监控/requirement.md)：依据需求 v0.10、[设计 v0.2](REQ-002-局域网多设备监控/detailed-design.md)及[五组 tasks](REQ-002-局域网多设备监控/tasks/progress.md)实施并进行本机联调，原生新建按 D-05 暂缓。D-06独立手机UI、D-07仅简体中文的[本批验证](validation/codextop-mobile-ui-2026-09-24.md)已记录，当前 APK 尚未通过整体视觉验收。[首页精简讨论](REQ-002-局域网多设备监控/homepage-revision-draft.md)、[原六页提示词](REQ-002-局域网多设备监控/assets/ui-2026-09-24/prompts.md)、[简化账号设置图](REQ-002-局域网多设备监控/assets/design-v0.2/prompts.md)和[手机验收记录](validation/happier-mobile.md)保留依据；[主管记录](REQ-002-局域网多设备监控/supervision.md)顶部为当前写权，旧实施及[开源调研](REQ-002-局域网多设备监控/opensource-research.md)为历史参考。
+- [REQ-002 多电脑 Codex 会话、手机通知与对话](REQ-002-局域网多设备监控/requirement.md)：本批以需求 v0.11、[设计 v0.3](REQ-002-局域网多设备监控/detailed-design.md)及[任务总表](REQ-002-局域网多设备监控/tasks/progress.md)为准；M2 负责原任务接入，M3 复用 Telegram 原版界面，M5 统一验收。原生新建按 D-05 暂缓，既有通知、审批等缺口继续保留。[主管记录](REQ-002-局域网多设备监控/supervision.md)顶部为本批写权边界；旧 RN 设计、图稿与任务勾选仅作历史参考。
 - [REQ-002 独立部署与公网验证](validation/codextop-deploy-package-2026-09-24.md)：业务与 HTTPS 容器已独立部署，云端登录、长连接、账号隔离和公网消息往返已验证；手机指定路径的状态和前后台恢复已复验，服务恢复、推送与小米验收仍未完成。
 - [build 36 可选渐隐双弧](validation/twin-arc-orb.md)：保留经典圆环，新增 D4 双弧及固定运行数，移除机器人原型。
 - [build 31 统一浅色实色外观](validation/solid-light-theme.md)：监控、菜单及主题快照共用不透明浅白，保留三项主题和原有布局。
