@@ -2,7 +2,7 @@
 
 2026-10-02 D-39／D-40／D-41阶段：Android额度持久化f72deb3、真实摘要与右侧状态51af150、电脑／项目原语义图标0bbf5cd、明暗像素强调4f01a46已分别提交并推到自有分支，远端同SHA。最终2e71f86e已覆盖模拟器并回核完整SHA／账号；明暗列表、电脑／项目／聊天、多选原路径及额度离线冷恢复已实拍。一次在线合成首发T0→原记录T2观测1531.2ms，原用户／助手各1，回复与下一条输入保留。当前Mac75／模拟器2e71f86e／断连实体15e8f2da；不扩大为手机或恢复验收。Cursor／Grok四项已实际交付，主题保存失败返修已核验；异步题仍缺真实卡片回复闭合，原六文件跟随链返修已实际接收。目标五文件只读基础独立通过但尚未接入或发布。摘要格式和浅色系统导航对比度继续核对，完整目标未完成。
 
-当前写权：Android生产文件全部冻结交回，主管已完成四片源码提交。Cursor聊天设计任务只读审查摘要格式与导航对比度；手机提问任务独占readCodexCandidateLifecycle、readAfterCodexTranscript、createCodexDirectSessionFollowLease及各直接测试六文件。目标五文件已冻结并独立复核；该Cursor任务已继续只读追原机器传输的兼容接入，不写原控制契约和异步题六文件。主管独占文档、Git、构建、安装和桌面／设备；用户AGENTS及Happier旧UI同步脏改保留。
+当前写权：Android上一阶段已冻结交回并完成四片源码提交。Cursor聊天设计任务独占DialogCell、新CodexDialogPreview及两份专项四文件实施显示层Markdown整理，Runtime／TranscriptText／主题保持冻结；手机提问任务独占readCodexCandidateLifecycle、readAfterCodexTranscript、createCodexDirectSessionFollowLease及各直接测试六文件。目标五文件已冻结并独立复核；该Cursor任务已继续只读追原机器传输的兼容接入，不写原控制契约和异步题六文件。主管独占文档、Git、构建、安装和桌面／设备；用户AGENTS及Happier旧UI同步脏改保留。
 
 2026-10-01 L两文件已交回并推送自有71062c69，远端一致；独立复核与主管32MiB真实方法专项／5组相邻回归通过，三项RED及首连成功／失败边界均已GREEN。原额度入口的在途登记和回调仅在UI线程处理，仍用原approvalQueue与额度快照，不取类锁、不新增owner或提示。主管统一完成构建、签名、正常覆盖安装、账号回核和旧包清理；八份文档由附件复核任务独占补记，源码／Git／设备无写权。当前Mac74／模拟器378a955b，未启动应用或操作手机UI，收发恢复及外接屏仍未验；官方云下载桥仍缺，整批未完成。详见[本批验收](../validation/native-v03-20260930.md#额度同来源并发合并2026-10-01)。
 
