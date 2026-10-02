@@ -1,5 +1,9 @@
 # 当前状态与续做记录
 
+2026-10-03 桌面超时来源诊断已部署：Happier原request-end仅增加六个固定source，自己的timer、匹配router超时响应、普通响应、连接／协议失败与共享IPC失败分开。返回、原期限、pending清理与迟回执守卫保持；普通response不是已验证owner ACK，传播给其他pending的timeout保守记ipc_failure。原13项诊断RED、193项IPC／control及typecheck通过，主管18项和独立22项通过；原测试与前片ACK两文件字节保持。Cursor Grok核查官方router，主管回读producer，确认request-timeout只证明登记router等待，不能证明handler收到；no-client-found的catch也覆盖转发异常，不能当作精确准入阶段。
+
+源验证后另执行正式部署：canonical连接构建、Swift206项／release、签名及Mac78安装回读通过，daemon实际报告78，GUI与组件各一份、账号／机器身份保持。CUA真实展开任务面板后恢复圆环；冷启动先显示0，随后恢复真实1个运行中，未改状态判定。新daemon尚无可观察的request-end样本，未新发或重发消息，不能称现场发送已修复。模拟器仍a867、实体手机未检测到且最后2a7保留；实际图片后文字、两轮恢复、三秒T2、提问／目标写入／App内更新和五图实拍仍待。0.3目的checkout仍缺，只阻迁移。默认正式构建78，保留77回退；旧76在签名／SHA、无句柄与构建核对后退役并回核保留项。见[本片验收](validation/native-v03-20260930.md#桌面超时来源诊断2026-10-03)，整体目标继续，下文保留发生时状态。
+
 2026-10-03 图片回执异步等待：Codex两路限定实现与第三路独立复核已交回。DesktopConnection沿唯一异步RPC核心返回原future，Runtime回执回原sendQueue结算；图片等待ACK时后续文字首写不再占网络等待，其他准备好的会话可继续推进。每会话一条、全局最多两条link→send链，准备完成会话FIFO轮转；RPC终态即释放，原unknown不重投，新localId不等权威回显。同会话仍可能等前ACK，不能称全部延迟消除。
 
 主管独立64MiB真实Java8方法：新Runtime11／Connection5、原队列11／确认14／RPC200竞争通过；旧同步阻ACK及三种编译后行为反例RED，原两场景段与断言逐字节保持。取消、close、删除不复活、accepted不降级及logout旧回调隔离均通过。原ACK Timer承担25秒任务，门后保留Socket清理与异常尾部；两条链上限不等于总Timer／线程峰值，没有新RPC、轮询或自动重发，Android真实RSS／流量仍未实测。
