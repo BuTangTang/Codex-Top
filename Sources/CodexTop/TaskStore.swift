@@ -12,7 +12,7 @@ import CodexTopCore
     @Published private(set) var quotaWarning: String?
     @Published private(set) var sourceWarning: String?
     @Published var notice: String? { didSet { if notice != oldValue { onChange?() } } }
-    @Published private(set) var lastRefresh: Date?
+    private(set) var lastRefresh: Date?
     @Published var paused = false {
         didSet {
             guard paused != oldValue else { return }
@@ -185,8 +185,10 @@ import CodexTopCore
         accountQuota = nil; historicalQuota = nil; quota = nil; quotaWarning = nil
         refreshQuota()
     }
+    /// 额度内容没有变化时不重复通知整个监控界面。
     private func updateQuota() {
-        quota = demo ? historicalQuota : accountQuota
+        let next = demo ? historicalQuota : accountQuota
+        if quota != next { quota = next }
     }
     private func updateRolloutWatches() {
         guard !demo, !paused, !stopping else { rolloutChanges?.stop(); return }
@@ -224,12 +226,15 @@ import CodexTopCore
         fastRefreshTask?.cancel(); fastRefreshTask = nil; fastRefreshID = nil
         fastRefreshNeeded = false
     }
+    /// 每轮仍读取状态并执行过期规则，仅在展示内容变化时发布和重排窗口。
     func refresh() async {
         guard !stopping, !refreshing else { return }
         refreshing = true
         let generation = sourceGeneration
+        var needsLayout = loading
         defer {
-            refreshing = false; loading = false
+            refreshing = false
+            if loading { loading = false }
             updateRolloutWatches()
             scheduleFastRefresh()
         }
@@ -237,25 +242,30 @@ import CodexTopCore
             let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
             let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs)
             guard !stopping, generation == sourceGeneration else { return }
-            tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
-            historicalQuota = snapshot.quota; updateQuota()
-            sourceWarning = snapshot.warning; lastRefresh = snapshot.observedAt
-            let previous = preferences
-            MonitoringPolicy.reconcile(&preferences, tasks: tasks, now: snapshot.observedAt)
-            if demo && !previous.initialized { preferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
-            if preferences != previous { save() }
+            if tasks != snapshot.tasks {
+                tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
+                needsLayout = true
+            }
+            if historicalQuota != snapshot.quota { historicalQuota = snapshot.quota }
+            updateQuota()
+            if sourceWarning != snapshot.warning { sourceWarning = snapshot.warning; needsLayout = true }
+            lastRefresh = snapshot.observedAt
+            var nextPreferences = preferences
+            MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, now: snapshot.observedAt)
+            if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
+            if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
             if selected.contains(where: { task in
                 guard let old = previousPhases[task.id] else { return false }
                 return old != .completed && graph.activity(for: task).phase == .completed
             }) { completionSequence += 1 }
         } catch {
             guard !stopping, generation == sourceGeneration else { return }
-            sourceWarning = error.localizedDescription
+            if sourceWarning != error.localizedDescription { sourceWarning = error.localizedDescription; needsLayout = true }
             // Do not leave the previous snapshot claiming active/completed after source loss.
-            tasks = tasks.map { task in var copy = task; copy.activity = TaskActivity(detail: "数据源不可用，无法确认当前状态"); return copy }
-            graph = TaskGraph(tasks: tasks)
+            let unavailable = tasks.map { task in var copy = task; copy.activity = TaskActivity(detail: "数据源不可用，无法确认当前状态"); return copy }
+            if tasks != unavailable { tasks = unavailable; graph = TaskGraph(tasks: tasks); needsLayout = true }
         }
-        onChange?()
+        if needsLayout { onChange?() }
     }
     func previewDemoPhase(_ phase: TaskPhase?) {
         guard demo else { return }

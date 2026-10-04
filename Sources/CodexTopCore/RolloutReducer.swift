@@ -212,6 +212,33 @@ public struct RolloutReducer: Sendable {
     }
 }
 
+/// 只读取增量游标所需的元数据，避免成功路径读取扩展属性；保留链接自身的原有语义。
+private struct RolloutFileMetadata: Sendable {
+    struct ModificationTime: Equatable, Sendable {
+        let seconds: Int
+        let nanoseconds: Int
+    }
+    let size: UInt64
+    let inode: UInt64
+    let modified: ModificationTime
+
+    /// 使用 lstat 保持原 attributesOfItem 不跟随末级符号链接的行为，并保留纳秒精度。
+    static func read(_ url: URL) throws -> Self {
+        var value = stat()
+        let errorCode = url.path.withCString { path in
+            lstat(path, &value) == 0 ? 0 : errno
+        }
+        guard errorCode == 0 else {
+            // 失败时沿用 Foundation 的错误域、错误码和说明；该分支不进入正常轮询热路径。
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            // 若检查之间文件已恢复，仍报告本次未取得可靠快照，交给下一轮重新读取。
+            throw POSIXError(POSIXErrorCode(rawValue: errorCode) ?? .EIO)
+        }
+        return Self(size: UInt64(value.st_size), inode: UInt64(value.st_ino),
+                    modified: ModificationTime(seconds: value.st_mtimespec.tv_sec, nanoseconds: value.st_mtimespec.tv_nsec))
+    }
+}
+
 public struct IncrementalRollout: Sendable {
     public private(set) var reducer = RolloutReducer()
     public private(set) var offset: UInt64 = 0
@@ -219,7 +246,7 @@ public struct IncrementalRollout: Sendable {
     public private(set) var isCaughtUp = false
     private var inode: UInt64?
     private var observedSize: UInt64?
-    private var modified: Date?
+    private var modified: RolloutFileMetadata.ModificationTime?
     private var pending = Data()
     private var skippingLongLine = false
     private var timingRecovery: RolloutTimingRecovery?
@@ -229,12 +256,12 @@ public struct IncrementalRollout: Sendable {
         self.maximumRead = max(1024, maximumRead)
         self.maximumCatchUpRead = max(self.maximumRead, maximumCatchUpRead)
     }
-    /// Returns bytes actually read; unchanged files incur only a metadata check.
+    /// 返回实际读取字节数；未变文件只检查元数据，重写或替换时清空旧游标与状态。
     public mutating func refresh(url: URL) throws -> Int {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-        let newInode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
-        let newModified = attributes[.modificationDate] as? Date
+        let metadata = try RolloutFileMetadata.read(url)
+        let size = metadata.size
+        let newInode = metadata.inode
+        let newModified = metadata.modified
         if inode == newInode && size == offset && modified == newModified { return 0 }
         let rewritten = observedSize.map { size < $0 || (size == $0 && modified != newModified) } ?? false
         let reset = inode != newInode || size < offset || rewritten
@@ -267,16 +294,15 @@ public struct IncrementalRollout: Sendable {
         return bytesRead
     }
 
-    /// Optional work for selected tasks only. Progress and a failed search are
-    /// retained across unchanged/appended files; replacement or rewrite resets them.
+    /// 仅为所选任务补查开始时间；未变或追加保留进度，读取前后核对替换、重写与截断。
     public mutating func recoverTiming(url: URL, maximumBytes: Int = 4 * 1_024 * 1_024) throws -> Int {
         guard reducer.activity.startedAt == nil else { timingRecovery = nil; return 0 }
         guard isCaughtUp, reducer.activity.phase == .running || reducer.activity.phase == .waiting,
               timingRecovery?.isFinished != true else { return 0 }
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-        let currentInode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
-        let currentModified = attributes[.modificationDate] as? Date
+        let metadata = try RolloutFileMetadata.read(url)
+        let size = metadata.size
+        let currentInode = metadata.inode
+        let currentModified = metadata.modified
         guard currentInode == inode, size >= offset,
               !(size == observedSize && currentModified != modified) else { return 0 }
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
@@ -287,10 +313,10 @@ public struct IncrementalRollout: Sendable {
         var recovery = timingRecovery ?? RolloutTimingRecovery(end: offset)
         let bytes = recovery.advance(handle: handle, through: offset, blockSize: maximumRead, budget: max(1_024, maximumBytes))
         var after = stat()
-        let currentPath = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let pathInode = (currentPath?[.systemFileNumber] as? NSNumber)?.uint64Value
-        let pathSize = (currentPath?[.size] as? NSNumber)?.uint64Value
-        let pathModified = currentPath?[.modificationDate] as? Date
+        let currentPath = try? RolloutFileMetadata.read(url)
+        let pathInode = currentPath?.inode
+        let pathSize = currentPath?.size
+        let pathModified = currentPath?.modified
         guard fstat(handle.fileDescriptor, &after) == 0,
               before.st_ino == after.st_ino, after.st_size >= before.st_size,
               !(after.st_size == before.st_size && (after.st_mtimespec.tv_sec != before.st_mtimespec.tv_sec || after.st_mtimespec.tv_nsec != before.st_mtimespec.tv_nsec)),
