@@ -147,24 +147,23 @@ final class MobileAccountClientTests: XCTestCase, @unchecked Sendable {
     /// 取消或超时后只回收本次拥有的组件进程，不遗留无主认证操作。
     func testCancellationAndTimeoutReapOwnedCommand() async throws {
         let root = try fixture(script: #"""
-        printf '%s' "$$" > "$HAPPIER_HOME_DIR/pid"
+        printf '%s\n' "$$" > "$HAPPIER_HOME_DIR/pid"
         cat >/dev/null
         exec /bin/sleep 20
         """#)
-        let short = try client(root, timeout: 1)
-        do { _ = try await short.status(); XCTFail("Expected timeout") }
+        let short = try client(root, timeout: 5)
+        let timeoutTask = Task { try await short.status() }
+        let timeoutPID = try await waitForStartedPID(root, ownedTask: timeoutTask)
+        do { _ = try await timeoutTask.value; XCTFail("Expected timeout") }
         catch { XCTAssertEqual(error as? MobileAccountError, .timedOut) }
-        try assertReaped(root)
+        assertReaped(timeoutPID)
         try FileManager.default.removeItem(at: root.appendingPathComponent("pid"))
         let task = Task { try await self.client(root).status() }
-        for _ in 0..<100 {
-            if FileManager.default.fileExists(atPath: root.appendingPathComponent("pid").path) { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        let cancellationPID = try await waitForStartedPID(root, ownedTask: task)
         task.cancel()
         do { _ = try await task.value; XCTFail("Expected cancellation") }
         catch { XCTAssertTrue(error is CancellationError) }
-        try assertReaped(root)
+        assertReaped(cancellationPID)
     }
 
     /// 为测试建立独立脚本，不读取真实账号或 Codex 数据。
@@ -183,9 +182,30 @@ final class MobileAccountClientTests: XCTestCase, @unchecked Sendable {
         MobileAccountClient(configuration: try MobileAccountConfiguration(serverAddress: "https://example.com", home: root, executable: root.appendingPathComponent("bridge")), timeout: timeout)
     }
 
-    /// 通过进程标识确认已经回收，而不是只收到取消错误。
-    private func assertReaped(_ root: URL) throws {
-        let pid = try XCTUnwrap(Int32(String(contentsOf: root.appendingPathComponent("pid"), encoding: .utf8)))
-        XCTAssertEqual(kill(pid, 0), -1)
+    /// 等待夹具写完正 PID；启动握手失败也先取消并回收原任务，避免清理目录时仍有命令存活。
+    private func waitForStartedPID(_ root: URL, ownedTask: Task<MobileAccountSession, Error>) async throws -> Int32 {
+        do {
+            let deadline = ProcessInfo.processInfo.systemUptime + 2
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                if let text = try? String(contentsOf: root.appendingPathComponent("pid"), encoding: .utf8),
+                   text.hasSuffix("\n"), let pid = Int32(text.dropLast()), pid > 0 {
+                    return pid
+                }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            throw NSError(domain: "MobileAccountClientTests", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "合成命令未在 2 秒内写出完整正 PID"])
+        } catch {
+            ownedTask.cancel()
+            _ = await ownedTask.result
+            throw error
+        }
+    }
+
+    /// 使用启动时保存的 PID 确认进程不存在，不能把权限错误等其他失败视为已经回收。
+    private func assertReaped(_ pid: Int32) {
+        let result = kill(pid, 0), failure = errno
+        XCTAssertEqual(result, -1)
+        XCTAssertEqual(failure, ESRCH)
     }
 }

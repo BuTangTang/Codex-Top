@@ -196,8 +196,16 @@ public struct TaskGraph: Sendable {
     public init(tasks: [CodexTask]) {
         let resolved = Self.resolveRootIDs(tasks: tasks)
         rootIDs = resolved
-        roots = tasks.filter { resolved[$0.id] == $0.id }
-        children = Dictionary(grouping: tasks.filter { resolved[$0.id] != $0.id }) { resolved[$0.id] ?? $0.id }
+        // 同一次遍历按原输入顺序追加根和后代，省去两次过滤及后代中间数组。
+        var rootTasks: [CodexTask] = []
+        var grouped: [String: [CodexTask]] = [:]
+        for task in tasks {
+            let rootID = resolved[task.id]
+            if rootID == task.id { rootTasks.append(task) }
+            else { grouped[rootID ?? task.id, default: []].append(task) }
+        }
+        roots = rootTasks
+        children = grouped
         var indexed: [String: CodexTask] = [:]
         indexed.reserveCapacity(children.count)
         for (rootID, descendants) in children {
