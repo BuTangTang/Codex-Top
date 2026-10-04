@@ -52,4 +52,33 @@ final class PendingNavigationTests: XCTestCase {
             XCTAssertEqual(graph.navigationTarget(for: root).id, root.id, phase.rawValue)
         }
     }
+
+    /// 未知、未运行和终态子任务不参与提升，尤其不能将未知父任务伪装成完成。
+    func testInactiveAndUnknownChildrenNeverReplaceRootActivity() {
+        for rootPhase in TaskPhase.allCases {
+            let root = task("root", phase: rootPhase)
+            let children = [TaskPhase.unknown, .idle, .completed, .stopped].enumerated().map {
+                task("child-\($0.offset)", phase: $0.element, parent: root.id)
+            }
+            let graph = TaskGraph(tasks: [root] + children)
+            XCTAssertEqual(graph.activitySource(for: root), root, rootPhase.rawValue)
+            XCTAssertEqual(graph.activity(for: root), root.activity, rootPhase.rawValue)
+        }
+    }
+
+    /// 运行、等待和失败同级时父任务优先；父任务更低级时保留输入中首个同级子任务。
+    func testEveryEligibleTieKeepsRootOrFirstChildAndRespectsPassedRoot() {
+        for phase in [TaskPhase.running, .waiting, .failed] {
+            let root = task("root", phase: phase)
+            let first = task("first", phase: phase, parent: root.id)
+            let second = task("second", phase: phase, parent: root.id)
+            XCTAssertEqual(TaskGraph(tasks: [root, first, second]).activitySource(for: root), root)
+            let completed = task("root", phase: .completed)
+            for children in [[first, second], [second, first]] {
+                let graph = TaskGraph(tasks: [completed] + children)
+                XCTAssertEqual(graph.activitySource(for: completed), children[0])
+                XCTAssertEqual(graph.activitySource(for: root), root, "比较应尊重调用方传入的父任务活动")
+            }
+        }
+    }
 }

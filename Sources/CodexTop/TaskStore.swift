@@ -90,16 +90,30 @@ import CodexTopCore
         return orbPhase.label
     }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
+    /// 本次计算只取一次图和选择集合，预先计算排序键，保持状态、时间及并列输入顺序。
     var selected: [CodexTask] {
-        graph.roots.filter { preferences.selectedIDs.contains($0.id) }.sorted {
-            let left = graph.activity(for: $0), right = graph.activity(for: $1)
-            if left.phase.priority != right.phase.priority { return left.phase.priority < right.phase.priority }
-            return $0.updatedAt > $1.updatedAt
+        let graph = self.graph, selectedIDs = preferences.selectedIDs
+        var ranked = graph.roots.compactMap { task -> (task: CodexTask, priority: Int)? in
+            guard selectedIDs.contains(task.id) else { return nil }
+            return (task, graph.activitySource(for: task).activity.phase.priority)
         }
+        ranked.sort {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            return $0.task.updatedAt > $1.task.updatedAt
+        }
+        return ranked.map { $0.task }
     }
     var active: [CodexTask] { selected.filter { !graph.activity(for: $0).phase.isFinished } }
     var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished } }
-    var statusSummary: MonitorStatusSummary { MonitorStatusSummary(phases: selected.map { graph.activity(for: $0).phase }) }
+    /// 汇总只需已选根任务的阶段，不进行列表排序，也不生成子任务展示文案。
+    var statusSummary: MonitorStatusSummary {
+        let graph = self.graph, selectedIDs = preferences.selectedIDs
+        let phases = graph.roots.compactMap { task -> TaskPhase? in
+            guard selectedIDs.contains(task.id) else { return nil }
+            return graph.activitySource(for: task).activity.phase
+        }
+        return MonitorStatusSummary(phases: phases)
+    }
     var runningCount: Int { statusSummary.running }
     var attentionCount: Int { statusSummary.attention }
     func start() {
@@ -257,7 +271,7 @@ import CodexTopCore
             if sourceWarning != snapshot.warning { sourceWarning = snapshot.warning; needsLayout = true }
             lastRefresh = snapshot.observedAt
             var nextPreferences = preferences
-            MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, now: snapshot.observedAt)
+            MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)
             if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
             if selected.contains(where: { task in

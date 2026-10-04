@@ -91,8 +91,12 @@ public enum MonitoringPolicy {
         activity.detail = "子任务 · \(child.activity.detail)"
         return activity
     }
+    /// 保留公开入口，为没有现成任务图的调用方构图后执行关注与过期策略。
     public static func reconcile(_ preferences: inout MonitorPreferences, tasks: [CodexTask], now: Date) {
-        let graph = TaskGraph(tasks: tasks)
+        reconcile(&preferences, tasks: tasks, graph: TaskGraph(tasks: tasks), now: now)
+    }
+    /// 复用同一份任务快照的图；调用方须保证匹配，任务不变时仍按本轮时间执行过期判断。
+    package static func reconcile(_ preferences: inout MonitorPreferences, tasks: [CodexTask], graph: TaskGraph, now: Date) {
         if !preferences.initialized {
             preferences.autoEnabledAt = now
             preferences.autoBaselineIDs = Set(tasks.map(\.id))
@@ -212,10 +216,16 @@ public struct TaskGraph: Sendable {
         guard source.id != root.id else { return root.activity }
         var result = source.activity; result.detail = "子任务 · \(result.detail)"; return result
     }
+    /// 单遍选择更高优先级的活跃或失败子任务；同级保留父任务或最先出现的子任务。
     public func activitySource(for root: CodexTask) -> CodexTask {
-        guard let child = (children[root.id] ?? []).filter({ $0.activity.phase.isActive || $0.activity.phase == .failed })
-            .min(by: { $0.activity.phase.priority < $1.activity.phase.priority }), child.activity.phase.priority < root.activity.phase.priority else { return root }
-        return child
+        var source = root
+        for child in children[root.id] ?? [] {
+            let phase = child.activity.phase
+            if (phase.isActive || phase == .failed), phase.priority < source.activity.phase.priority {
+                source = child
+            }
+        }
+        return source
     }
     /// A pending row opens the task that actually supplied its question or approval.
     /// Other rows keep their existing root-task destination.

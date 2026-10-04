@@ -76,6 +76,44 @@ final class TaskStorePublicationTests: XCTestCase {
         withExtendedLifetime(subscription) {}
     }
 
+    /// 子任务从等待进入终态后，本轮过期判断必须读取新图，不能沿用刷新前的等待状态。
+    @MainActor func testRetentionUsesUpdatedChildGraphInSameRefresh() async throws {
+        let directory = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let old = Date().addingTimeInterval(-8 * 86_400)
+        let childLog = directory.appendingPathComponent("child.jsonl")
+        try event("task_complete", at: old).write(to: directory.appendingPathComponent("task.jsonl"))
+        try event("exec_approval_request", at: old).write(to: childLog)
+        var connection: OpaquePointer?
+        guard sqlite3_open(directory.appendingPathComponent("state_5.sqlite").path, &connection) == SQLITE_OK else {
+            if let connection { sqlite3_close(connection) }
+            throw NSError(domain: "fixture", code: 1)
+        }
+        defer { sqlite3_close(connection) }
+        let timestamp = Int(old.timeIntervalSince1970)
+        let sql = """
+        UPDATE threads SET created_at=\(timestamp),updated_at=\(timestamp);
+        INSERT INTO threads VALUES('child','合成子任务','/synthetic','\(childLog.path)',\(timestamp),\(timestamp),0);
+        CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT);
+        INSERT INTO thread_spawn_edges VALUES('synthetic','child');
+        """
+        XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK)
+        let store = TaskStore(stateDirectory: directory)
+        await store.refresh()
+        XCTAssertEqual(store.preferences.selectedIDs, ["synthetic"])
+        XCTAssertEqual(store.graph.activity(for: try XCTUnwrap(store.graph.roots.first)).phase, .waiting)
+
+        let handle = try FileHandle(forWritingTo: childLog)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: event("turn_aborted", at: old))
+        try handle.close()
+        await store.refresh()
+
+        XCTAssertEqual(store.tasks.first(where: { $0.id == "child" })?.activity.phase, .stopped)
+        XCTAssertTrue(store.preferences.selectedIDs.isEmpty)
+        XCTAssertEqual(store.preferences.automaticallyRemovedIDs, ["synthetic"])
+    }
+
     /// 使用独立临时数据库与合成事件，不接触真实任务或账号。
     private func makeFixture() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("publication-\(UUID().uuidString)")
@@ -99,9 +137,9 @@ final class TaskStorePublicationTests: XCTestCase {
         return directory
     }
 
-    /// 生成当前轮次的完整事件行，保留真实解析和状态转换路径。
-    private func event(_ type: String) throws -> Data {
-        let record: [String: Any] = ["type": "event_msg", "timestamp": ISO8601DateFormatter().string(from: Date()),
+    /// 按用例时间生成当前轮次的完整事件行，保留真实解析和状态转换路径。
+    private func event(_ type: String, at time: Date = Date()) throws -> Data {
+        let record: [String: Any] = ["type": "event_msg", "timestamp": ISO8601DateFormatter().string(from: time),
                                    "payload": ["type": type, "turn_id": "synthetic-turn"]]
         var data = try JSONSerialization.data(withJSONObject: record)
         data.append(10)

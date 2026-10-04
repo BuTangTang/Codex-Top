@@ -291,6 +291,49 @@ final class DesktopReplyReceiptSourceTests: XCTestCase {
         }
     }
 
+    /// 只关注父任务时，同一快照的后代映射同时支持计时恢复和回执投影，投影读取恢复后的当前活动。
+    func testSelectedAncestorRecoversChildTimingAndProjectsItsReceipt() async throws {
+        let server = try ReceiptSocketServer(responses: [thread: try snapshot(state(items: [item()]))])
+        defer { server.dispose() }
+        let ancestor = "00000000-0000-4000-8000-000000000004"
+        let log = server.root.appendingPathComponent("child.jsonl")
+        let ancestorLog = server.root.appendingPathComponent("root.jsonl")
+        let begin = try rollout("task_started", at: 0, extra: ["turn_id": turn])
+        let ask = try rollout("function_call", at: 10, kind: "response_item",
+                              extra: ["name": "request_user_input_async", "call_id": "call_synthetic", "arguments": "{\"questions\":[{\"title\":\"合成问题\"}]}"])
+        try (begin + Data(repeating: 120, count: 70_000) + Data([10]) + ask).write(to: log)
+        try rollout("task_complete", at: 0, extra: ["turn_id": "synthetic-root"]).write(to: ancestorLog)
+        let databaseURL = server.root.appendingPathComponent("state_5.sqlite")
+        try database(at: databaseURL, rollout: log)
+        var connection: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &connection) == SQLITE_OK else {
+            if let connection { sqlite3_close(connection) }
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_close(connection) }
+        let sql = """
+        INSERT INTO threads VALUES('\(ancestor)','Synthetic parent','/synthetic','\(ancestorLog.path)',1,2,0);
+        CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT);
+        INSERT INTO thread_spawn_edges VALUES('\(ancestor)','\(thread)');
+        """
+        XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK)
+        let source = LocalCodexSource(root: server.root)
+        let cold = try await source.snapshot(now: started.addingTimeInterval(21))
+        XCTAssertEqual(cold.tasks.first(where: { $0.id == thread })?.activity.phase, .waiting)
+        XCTAssertNil(cold.tasks.first(where: { $0.id == thread })?.activity.startedAt)
+        XCTAssertTrue(try server.messages().isEmpty)
+
+        let worker = server.start()
+        let selected = try await source.snapshot(now: started.addingTimeInterval(21), recoverTimingFor: [ancestor])
+        await worker.value
+        let child = try XCTUnwrap(selected.tasks.first(where: { $0.id == thread }))
+        XCTAssertEqual(child.activity.startedAt, started)
+        XCTAssertEqual(child.activity.phase, .running)
+        XCTAssertEqual(child.activity.detail, "已回复，等待继续")
+        XCTAssertEqual(child.activity.lastEventAt, started.addingTimeInterval(10))
+        XCTAssertFalse(server.didTimeout)
+    }
+
     /// 创建独立状态库，所有写入只发生在合成测试准备阶段。
     private func database(at url: URL, rollout: URL) throws {
         var database: OpaquePointer?

@@ -39,6 +39,7 @@ public actor LocalCodexSource {
             }
         }
         var tasks: [CodexTask] = [], quota: QuotaSnapshot?, bytes = 0, failures = 0
+        let rootPrefix = root.path + "/"
         for row in rows {
             guard let id = row["id"], let path = row["rollout_path"] else { continue }
             let file = URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath()
@@ -46,7 +47,7 @@ public actor LocalCodexSource {
                                  createdAt: Date(timeIntervalSince1970: Double(row["created_at"] ?? "") ?? 0),
                                  updatedAt: Date(timeIntervalSince1970: Double(row["updated_at"] ?? "") ?? 0),
                                  parentID: parents[id] ?? Self.parentFromSource(row["source"]), rolloutURL: file)
-            if !file.path.hasPrefix(root.path + "/") {
+            if !file.path.hasPrefix(rootPrefix) {
                 task.activity.detail = "记录位于数据目录之外，未读取"; failures += 1
             } else {
                 var tail = tails[id] ?? IncrementalRollout()
@@ -66,11 +67,12 @@ public actor LocalCodexSource {
             }
             tasks.append(task)
         }
+        // 本轮仅复用不会被计时恢复改变的祖先映射，后续活动状态仍从当前 tasks 读取。
+        let taskRootIDs = rootIDs.isEmpty ? [:] : TaskGraph(tasks: tasks).rootIDs
         if !rootIDs.isEmpty {
-            let graph = TaskGraph(tasks: tasks)
             let candidates = tasks.indices.filter { index in
                 let task = tasks[index]
-                guard rootIDs.contains(graph.rootIDs[task.id] ?? task.id), let tail = tails[task.id] else { return false }
+                guard rootIDs.contains(taskRootIDs[task.id] ?? task.id), let tail = tails[task.id] else { return false }
                 return tail.reducer.activity.startedAt == nil && (tail.reducer.activity.phase == .running || tail.reducer.activity.phase == .waiting)
             }
             var remaining = 8 * 1_024 * 1_024
@@ -91,9 +93,8 @@ public actor LocalCodexSource {
                 if tail.isCaughtUp { tasks[index].activity = tail.reducer.activity.effective(at: now) }
             }
         }
-        let graph = TaskGraph(tasks: tasks)
         let pending = Dictionary(uniqueKeysWithValues: tasks.compactMap { task -> (String, Date)? in
-            guard rootIDs.contains(graph.rootIDs[task.id] ?? task.id), task.activity.phase == .waiting,
+            guard rootIDs.contains(taskRootIDs[task.id] ?? task.id), task.activity.phase == .waiting,
                   let tail = tails[task.id], tail.isCaughtUp, let since = tail.reducer.awaitingReplySince else { return nil }
             return (task.id, since)
         })
@@ -148,19 +149,29 @@ public actor LocalCodexSource {
         guard let url = candidates.max(by: { $0.0 < $1.0 })?.1 else { throw CodexSourceError.missingDatabase }
         return url
     }
+    /// 每条查询在首行产生后读取列名与原索引，保留自动重编译、NULL 与别名覆盖语义。
     private func query(_ database: OpaquePointer?, _ sql: String) throws -> [[String: String]] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw CodexSourceError.incompatibleDatabase }
         defer { sqlite3_finalize(statement) }
         var rows: [[String: String]] = []
+        var columns: [(index: Int32, name: String)]?
         while true {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE { break }
             guard result == SQLITE_ROW else { throw CodexSourceError.databaseUnavailable }
-            var row: [String: String] = [:]
-            for column in 0..<sqlite3_column_count(statement) {
-                if let name = sqlite3_column_name(statement, column), let text = sqlite3_column_text(statement, column) {
-                    row[String(cString: name)] = String(cString: text)
+            if columns == nil {
+                // prepare 后第一次 step 可能自动重编译；此时再读取列信息，且不跨查询保存。
+                columns = (0..<sqlite3_column_count(statement)).compactMap { index in
+                    guard let name = sqlite3_column_name(statement, index) else { return nil }
+                    return (index, String(cString: name))
+                }
+            }
+            let currentColumns = columns ?? []
+            var row = [String: String](minimumCapacity: currentColumns.count)
+            for column in currentColumns {
+                if let text = sqlite3_column_text(statement, column.index) {
+                    row[column.name] = String(cString: text)
                 }
             }
             rows.append(row)
