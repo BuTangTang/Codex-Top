@@ -5,16 +5,17 @@ import CodexTopCore
 @testable import CodexTop
 
 final class TaskStorePublicationTests: XCTestCase {
-    /// 相同文件仍参与刷新，但不得重复发布内容或触发窗口重排，刷新按钮仍接收忙碌状态。
+    /// 相同文件仍参与刷新，但不得广播整个数据仓库或触发窗口重排，刷新按钮仍接收忙碌状态。
     @MainActor func testUnchangedRefreshOnlyPublishesBusyTransitions() async throws {
         let directory = try makeFixture()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = TaskStore(stateDirectory: directory)
         await store.refresh()
         let firstRefresh = store.lastRefresh
-        var updates = 0, layoutUpdates = 0
+        var updates = 0, layoutUpdates = 0, storeUpdates = 0
         var busy: [Bool] = []
         var subscriptions = Set<AnyCancellable>()
+        store.objectWillChange.sink { storeUpdates += 1 }.store(in: &subscriptions)
         store.$tasks.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
         store.$graph.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
         store.$preferences.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
@@ -22,12 +23,13 @@ final class TaskStorePublicationTests: XCTestCase {
         store.$quota.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
         store.$sourceWarning.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
         store.$loading.dropFirst().sink { _ in updates += 1 }.store(in: &subscriptions)
-        store.$refreshing.dropFirst().sink { busy.append($0) }.store(in: &subscriptions)
+        store.refreshState.$isRefreshing.dropFirst().sink { busy.append($0) }.store(in: &subscriptions)
         store.onChange = { layoutUpdates += 1 }
 
         await store.refresh()
 
         XCTAssertEqual(updates, 0)
+        XCTAssertEqual(storeUpdates, 0, "后台检查的忙碌切换不能唤醒圆环和隐藏任务列表")
         XCTAssertEqual(layoutUpdates, 0)
         XCTAssertEqual(busy, [true, false])
         XCTAssertGreaterThan(try XCTUnwrap(store.lastRefresh), try XCTUnwrap(firstRefresh))
@@ -42,6 +44,8 @@ final class TaskStorePublicationTests: XCTestCase {
         let store = TaskStore(stateDirectory: directory)
         await store.refresh()
         var layoutUpdates = 0
+        var busy: [Bool] = []
+        let subscription = store.refreshState.$isRefreshing.dropFirst().sink { busy.append($0) }
         store.onChange = { layoutUpdates += 1 }
         let log = directory.appendingPathComponent("task.jsonl")
         let handle = try FileHandle(forWritingTo: log)
@@ -67,6 +71,9 @@ final class TaskStorePublicationTests: XCTestCase {
         XCTAssertEqual(store.selected.first?.activity.phase, .completed)
         XCTAssertNil(store.sourceWarning)
         XCTAssertGreaterThan(layoutUpdates, afterFailure)
+        XCTAssertEqual(busy, [true, false, true, false, true, false, true, false])
+        XCTAssertFalse(store.refreshing, "数据源失败及恢复后仍须解除刷新按钮的忙碌禁用")
+        withExtendedLifetime(subscription) {}
     }
 
     /// 使用独立临时数据库与合成事件，不接触真实任务或账号。

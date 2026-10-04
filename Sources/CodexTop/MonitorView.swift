@@ -1,6 +1,17 @@
 import SwiftUI
 import CodexTopCore
 
+/// 收起列表只生成一次时间值；显示时沿用原有每秒计划，不影响后台任务刷新。
+struct MonitorElapsedTimelineSchedule: TimelineSchedule, Equatable {
+    let active: Bool
+
+    /// 重新显示时从框架传入的当前时间开始，隐藏时不再安排后续秒表更新。
+    func entries(from startDate: Date, mode: Mode) -> AnySequence<Date> {
+        guard active else { return AnySequence(CollectionOfOne(startDate)) }
+        return AnySequence(PeriodicTimelineSchedule(from: startDate, by: 1).entries(from: startDate, mode: mode))
+    }
+}
+
 @MainActor final class MonitorPanelState: ObservableObject {
     @Published var expandedFinished = false
     @Published var floatingFinished = false
@@ -251,11 +262,12 @@ private struct MonitorTaskRow: View {
         }
     }
 
+    /// 保留运行与待处理的原有时间含义，只在列表显示时持续推进运行秒表。
     private func activityStatus(_ activity: TaskActivity) -> some View {
         HStack(spacing: 8) {
             if activity.phase == .running {
                 if let started = activity.startedAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(MonitorElapsedTimelineSchedule(active: animationsActive)) { context in
                         let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
                         Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
                     }.foregroundStyle(Palette.secondary(store.theme.colorScheme))

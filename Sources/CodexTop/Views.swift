@@ -2,6 +2,20 @@ import SwiftUI
 import ServiceManagement
 import CodexTopCore
 
+/// 仅此按钮观察刷新过程，圆环和任务列表继续只观察展示数据的变化。
+private struct TaskRefreshButton: View {
+    let store: TaskStore
+    @ObservedObject var state: TaskRefreshState
+
+    /// 沿用手动刷新及忙碌禁用行为，不向父级数据仓库转发过程通知。
+    var body: some View {
+        Button("立即刷新") {
+            store.refreshQuota(force: true)
+            Task { await store.refresh() }
+        }.disabled(state.isRefreshing)
+    }
+}
+
 struct CompactView: View {
     @ObservedObject var store: TaskStore
     @Environment(\.compactMonitorTypography) private var compactTypography
@@ -390,7 +404,7 @@ struct SettingsView: View {
                 }
                 Text("仅移出已停止、已完成的任务，按最近活动计算。再次运行会自动回来；通过＋重新加入后保留。关闭此项会恢复自动移出的任务。").font(.caption).foregroundStyle(.secondary)
                 Toggle("暂停任务刷新", isOn: $store.paused)
-                Button("立即刷新") { store.refreshQuota(force: true); Task { await store.refresh() } }.disabled(store.refreshing)
+                TaskRefreshButton(store: store, state: store.refreshState)
             }
     }
 

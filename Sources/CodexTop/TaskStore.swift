@@ -3,6 +3,11 @@ import Combine
 import SwiftUI
 import CodexTopCore
 
+/// 忙碌状态只通知刷新按钮，避免每次后台检查都重新计算整个监控界面。
+@MainActor final class TaskRefreshState: ObservableObject {
+    @Published fileprivate(set) var isRefreshing = false
+}
+
 @MainActor final class TaskStore: ObservableObject {
     @Published private(set) var preferences: MonitorPreferences
     @Published private(set) var tasks: [CodexTask] = []
@@ -21,7 +26,8 @@ import CodexTopCore
             if !paused { requestFastRefresh() }
         }
     }
-    @Published private(set) var refreshing = false
+    let refreshState = TaskRefreshState()
+    var refreshing: Bool { refreshState.isRefreshing }
     @Published private(set) var loading = true
     @Published private(set) var completionSequence = 0
     @Published private(set) var demoPhase: TaskPhase?
@@ -229,11 +235,11 @@ import CodexTopCore
     /// 每轮仍读取状态并执行过期规则，仅在展示内容变化时发布和重排窗口。
     func refresh() async {
         guard !stopping, !refreshing else { return }
-        refreshing = true
+        refreshState.isRefreshing = true
         let generation = sourceGeneration
         var needsLayout = loading
         defer {
-            refreshing = false
+            refreshState.isRefreshing = false
             if loading { loading = false }
             updateRolloutWatches()
             scheduleFastRefresh()
