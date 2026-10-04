@@ -7,6 +7,15 @@ public actor LocalCodexSource {
     private var recoveryCursor = 0
     private let replySource: DesktopReplyReceiptSource
     private var receivedReplies: [String: QuestionReplyReceipt] = [:]
+    private var labels: [String: TaskLabels] = [:]
+
+    /// 只保存纯文本的解析结果；原始字段改变即重算，不缓存路径、文件或活动状态。
+    private struct TaskLabels {
+        let rawTitle: String
+        let rawSource: String?
+        let title: String
+        let parentID: String?
+    }
 
     /// 数据库、历史和桌面接收证据使用同一根目录，切换数据源时不会串用回执。
     public init(root: URL) {
@@ -43,10 +52,13 @@ public actor LocalCodexSource {
         for row in rows {
             guard let id = row["id"], let path = row["rollout_path"] else { continue }
             let file = URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath()
-            var task = CodexTask(id: id, title: Self.cleanTitle(row["title"] ?? ""), project: URL(fileURLWithPath: row["cwd"] ?? "").lastPathComponent,
+            let explicitParent = parents[id]
+            // 有正式父子边时沿用原短路规则，不再额外解析可能很长的来源 JSON。
+            let label = taskLabels(id: id, title: row["title"] ?? "", source: explicitParent == nil ? row["source"] : nil)
+            var task = CodexTask(id: id, title: label.title, project: URL(fileURLWithPath: row["cwd"] ?? "", isDirectory: true).lastPathComponent,
                                  createdAt: Date(timeIntervalSince1970: Double(row["created_at"] ?? "") ?? 0),
                                  updatedAt: Date(timeIntervalSince1970: Double(row["updated_at"] ?? "") ?? 0),
-                                 parentID: parents[id] ?? Self.parentFromSource(row["source"]), rolloutURL: file)
+                                 parentID: explicitParent ?? label.parentID, rolloutURL: file)
             if !file.path.hasPrefix(rootPrefix) {
                 task.activity.detail = "记录位于数据目录之外，未读取"; failures += 1
             } else {
@@ -137,7 +149,19 @@ public actor LocalCodexSource {
             }
         }
         let ids = Set(tasks.map(\.id)); tails = tails.filter { ids.contains($0.key) }
+        labels = labels.filter { ids.contains($0.key) }
         return SourceSnapshot(tasks: tasks, quota: quota, warning: failures == 0 ? nil : "\(failures) 个任务的记录不可用，其状态显示为未知。", bytesRead: bytes, observedAt: now)
+    }
+    /// 按完整原始字段判断复用，父子边仍逐轮覆盖；最多256项、每项原文4KiB，避免缓存长正文。
+    private func taskLabels(id: String, title: String, source: String?) -> TaskLabels {
+        if let cached = labels[id], cached.rawTitle == title, cached.rawSource == source { return cached }
+        let value = TaskLabels(rawTitle: title, rawSource: source, title: Self.cleanTitle(title), parentID: Self.parentFromSource(source))
+        if title.utf8.count + (source?.utf8.count ?? 0) <= 4_096, labels[id] != nil || labels.count < 256 {
+            labels[id] = value
+        } else {
+            labels.removeValue(forKey: id)
+        }
+        return value
     }
     private func databaseURL() throws -> URL {
         guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { throw CodexSourceError.missingDatabase }

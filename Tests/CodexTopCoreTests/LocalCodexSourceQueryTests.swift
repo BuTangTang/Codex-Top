@@ -73,6 +73,66 @@ final class LocalCodexSourceQueryTests: XCTestCase {
         XCTAssertEqual(restored.bytesRead, 0, "字段变化不得迫使未变化的历史重新读取")
     }
 
+    /// 标题和来源各自变化立即生效，即使 updated_at 没变；父子边的新增和删除每轮优先处理。
+    func testLabelChangesAndParentEdgesDoNotRequireTimestampChanges() async throws {
+        let root = try fixture()
+        try execute(root, schema + "; ALTER TABLE threads ADD COLUMN source TEXT; CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT)")
+        let path = root.appendingPathComponent("rollout.jsonl").path
+        let originalSource = "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"original-parent\"}}}"
+        try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0,?)", ["child", "  初始\n标题  ", "/synthetic/原项目/", path, originalSource])
+        let source = LocalCodexSource(root: root)
+        let first = try await source.snapshot(now: now)
+        XCTAssertEqual(first.tasks.first?.title, "初始 标题")
+        XCTAssertEqual(first.tasks.first?.parentID, "original-parent")
+        let unchanged = try await source.snapshot(now: now)
+        XCTAssertEqual(unchanged.tasks, first.tasks)
+        XCTAssertEqual(unchanged.bytesRead, 0)
+
+        try execute(root, "UPDATE threads SET title=?,cwd=?", ["  新\r\n标题  ", "/synthetic/新项目"])
+        let renamed = try await source.snapshot(now: now)
+        XCTAssertEqual(renamed.tasks.first?.title, "新  标题", "沿用原来的逐换行字符替换规则")
+        XCTAssertEqual(renamed.tasks.first?.project, "新项目")
+        XCTAssertEqual(renamed.tasks.first?.parentID, "original-parent")
+        XCTAssertEqual(renamed.tasks.first?.updatedAt, first.tasks.first?.updatedAt)
+
+        try execute(root, "UPDATE threads SET source=?", ["{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"new-parent\"}}}"])
+        let reparented = try await source.snapshot(now: now)
+        XCTAssertEqual(reparented.tasks.first?.parentID, "new-parent")
+        try execute(root, "INSERT INTO thread_spawn_edges VALUES('edge-parent','child')")
+        let edge = try await source.snapshot(now: now)
+        XCTAssertEqual(edge.tasks.first?.parentID, "edge-parent")
+        try execute(root, "DELETE FROM thread_spawn_edges")
+        let fallback = try await source.snapshot(now: now)
+        XCTAssertEqual(fallback.tasks.first?.parentID, "new-parent")
+        try execute(root, "UPDATE threads SET title=NULL,source=NULL")
+        let cleared = try await source.snapshot(now: now)
+        XCTAssertEqual(cleared.tasks.first?.title, "未命名任务")
+        XCTAssertNil(cleared.tasks.first?.parentID)
+        XCTAssertEqual(cleared.bytesRead, 0)
+    }
+
+    /// 任务归档后重新出现及数据库版本替换，不能用旧标题或旧来源覆盖当前字段。
+    func testArchivedAndReplacedDatabaseUseCurrentLabels() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let path = root.appendingPathComponent("rollout.jsonl").path
+        try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["root", "旧标题", "/synthetic/旧项目", path])
+        let source = LocalCodexSource(root: root)
+        _ = try await source.snapshot(now: now)
+        try execute(root, "UPDATE threads SET archived=1")
+        let archived = try await source.snapshot(now: now)
+        XCTAssertTrue(archived.tasks.isEmpty)
+        try execute(root, "UPDATE threads SET archived=0,title=?", [String(repeating: "新", count: 400)])
+        let restored = try await source.snapshot(now: now)
+        XCTAssertEqual(restored.tasks.first?.title, String(repeating: "新", count: 300))
+        try execute(root, "UPDATE threads SET title='另一数据库'")
+        try FileManager.default.copyItem(at: root.appendingPathComponent("state_5.sqlite"), to: root.appendingPathComponent("state_6.sqlite"))
+        try execute(root, "UPDATE threads SET title='不该读取的旧库'")
+        let replaced = try await source.snapshot(now: now)
+        XCTAssertEqual(replaced.tasks.first?.title, "另一数据库")
+        XCTAssertEqual(replaced.tasks.first?.activity.phase, .completed)
+    }
+
     /// 独立临时目录仅包含合成数据库和一条完成事件，结束后自动移除。
     private func fixture() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("query-\(UUID().uuidString)", isDirectory: true)

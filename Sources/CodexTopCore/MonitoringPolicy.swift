@@ -191,6 +191,8 @@ public struct TaskGraph: Sendable {
     public let rootIDs: [String: String]
     public let roots: [CodexTask]
     public let children: [String: [CodexTask]]
+    private let activityChildren: [String: CodexTask]
+    /// 按当前快照归根，并为每个根保留最高优先级的活跃或失败子任务，不跨图复用。
     public init(tasks: [CodexTask]) {
         let lookup = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var resolved: [String: String] = [:]
@@ -210,22 +212,31 @@ public struct TaskGraph: Sendable {
         rootIDs = resolved
         roots = tasks.filter { resolved[$0.id] == $0.id }
         children = Dictionary(grouping: tasks.filter { resolved[$0.id] != $0.id }) { resolved[$0.id] ?? $0.id }
+        var indexed: [String: CodexTask] = [:]
+        indexed.reserveCapacity(children.count)
+        for (rootID, descendants) in children {
+            var source: CodexTask?
+            for child in descendants {
+                let phase = child.activity.phase
+                guard phase.isActive || phase == .failed else { continue }
+                // 同级不覆盖，确保详情、计时与跳转继续来自输入中最先出现的子任务。
+                if let source, source.activity.phase.priority <= phase.priority { continue }
+                source = child
+            }
+            if let source { indexed[rootID] = source }
+        }
+        activityChildren = indexed
     }
     public func activity(for root: CodexTask) -> TaskActivity {
         let source = activitySource(for: root)
         guard source.id != root.id else { return root.activity }
         var result = source.activity; result.detail = "子任务 · \(result.detail)"; return result
     }
-    /// 单遍选择更高优先级的活跃或失败子任务；同级保留父任务或最先出现的子任务。
+    /// 从当前图取子任务候选；仍以调用者传入的父任务活动比较，同级保留父任务。
     public func activitySource(for root: CodexTask) -> CodexTask {
-        var source = root
-        for child in children[root.id] ?? [] {
-            let phase = child.activity.phase
-            if (phase.isActive || phase == .failed), phase.priority < source.activity.phase.priority {
-                source = child
-            }
-        }
-        return source
+        guard let child = activityChildren[root.id],
+              child.activity.phase.priority < root.activity.phase.priority else { return root }
+        return child
     }
     /// A pending row opens the task that actually supplied its question or approval.
     /// Other rows keep their existing root-task destination.
