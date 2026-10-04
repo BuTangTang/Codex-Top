@@ -194,21 +194,7 @@ public struct TaskGraph: Sendable {
     private let activityChildren: [String: CodexTask]
     /// 按当前快照归根，并为每个根保留最高优先级的活跃或失败子任务，不跨图复用。
     public init(tasks: [CodexTask]) {
-        let lookup = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var resolved: [String: String] = [:]
-        for task in tasks {
-            var current = task.id, path: [String] = [], positions: [String: Int] = [:]
-            while resolved[current] == nil, positions[current] == nil, let item = lookup[current] {
-                positions[current] = path.count; path.append(current)
-                guard let parent = item.parentID, lookup[parent] != nil else { break }
-                current = parent
-            }
-            let root: String
-            if let known = resolved[current] { root = known }
-            else if let cycleStart = positions[current], path.last != current { root = path[cycleStart...].min() ?? current }
-            else { root = current }
-            for id in path { resolved[id] = root }
-        }
+        let resolved = Self.resolveRootIDs(tasks: tasks)
         rootIDs = resolved
         roots = tasks.filter { resolved[$0.id] == $0.id }
         children = Dictionary(grouping: tasks.filter { resolved[$0.id] != $0.id }) { resolved[$0.id] ?? $0.id }
@@ -226,6 +212,25 @@ public struct TaskGraph: Sendable {
             if let source { indexed[rootID] = source }
         }
         activityChildren = indexed
+    }
+    /// 唯一的当前快照归根算法；仅读取祖先映射时不创建展示分组或活动索引。
+    package static func resolveRootIDs(tasks: [CodexTask]) -> [String: String] {
+        let lookup = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var resolved: [String: String] = [:]
+        for task in tasks {
+            var current = task.id, path: [String] = [], positions: [String: Int] = [:]
+            while resolved[current] == nil, positions[current] == nil, let item = lookup[current] {
+                positions[current] = path.count; path.append(current)
+                guard let parent = item.parentID, lookup[parent] != nil else { break }
+                current = parent
+            }
+            let root: String
+            if let known = resolved[current] { root = known }
+            else if let cycleStart = positions[current], path.last != current { root = path[cycleStart...].min() ?? current }
+            else { root = current }
+            for id in path { resolved[id] = root }
+        }
+        return resolved
     }
     public func activity(for root: CodexTask) -> TaskActivity {
         let source = activitySource(for: root)

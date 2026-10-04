@@ -85,7 +85,7 @@ public actor LocalCodexSource {
             tasks.append(task)
         }
         // 本轮仅复用不会被计时恢复改变的祖先映射，后续活动状态仍从当前 tasks 读取。
-        let taskRootIDs = rootIDs.isEmpty ? [:] : TaskGraph(tasks: tasks).rootIDs
+        let taskRootIDs = rootIDs.isEmpty ? [:] : TaskGraph.resolveRootIDs(tasks: tasks)
         if !rootIDs.isEmpty {
             let candidates = tasks.indices.filter { index in
                 let task = tasks[index]
@@ -207,8 +207,12 @@ public actor LocalCodexSource {
         }
         return rows
     }
+    /// 无换行时省去拆分拼接，Unicode 换行、空白与300字素上限继续沿用原规则。
     private static func cleanTitle(_ title: String) -> String {
-        let cleaned = title.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        let newlines = CharacterSet.newlines
+        let flattened = title.unicodeScalars.contains(where: { newlines.contains($0) })
+            ? title.components(separatedBy: newlines).joined(separator: " ") : title
+        let cleaned = flattened.trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty ? "未命名任务" : String(cleaned.prefix(300))
     }
     /// 仅解析可能为 JSON 对象的来源，仍由原解析器判定嵌套父任务编号。

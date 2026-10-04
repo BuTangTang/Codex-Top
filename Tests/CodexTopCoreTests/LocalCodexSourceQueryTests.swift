@@ -6,6 +6,43 @@ final class LocalCodexSourceQueryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let schema = "CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,rollout_path TEXT,created_at INTEGER,updated_at INTEGER,archived INTEGER)"
 
+    /// 通过实际快照核对清洗规则，逐字节保留换行、空白及300字素截断的旧输出。
+    func testTitleCleanupPreservesUnicodeWhitespaceAndTruncation() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let separators = ["\n", "\r", "\r\n", "\u{000B}", "\u{000C}", "\u{0085}", "\u{2028}", "\u{2029}"]
+        let whitespace = [" ", "\t", "\u{00A0}", "\u{2009}", "\u{3000}", "\u{FEFF}"]
+        let graphemes = ["e\u{301}", "é", "👨‍👩‍👧‍👦", "🇨🇳", "👍🏽", "中"]
+        var titles = ["", "普通标题", "  中间  空格  ", "甲\r\n乙", String(repeating: "👨‍👩‍👧‍👦", count: 301)]
+        for separator in separators {
+            titles += [separator, "甲" + separator + "乙", separator + "甲" + separator,
+                       " " + separator + " 甲 " + separator + " ", String(repeating: "中", count: 299) + separator + "乙"]
+        }
+        for space in whitespace { titles += [space, space + "正文" + space, "甲" + space + "乙"] }
+        for grapheme in graphemes {
+            for count in [1, 299, 300, 301, 600] {
+                titles += [String(repeating: grapheme, count: count), " " + String(repeating: grapheme, count: count) + "\t",
+                           String(repeating: grapheme, count: count) + "\r\n末尾"]
+            }
+        }
+        for (index, title) in titles.enumerated() {
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)",
+                        ["title-\(index)", title, "/synthetic/project", root.appendingPathComponent("rollout.jsonl").path])
+        }
+
+        let snapshot = try await LocalCodexSource(root: root).snapshot(now: now)
+        let actual = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0.title) })
+        XCTAssertEqual(actual.count, titles.count)
+        for (index, title) in titles.enumerated() {
+            let cleaned = title.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            let expected = cleaned.isEmpty ? "未命名任务" : String(cleaned.prefix(300))
+            XCTAssertEqual(actual["title-\(index)"].map { Array($0.utf8) }, Array(expected.utf8), "合成标题 \(index)")
+        }
+        XCTAssertEqual(actual["title-0"], "未命名任务")
+        XCTAssertEqual(actual["title-3"], "甲  乙")
+        XCTAssertEqual(actual["title-4"], String(repeating: "👨‍👩‍👧‍👦", count: 300))
+    }
+
     /// 提前排除普通来源不得改变旧解析器对空白、BOM、嵌套类型或异常 JSON 的判定。
     func testSourceObjectDetectionPreservesOriginalJSONSemantics() async throws {
         let root = try fixture()
