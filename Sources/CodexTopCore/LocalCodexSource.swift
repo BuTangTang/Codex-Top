@@ -41,7 +41,7 @@ public actor LocalCodexSource {
         var tasks: [CodexTask] = [], quota: QuotaSnapshot?, bytes = 0, failures = 0
         for row in rows {
             guard let id = row["id"], let path = row["rollout_path"] else { continue }
-            let file = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
+            let file = URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath()
             var task = CodexTask(id: id, title: Self.cleanTitle(row["title"] ?? ""), project: URL(fileURLWithPath: row["cwd"] ?? "").lastPathComponent,
                                  createdAt: Date(timeIntervalSince1970: Double(row["created_at"] ?? "") ?? 0),
                                  updatedAt: Date(timeIntervalSince1970: Double(row["updated_at"] ?? "") ?? 0),
