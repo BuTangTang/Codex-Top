@@ -6,6 +6,175 @@ final class LocalCodexSourceQueryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let schema = "CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,rollout_path TEXT,created_at INTEGER,updated_at INTEGER,archived INTEGER)"
 
+    /// 正常保留全部尾部时，不变文件读零字节；跨快照半行仍保留待答编号、开始时间和增量游标。
+    func testWarmTailsKeepPendingHalfLineAndReadOnlyAppendedBytes() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let waitingLog = root.appendingPathComponent("waiting.jsonl")
+        let otherLog = root.appendingPathComponent("other.jsonl")
+        let started = now.addingTimeInterval(-20)
+        let begin = try rolloutRecord("task_started", at: started, extra: ["turn_id": "waiting-turn"])
+        let question = try rolloutRecord("function_call", at: now.addingTimeInterval(-10), kind: "response_item",
+                                         extra: ["name": "request_user_input", "call_id": "synthetic-call"])
+        let other = try rolloutRecord("task_started", at: now.addingTimeInterval(-30), extra: ["turn_id": "other-turn"])
+        try (begin + question).write(to: waitingLog)
+        try other.write(to: otherLog)
+        try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["waiting", "合成待答", "/synthetic", waitingLog.path])
+        try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,1,0)", ["other", "合成运行", "/synthetic", otherLog.path])
+        let source = LocalCodexSource(root: root)
+        let initial = try await source.snapshot(now: now)
+        let waiting = try XCTUnwrap(initial.tasks.first { $0.id == "waiting" })
+        let unchangedOther = try XCTUnwrap(initial.tasks.first { $0.id == "other" })
+        XCTAssertEqual(initial.bytesRead, begin.count + question.count + other.count)
+        XCTAssertEqual(waiting.activity.phase, .waiting)
+        XCTAssertEqual(waiting.activity.startedAt, started)
+        XCTAssertEqual(waiting.activity.turnID, "waiting-turn")
+        let unchanged = try await source.snapshot(now: now)
+        XCTAssertEqual(unchanged.tasks, initial.tasks)
+        XCTAssertEqual(unchanged.bytesRead, 0)
+
+        let reply = try rolloutRecord("function_call_output", at: now.addingTimeInterval(-5), kind: "response_item",
+                                      extra: ["call_id": "synthetic-call", "output": "合成🙂"])
+        let split = reply.count / 2
+        try append(Data(reply.prefix(split)), to: waitingLog)
+        let partial = try await source.snapshot(now: now)
+        XCTAssertEqual(partial.bytesRead, split)
+        XCTAssertEqual(partial.tasks, initial.tasks, "没有换行的事件不得提前归约")
+        let repeatedPartial = try await source.snapshot(now: now)
+        XCTAssertEqual(repeatedPartial.bytesRead, 0)
+        XCTAssertEqual(repeatedPartial.tasks, initial.tasks)
+        try append(Data(reply.dropFirst(split)), to: waitingLog)
+        let completedLine = try await source.snapshot(now: now)
+        let resumed = try XCTUnwrap(completedLine.tasks.first { $0.id == "waiting" })
+        XCTAssertEqual(completedLine.bytesRead, reply.count - split)
+        XCTAssertEqual(resumed.activity.phase, .running)
+        XCTAssertEqual(resumed.activity.detail, "已收到回答，正在继续")
+        XCTAssertEqual(resumed.activity.startedAt, started)
+        XCTAssertEqual(resumed.activity.turnID, "waiting-turn")
+        XCTAssertEqual(resumed.activity.lastEventAt, now.addingTimeInterval(-5))
+        XCTAssertEqual(completedLine.tasks.first { $0.id == "other" }, unchangedOther)
+        XCTAssertNil(completedLine.warning)
+        let stable = try await source.snapshot(now: now)
+        XCTAssertEqual(stable.tasks, completedLine.tasks)
+        XCTAssertEqual(stable.bytesRead, 0)
+    }
+
+    /// 大部分任务归档时保留项继续增量读；归档项重开必须冷读，整批空集后也不能保留旧游标。
+    func testArchiveReopenReadsRemovedTailsWithoutReReadingRetainedFiles() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let original = try rolloutRecord("task_complete", at: now.addingTimeInterval(-20), extra: ["turn_id": "original-turn"])
+        let logs = (0..<65).map { root.appendingPathComponent("archive-\($0).jsonl") }
+        for (index, log) in logs.enumerated() {
+            try original.write(to: log)
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["tail-\(index)", "合成归档", "/synthetic", log.path])
+        }
+        let source = LocalCodexSource(root: root)
+        let initial = try await source.snapshot(now: now)
+        XCTAssertEqual(initial.tasks.count, logs.count)
+        XCTAssertEqual(initial.bytesRead, original.count * logs.count)
+        try execute(root, "UPDATE threads SET archived=1 WHERE id<>'tail-0'")
+        let archived = try await source.snapshot(now: now)
+        XCTAssertEqual(archived.tasks.map(\.id), ["tail-0"])
+        XCTAssertEqual(archived.bytesRead, 0, "删除其他缓存项不得重读保留项")
+        let newTurn = try rolloutRecord("task_started", at: now.addingTimeInterval(-5), extra: ["turn_id": "new-turn"])
+        for log in logs { try append(newTurn, to: log) }
+        let retained = try await source.snapshot(now: now)
+        XCTAssertEqual(retained.bytesRead, newTurn.count)
+        XCTAssertEqual(retained.tasks.first?.activity.phase, .running)
+        XCTAssertEqual(retained.tasks.first?.activity.turnID, "new-turn")
+        try execute(root, "UPDATE threads SET archived=0")
+        let reopened = try await source.snapshot(now: now)
+        XCTAssertEqual(reopened.tasks.count, logs.count)
+        XCTAssertEqual(reopened.bytesRead, (original.count + newTurn.count) * (logs.count - 1))
+        XCTAssertEqual(reopened.tasks.first { $0.id == "tail-0" }, retained.tasks.first)
+        XCTAssertTrue(reopened.tasks.allSatisfy { $0.activity.phase == .running && $0.activity.turnID == "new-turn" })
+        XCTAssertNil(reopened.warning)
+        let unchanged = try await source.snapshot(now: now)
+        XCTAssertEqual(unchanged.bytesRead, 0)
+        XCTAssertEqual(unchanged.tasks, reopened.tasks)
+
+        try execute(root, "UPDATE threads SET archived=1")
+        let empty = try await source.snapshot(now: now)
+        XCTAssertTrue(empty.tasks.isEmpty)
+        XCTAssertEqual(empty.bytesRead, 0)
+        try execute(root, "UPDATE threads SET archived=0 WHERE id='tail-0'")
+        let afterEmpty = try await source.snapshot(now: now)
+        XCTAssertEqual(afterEmpty.tasks, retained.tasks)
+        XCTAssertEqual(afterEmpty.bytesRead, original.count + newTurn.count)
+    }
+
+    /// 本轮读失败逐项清空尾部后仍继续逐轮检查；恢复文件从新状态冷读，不复活开始时间或轮次。
+    func testAllFailedTailsRecoverFromFreshFilesWithoutOldReducerState() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let logs = [root.appendingPathComponent("failed-a.jsonl"), root.appendingPathComponent("failed-b.jsonl")]
+        let running = try rolloutRecord("task_started", at: now.addingTimeInterval(-20), extra: ["turn_id": "old-turn"])
+        for (index, log) in logs.enumerated() {
+            try running.write(to: log)
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["failed-\(index)", "合成缺失", "/synthetic", log.path])
+        }
+        let source = LocalCodexSource(root: root)
+        let initial = try await source.snapshot(now: now)
+        XCTAssertEqual(initial.bytesRead, running.count * logs.count)
+        XCTAssertTrue(initial.tasks.allSatisfy { $0.activity.phase == .running && $0.activity.startedAt != nil })
+        for log in logs { try FileManager.default.removeItem(at: log) }
+        let failed = try await source.snapshot(now: now)
+        XCTAssertEqual(failed.tasks.count, logs.count)
+        XCTAssertTrue(failed.tasks.allSatisfy { $0.activity.phase == .unknown && $0.activity.startedAt == nil })
+        XCTAssertEqual(failed.bytesRead, 0)
+        XCTAssertNotNil(failed.warning)
+        let stillMissing = try await source.snapshot(now: now)
+        XCTAssertEqual(stillMissing.tasks, failed.tasks)
+        XCTAssertEqual(stillMissing.bytesRead, 0)
+        let finished = try rolloutRecord("task_complete", at: now.addingTimeInterval(-5), extra: ["turn_id": "fresh-turn"])
+        for log in logs { try finished.write(to: log) }
+        let restored = try await source.snapshot(now: now)
+        XCTAssertEqual(restored.bytesRead, finished.count * logs.count)
+        XCTAssertTrue(restored.tasks.allSatisfy { $0.activity.phase == .completed && $0.activity.startedAt == nil && $0.activity.turnID == nil })
+        XCTAssertNil(restored.warning)
+        let unchanged = try await source.snapshot(now: now)
+        XCTAssertEqual(unchanged.tasks, restored.tasks)
+        XCTAssertEqual(unchanged.bytesRead, 0)
+    }
+
+    /// 部分日志失败后仍保留可读日志的游标；恢复项冷读而保留项只读新增字节。
+    func testPartialFailedTailsRecoverWithoutResettingRetainedTail() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let logs = (0..<65).map { root.appendingPathComponent("partial-failure-\($0).jsonl") }
+        let original = try rolloutRecord("task_complete", at: now.addingTimeInterval(-20), extra: ["turn_id": "original-turn"])
+        for (index, log) in logs.enumerated() {
+            try original.write(to: log)
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["partial-\(index)", "合成部分失败", "/synthetic", log.path])
+        }
+        let source = LocalCodexSource(root: root)
+        let initial = try await source.snapshot(now: now)
+        XCTAssertEqual(initial.bytesRead, original.count * logs.count)
+        for log in logs.dropFirst() { try FileManager.default.removeItem(at: log) }
+        let failed = try await source.snapshot(now: now)
+        XCTAssertEqual(failed.tasks.count, logs.count)
+        XCTAssertEqual(failed.tasks.filter { $0.activity.phase == .unknown }.count, logs.count - 1)
+        XCTAssertEqual(failed.tasks.first { $0.id == "partial-0" }, initial.tasks.first { $0.id == "partial-0" })
+        XCTAssertEqual(failed.bytesRead, 0)
+        XCTAssertNotNil(failed.warning)
+
+        let newTurn = try rolloutRecord("task_started", at: now.addingTimeInterval(-5), extra: ["turn_id": "retained-turn"])
+        try append(newTurn, to: logs[0])
+        let retained = try await source.snapshot(now: now)
+        XCTAssertEqual(retained.bytesRead, newTurn.count)
+        XCTAssertEqual(retained.tasks.first { $0.id == "partial-0" }?.activity.turnID, "retained-turn")
+        let fresh = try rolloutRecord("task_complete", at: now.addingTimeInterval(-5), extra: ["turn_id": "fresh-turn"])
+        for log in logs.dropFirst() { try fresh.write(to: log) }
+        let restored = try await source.snapshot(now: now)
+        XCTAssertEqual(restored.bytesRead, fresh.count * (logs.count - 1))
+        XCTAssertEqual(restored.tasks.first { $0.id == "partial-0" }, retained.tasks.first { $0.id == "partial-0" })
+        XCTAssertTrue(restored.tasks.filter { $0.id != "partial-0" }.allSatisfy {
+            $0.activity.phase == .completed && $0.activity.startedAt == nil
+        })
+        XCTAssertNil(restored.warning)
+    }
+
     /// 超过缓存容量的历史仍使用当前字段；长标题、父关系切换与归档后恢复不复活旧标签。
     func testLargeHistoryLabelsStayCurrentAcrossReplacementAndArchive() async throws {
         let root = try fixture()
@@ -382,6 +551,21 @@ final class LocalCodexSourceQueryTests: XCTestCase {
         let replaced = try await source.snapshot(now: now)
         XCTAssertEqual(replaced.tasks.first?.title, "另一数据库")
         XCTAssertEqual(replaced.tasks.first?.activity.phase, .completed)
+    }
+
+    /// 构造单条合成元数据，时间固定且携带换行，增量测试可按字节拆分而无需等待真实活动。
+    private func rolloutRecord(_ type: String, at date: Date, kind: String = "event_msg", extra: [String: Any]) throws -> Data {
+        var payload = extra
+        payload["type"] = type
+        return try JSONSerialization.data(withJSONObject: ["type": kind, "timestamp": ISO8601DateFormatter().string(from: date), "payload": payload]) + Data([10])
+    }
+
+    /// 只向临时合成记录追加指定字节，保留 inode 与原前缀以验证真正的增量游标。
+    private func append(_ bytes: Data, to url: URL) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: bytes)
     }
 
     /// 独立临时目录仅包含合成数据库和一条完成事件，结束后自动移除。

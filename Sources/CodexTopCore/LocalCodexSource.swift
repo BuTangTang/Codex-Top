@@ -177,7 +177,11 @@ public actor LocalCodexSource {
                 }
             }
         }
-        let ids = Set(tasks.map(\.id)); tails = tails.filter { ids.contains($0.key) }
+        let ids = Set(tasks.map(\.id))
+        // 完整保留时不重建尾部字典；删除失效项或清空缓存仍沿用原 filter 的缩容行为。
+        if tails.isEmpty || tails.keys.contains(where: { !ids.contains($0) }) {
+            tails = tails.filter { ids.contains($0.key) }
+        }
         for id in labels.keys.filter({ !ids.contains($0) }) { removeCachedLabel(for: id) }
         return SourceSnapshot(tasks: tasks, quota: quota, warning: failures == 0 ? nil : "\(failures) 个任务的记录不可用，其状态显示为未知。", bytesRead: bytes, observedAt: now)
     }

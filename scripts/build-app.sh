@@ -91,6 +91,50 @@ if [[ -n "${CODEX_TOP_DEFAULT_SERVER_URL:-}" ]]; then
   plutil -insert CodexTopConnectionServer -string "$CODEX_TOP_DEFAULT_SERVER_URL" "$app_path/Contents/Info.plist"
 fi
 plutil -lint "$app_path/Contents/Info.plist"
+# 正式发布仅剥离待签名副本的局部调试符号；同次 dSYM 留在 App 外，调试构建不变。
+if [[ "$configuration" == release ]]; then
+  executable_path="$app_path/Contents/MacOS/CodexTop"
+  symbols_path="$repo_root/dist/$app_name.app.dSYM"
+  staged_symbols="$icon_work/$app_name.app.dSYM"
+  /usr/bin/xcrun dsymutil "$executable_path" -o "$staged_symbols"
+  executable_uuids="$(/usr/bin/xcrun dwarfdump --uuid "$executable_path" | awk '/^UUID:/ { print $2, $3 }' | sort)"
+  symbol_uuids="$(/usr/bin/xcrun dwarfdump --uuid "$staged_symbols" | awk '/^UUID:/ { print $2, $3 }' | sort)"
+  # 每个架构都必须有匹配的符号文件；生成失败或不匹配时不进入签名发布。
+  if [[ -z "$executable_uuids" || "$executable_uuids" != "$symbol_uuids" ]]; then
+    printf 'Release executable and dSYM UUIDs do not match.\n' >&2; exit 1
+  fi
+  /usr/bin/xcrun strip -x "$executable_path"
+  stripped_uuids="$(/usr/bin/xcrun dwarfdump --uuid "$executable_path" | awk '/^UUID:/ { print $2, $3 }' | sort)"
+  if [[ "$stripped_uuids" != "$executable_uuids" ]]; then
+    printf 'Release executable UUIDs changed while stripping local symbols.\n' >&2; exit 1
+  fi
+fi
 codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none "$app_path"
 codesign --verify --strict "$app_path"
+# 签名验收成功后再替换稳定的外置 dSYM；只保留本脚本拥有的最新发布符号目录。
+if [[ "$configuration" == release ]]; then
+  symbols_backup=""
+  # 旧符号暂存于同一文件系统，且不放进 EXIT 会清理的 icon_work。
+  if [[ -e "$symbols_path" || -L "$symbols_path" ]]; then
+    symbols_backup="$(mktemp -d "$repo_root/dist/.app-symbols-backup.XXXXXX")"
+    previous_symbols="$symbols_backup/$app_name.app.dSYM"
+    if ! mv "$symbols_path" "$previous_symbols"; then
+      rmdir "$symbols_backup"
+      printf 'Could not stage the previous dSYM; its stable path is unchanged.\n' >&2; exit 1
+    fi
+  fi
+  if ! mv "$staged_symbols" "$symbols_path"; then
+    printf 'Could not publish the release dSYM.\n' >&2
+    if [[ -n "$symbols_backup" ]]; then
+      if mv "$previous_symbols" "$symbols_path"; then
+        rmdir "$symbols_backup"
+      else
+        # 恢复失败时保留旧目录，退出清理只能移除本次的新符号暂存。
+        printf 'Could not restore the previous dSYM; preserved at: %s\n' "$previous_symbols" >&2
+      fi
+    fi
+    exit 1
+  fi
+  if [[ -n "$symbols_backup" ]]; then rm -rf "$symbols_backup"; fi
+fi
 printf 'Built: %s\n' "$app_path"
