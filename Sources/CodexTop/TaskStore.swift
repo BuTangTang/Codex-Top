@@ -259,7 +259,10 @@ import CodexTopCore
             scheduleFastRefresh()
         }
         do {
-            let previousPhases = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, graph.activity(for: $0).phase) })
+            // 完成提示只比较阶段；无需为了布尔判断排序或复制带详情的展示活动。
+            let previousPhases = Dictionary(uniqueKeysWithValues: graph.roots.filter {
+                preferences.selectedIDs.contains($0.id)
+            }.map { ($0.id, graph.activitySource(for: $0).activity.phase) })
             let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs)
             guard !stopping, generation == sourceGeneration else { return }
             if tasks != snapshot.tasks {
@@ -274,9 +277,9 @@ import CodexTopCore
             MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)
             if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
-            if selected.contains(where: { task in
-                guard let old = previousPhases[task.id] else { return false }
-                return old != .completed && graph.activity(for: task).phase == .completed
+            if graph.roots.contains(where: { task in
+                guard preferences.selectedIDs.contains(task.id), let old = previousPhases[task.id] else { return false }
+                return old != .completed && graph.activitySource(for: task).activity.phase == .completed
             }) { completionSequence += 1 }
         } catch {
             guard !stopping, generation == sourceGeneration else { return }

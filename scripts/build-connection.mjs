@@ -5,7 +5,7 @@ import { access, readFile, symlink, mkdtemp, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
-/** 复用相邻开源仓库的正式二进制打包器，包含托管运行时和其既有资源依赖。 */
+/** 复用相邻仓库的产品打包器，同包携带唯一 Bun、完整产品 JS 与运行资源。 */
 async function main() {
     const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
     const defaults = JSON.parse(await readFile(join(root, 'scripts/build-version.json'), 'utf8'));
@@ -21,11 +21,14 @@ async function main() {
     await access(modulePath);
     const { buildCliBinaryArtifactPayload } = await import(pathToFileURL(modulePath).href);
     // 只构建本机架构；真正分发 Intel 版需使用打包器的对应目标单独验证。
-    // 仅本产品开启已验证的空白／语法压缩，保留运行时标识符与原能力集合。
-    const result = await buildCliBinaryArtifactPayload({ repoRoot: source, payloadDir, releaseVersion, minifySyntaxWhitespace: true });
+    const result = await buildCliBinaryArtifactPayload({ repoRoot: source, payloadDir, releaseVersion, artifactProfile: 'codex-top' });
     // canonical 参数会把版本写进不可变构建源和编译配置；旧 manifest 不得冒充新包。
     const manifest = JSON.parse(await readFile(join(payloadDir, 'package-dist/.build-manifest.json'), 'utf8'));
     if (manifest.buildVersion !== releaseVersion) throw new Error('Connection build manifest does not match the requested version.');
+    const profile = JSON.parse(await readFile(join(payloadDir, 'product-profile.json'), 'utf8'));
+    if (profile.id !== 'codex-top' || profile.buildVersion !== releaseVersion || manifest.runtimeAsset?.relativePath !== 'runtime/bun') {
+        throw new Error('Connection payload does not contain the expected product runtime.');
+    }
     const { DEFAULT_CLI_RUNTIME_IMPORT_TIMEOUT_MS } = await import(pathToFileURL(join(source, 'packages/cli-common/runtimeImportProbePolicy.mjs')).href);
     const probeHome = await mkdtemp(join(tmpdir(), 'codextop-version-'));
     try {
@@ -35,7 +38,7 @@ async function main() {
             encoding: 'utf8', timeout: DEFAULT_CLI_RUNTIME_IMPORT_TIMEOUT_MS,
             env: { ...env, HAPPIER_HOME_DIR: probeHome, HAPPIER_PRODUCT_MODE: 'codextop' },
         }).trim();
-        if (reportedVersion !== releaseVersion) throw new Error('Compiled connection version does not match the requested version.');
+        if (reportedVersion !== releaseVersion) throw new Error('Connection version does not match the requested version.');
     } finally { await rm(probeHome, { recursive: true, force: true }); }
     // 仅在 manifest 与编译版本一致后发布原生入口，失败产物不能被下一步打包选中。
     await symlink(result.executableName, join(payloadDir, 'codex-top-bridge'));

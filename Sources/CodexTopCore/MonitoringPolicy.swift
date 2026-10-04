@@ -215,7 +215,9 @@ public struct TaskGraph: Sendable {
     }
     /// 唯一的当前快照归根算法；仅读取祖先映射时不创建展示分组或活动索引。
     package static func resolveRootIDs(tasks: [CodexTask]) -> [String: String] {
-        let lookup = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // 保留“存在但没有父项”和“不存在”的区别，不复制归根不需要的任务内容。
+        struct ParentReference { let parentID: String? }
+        let lookup = Dictionary(tasks.map { ($0.id, ParentReference(parentID: $0.parentID)) }, uniquingKeysWith: { first, _ in first })
         var resolved: [String: String] = [:]
         for task in tasks {
             var current = task.id, path: [String] = [], positions: [String: Int] = [:]

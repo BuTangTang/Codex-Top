@@ -114,6 +114,48 @@ final class TaskStorePublicationTests: XCTestCase {
         XCTAssertEqual(store.preferences.automaticallyRemovedIDs, ["synthetic"])
     }
 
+    /// 根已完成而子任务仍运行时，完成提示跟随子项；取消关注后完成不提示。
+    @MainActor func testCompletionFollowsSelectedChildAndStopsAfterDeselection() async throws {
+        let directory = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try event("task_complete").write(to: directory.appendingPathComponent("task.jsonl"))
+        let childLog = directory.appendingPathComponent("child.jsonl")
+        try event("task_started").write(to: childLog)
+        var connection: OpaquePointer?
+        guard sqlite3_open(directory.appendingPathComponent("state_5.sqlite").path, &connection) == SQLITE_OK else {
+            if let connection { sqlite3_close(connection) }; throw NSError(domain: "fixture", code: 1)
+        }
+        defer { sqlite3_close(connection) }
+        let now = Int(Date().timeIntervalSince1970)
+        let sql = """
+        INSERT INTO threads VALUES('child','合成子任务','/synthetic','\(childLog.path)',\(now),\(now),0);
+        CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT);
+        INSERT INTO thread_spawn_edges VALUES('synthetic','child');
+        """
+        XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK)
+        let store = TaskStore(stateDirectory: directory)
+        await store.refresh()
+        XCTAssertEqual(store.runningCount, 1)
+        XCTAssertEqual(store.completionSequence, 0)
+        func append(_ type: String) throws {
+            let handle = try FileHandle(forWritingTo: childLog)
+            defer { try? handle.close() }
+            try handle.seekToEnd(); try handle.write(contentsOf: event(type))
+        }
+        try append("task_complete")
+        await store.refresh()
+        XCTAssertEqual(store.completionSequence, 1)
+        await store.refresh()
+        XCTAssertEqual(store.completionSequence, 1, "同一完成状态不重复提示")
+        try append("task_started")
+        await store.refresh()
+        XCTAssertEqual(store.runningCount, 1)
+        store.removeFromMonitoring("synthetic")
+        try append("task_complete")
+        await store.refresh()
+        XCTAssertEqual(store.completionSequence, 1, "不提示已经取消关注的任务")
+    }
+
     /// 使用独立临时数据库与合成事件，不接触真实任务或账号。
     private func makeFixture() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("publication-\(UUID().uuidString)")
