@@ -21,7 +21,8 @@ async function main() {
     await access(modulePath);
     const { buildCliBinaryArtifactPayload } = await import(pathToFileURL(modulePath).href);
     // 只构建本机架构；真正分发 Intel 版需使用打包器的对应目标单独验证。
-    const result = await buildCliBinaryArtifactPayload({ repoRoot: source, payloadDir, releaseVersion });
+    // 仅本产品开启已验证的空白／语法压缩，保留运行时标识符与原能力集合。
+    const result = await buildCliBinaryArtifactPayload({ repoRoot: source, payloadDir, releaseVersion, minifySyntaxWhitespace: true });
     // canonical 参数会把版本写进不可变构建源和编译配置；旧 manifest 不得冒充新包。
     const manifest = JSON.parse(await readFile(join(payloadDir, 'package-dist/.build-manifest.json'), 'utf8'));
     if (manifest.buildVersion !== releaseVersion) throw new Error('Connection build manifest does not match the requested version.');

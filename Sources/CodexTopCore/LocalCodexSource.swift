@@ -48,6 +48,7 @@ public actor LocalCodexSource {
             }
         }
         var tasks: [CodexTask] = [], quota: QuotaSnapshot?, bytes = 0, failures = 0
+        var projectNames: [String: String] = [:]
         let rootPrefix = root.path + "/"
         for row in rows {
             guard let id = row["id"], let path = row["rollout_path"] else { continue }
@@ -55,7 +56,11 @@ public actor LocalCodexSource {
             let explicitParent = parents[id]
             // 有正式父子边时沿用原短路规则，不再额外解析可能很长的来源 JSON。
             let label = taskLabels(id: id, title: row["title"] ?? "", source: explicitParent == nil ? row["source"] : nil)
-            var task = CodexTask(id: id, title: label.title, project: URL(fileURLWithPath: row["cwd"] ?? "", isDirectory: true).lastPathComponent,
+            // 同一快照中相同原始项目路径只派生一次名称，下一轮仍按当前字段重建。
+            let cwd = row["cwd"] ?? ""
+            let project = projectNames[cwd] ?? URL(fileURLWithPath: cwd, isDirectory: true).lastPathComponent
+            projectNames[cwd] = project
+            var task = CodexTask(id: id, title: label.title, project: project,
                                  createdAt: Date(timeIntervalSince1970: Double(row["created_at"] ?? "") ?? 0),
                                  updatedAt: Date(timeIntervalSince1970: Double(row["updated_at"] ?? "") ?? 0),
                                  parentID: explicitParent ?? label.parentID, rolloutURL: file)
@@ -206,8 +211,10 @@ public actor LocalCodexSource {
         let cleaned = title.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty ? "未命名任务" : String(cleaned.prefix(300))
     }
+    /// 仅解析可能为 JSON 对象的来源，仍由原解析器判定嵌套父任务编号。
     private static func parentFromSource(_ source: String?) -> String? {
-        guard let data = source?.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        // 可解析为对象的 JSON 必有左花括号；普通来源标签无需构造 JSON 错误及缓冲区。
+        guard let source, source.utf8.contains(0x7B), let data = source.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let subagent = value["subagent"] as? [String: Any], let spawn = subagent["thread_spawn"] as? [String: Any] else { return nil }
         return spawn["parent_thread_id"] as? String
     }

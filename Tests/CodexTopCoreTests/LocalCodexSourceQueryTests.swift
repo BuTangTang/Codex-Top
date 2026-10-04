@@ -6,6 +6,53 @@ final class LocalCodexSourceQueryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let schema = "CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,rollout_path TEXT,created_at INTEGER,updated_at INTEGER,archived INTEGER)"
 
+    /// 提前排除普通来源不得改变旧解析器对空白、BOM、嵌套类型或异常 JSON 的判定。
+    func testSourceObjectDetectionPreservesOriginalJSONSemantics() async throws {
+        let root = try fixture()
+        try execute(root, schema + "; ALTER TABLE threads ADD COLUMN source TEXT")
+        let object = "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"parent\"}}}"
+        let values: [String?] = [nil, "", "cli", "vscode", "null", "false", "123", "\"source\"", "[]", "[1]", "{}", "{", "\"{\"", "[" + object + "]", object, " \t\r\n" + object, "\u{FEFF}" + object,
+            "{\"subagent\":[]}", "{\"subagent\":{\"thread_spawn\":null}}", "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":3}}}",
+            "{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"\"}}}"]
+        let path = root.appendingPathComponent("rollout.jsonl").path
+        for (index, value) in values.enumerated() {
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0,?)", ["source-\(index)", "测试", "/synthetic/project", path, value])
+        }
+        let snapshot = try await LocalCodexSource(root: root).snapshot(now: now)
+        let tasks = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
+        XCTAssertEqual(tasks.count, values.count)
+        for (index, value) in values.enumerated() {
+            let original = value?.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let subagent = original?["subagent"] as? [String: Any]
+            let spawn = subagent?["thread_spawn"] as? [String: Any]
+            XCTAssertEqual(tasks["source-\(index)"]?.parentID, spawn?["parent_thread_id"] as? String, "source case \(index)")
+        }
+        XCTAssertEqual(tasks["source-14"]?.parentID, "parent")
+        XCTAssertEqual(tasks["source-20"]?.parentID, "")
+    }
+
+    /// 重复路径、缺字段和特殊字符保持原 URL 显示规则，且字段更新后不会沿用上轮名称。
+    func testRepeatedProjectNamesPreservePathSemanticsAcrossSnapshots() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let paths: [String?] = [nil, "", "/", ".", "..", "relative/project", "/synthetic/项目/", "/synthetic/a/../b", "/synthetic/a%20b", "/synthetic/空 格#问?", "/synthetic/项目/", "/synthetic//重复///", "~/project", "/synthetic/e\u{301}"]
+        let rollout = root.appendingPathComponent("rollout.jsonl").path
+        for (index, path) in paths.enumerated() {
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", ["project-\(index)", "测试", path, rollout])
+        }
+        let source = LocalCodexSource(root: root)
+        let first = try await source.snapshot(now: now)
+        let tasks = Dictionary(uniqueKeysWithValues: first.tasks.map { ($0.id, $0) })
+        for (index, path) in paths.enumerated() {
+            XCTAssertEqual(tasks["project-\(index)"]?.project, URL(fileURLWithPath: path ?? "", isDirectory: true).lastPathComponent)
+        }
+        try execute(root, "UPDATE threads SET cwd=? WHERE id='project-10'", ["/synthetic/已移动"])
+        let second = try await source.snapshot(now: now)
+        XCTAssertEqual(second.tasks.first { $0.id == "project-10" }?.project, "已移动")
+        XCTAssertEqual(second.tasks.first { $0.id == "project-6" }?.project, "项目")
+        XCTAssertEqual(second.bytesRead, 0)
+    }
+
     /// 多行读取保持列别名和原索引，前面列的 NULL 不得错位或污染后续行。
     func testAliasesNullColumnsAndMultipleRowsKeepTheirOwnValues() async throws {
         let root = try fixture()

@@ -2,16 +2,58 @@ import AppKit
 import Combine
 import CodexTopCore
 
+/// 状态栏实际展示所依赖的值，外观变化也必须允许重新应用动态颜色。
+struct StatusItemPresentation: Equatable {
+    let placement: PanelPlacement
+    let running: Int
+    let attention: Int
+    let theme: PanelTheme
+    let appearance: NSAppearance.Name
+}
+
+/// 只负责单个状态栏按钮的展示，不持有任务仓库、窗口或异步回调。
+@MainActor struct StatusItemRenderer {
+    private var lastPresentation: StatusItemPresentation?
+
+    /// 同一入口负责长度、文案、图标和读屏信息，便于核验真实 AppKit 写入边界。
+    mutating func update(_ presentation: StatusItemPresentation, button: NSButton, setLength: (CGFloat) -> Void) {
+        // 只记住此按钮已应用的展示；任务、偏好或系统外观变化时仍立即应用新值。
+        guard lastPresentation != presentation else { return }
+        if presentation.placement == .menuBar {
+            setLength(NSStatusItem.variableLength)
+            button.image = nil
+            let text = "  ● \(presentation.running)   ● \(presentation.attention)  "
+            let title = NSMutableAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor])
+            let string = text as NSString
+            title.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: string.range(of: "●"))
+            title.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: string.range(of: "●", options: .backwards))
+            button.attributedTitle = title
+        } else {
+            setLength(NSStatusItem.squareLength)
+            button.title = ""
+            button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Codex Top")
+        }
+        button.toolTip = "Codex Top · \(presentation.running) 个运行中 · \(presentation.attention) 个待处理"
+        button.setAccessibilityLabel(button.toolTip)
+        lastPresentation = presentation
+    }
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: TaskStore!
     private var windows: WindowController!
     private var statusItem: NSStatusItem!
     private var statusMenu: NSMenu!
     private var statusObservation: AnyCancellable?
+    private var statusRenderer = StatusItemRenderer()
     private var shutdownTask: Task<Void, Never>?
+    /// 启动唯一状态栏入口并应用固定样式，再接入任务展示更新与窗口操作。
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = TaskStore(); windows = WindowController(store: store)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem.button?.wantsLayer = true
+        statusItem.button?.layer?.backgroundColor = NSColor.clear.cgColor
+        statusItem.button?.layer?.cornerRadius = 0
         windows.statusAnchorProvider = { [weak self] in
             guard let button = self?.statusItem?.button, let window = button.window else { return nil }
             return window.convertToScreen(button.convert(button.bounds, to: nil))
@@ -64,27 +106,14 @@ import CodexTopCore
         store.start()
         if CommandLine.arguments.contains("--show") { windows.toggleExpanded() }
     }
+    /// 广播后读取一次当前汇总，保留原队列和生命周期，不改变任务刷新频率。
     private func updateStatusItem() {
         guard let button = statusItem.button else { return }
-        button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.layer?.cornerRadius = 0
-        if store.placement == .menuBar {
-            statusItem.length = NSStatusItem.variableLength
-            button.image = nil
-            let text = "  ● \(store.runningCount)   ● \(store.attentionCount)  "
-            let title = NSMutableAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor])
-            let string = text as NSString
-            title.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: string.range(of: "●"))
-            title.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: string.range(of: "●", options: .backwards))
-            button.attributedTitle = title
-        } else {
-            statusItem.length = NSStatusItem.squareLength
-            button.title = ""
-            button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "Codex Top")
-        }
-        button.toolTip = "Codex Top · \(store.runningCount) 个运行中 · \(store.attentionCount) 个待处理"
-        button.setAccessibilityLabel(button.toolTip)
+        let summary = store.statusSummary
+        let presentation = StatusItemPresentation(placement: store.placement, running: summary.running,
+                                                  attention: summary.attention, theme: store.theme,
+                                                  appearance: button.effectiveAppearance.name)
+        statusRenderer.update(presentation, button: button) { statusItem.length = $0 }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store else { return .terminateNow }
