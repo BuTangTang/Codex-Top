@@ -8,6 +8,7 @@ public actor LocalCodexSource {
     private let replySource: DesktopReplyReceiptSource
     private var receivedReplies: [String: QuestionReplyReceipt] = [:]
     private var labels: [String: TaskLabels] = [:]
+    private var labelUTF8Bytes = 0
 
     /// 只保存纯文本的解析结果；原始字段改变即重算，不缓存路径、文件或活动状态。
     private struct TaskLabels {
@@ -15,6 +16,29 @@ public actor LocalCodexSource {
         let rawSource: String?
         let title: String
         let parentID: String?
+        let retainedUTF8Bytes: Int
+    }
+
+    /// 主查询固定七列，只保存当轮文本值，保留 NULL 与字段缺省处理的边界。
+    private struct ThreadRow {
+        let id: String?
+        let title: String?
+        let cwd: String?
+        let rolloutPath: String?
+        let createdAt: String?
+        let updatedAt: String?
+        let source: String?
+
+        /// 下一次 step 前复制 SQLite 文本，沿用 C 字符串转换，不改为数值或二进制解码。
+        init(statement: OpaquePointer?) {
+            id = sqlite3_column_text(statement, 0).map { String(cString: $0) }
+            title = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+            cwd = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+            rolloutPath = sqlite3_column_text(statement, 3).map { String(cString: $0) }
+            createdAt = sqlite3_column_text(statement, 4).map { String(cString: $0) }
+            updatedAt = sqlite3_column_text(statement, 5).map { String(cString: $0) }
+            source = sqlite3_column_text(statement, 6).map { String(cString: $0) }
+        }
     }
 
     /// 数据库、历史和桌面接收证据使用同一根目录，切换数据源时不会串用回执。
@@ -39,7 +63,7 @@ public actor LocalCodexSource {
         guard Set(["id", "title", "cwd", "rollout_path", "created_at", "updated_at", "archived"]).isSubset(of: columns) else { throw CodexSourceError.incompatibleDatabase }
         let title = columns.contains("name") ? "COALESCE(NULLIF(name,''),title)" : "title"
         let source = columns.contains("source") ? "source" : "'' AS source"
-        let rows = try query(connection, "SELECT id,\(title) AS title,cwd,rollout_path,created_at,updated_at,\(source) FROM threads WHERE archived=0 ORDER BY updated_at DESC")
+        let rows = try queryThreadRows(connection, "SELECT id,\(title) AS title,cwd,rollout_path,created_at,updated_at,\(source) FROM threads WHERE archived=0 ORDER BY updated_at DESC")
         let tables = try query(connection, "SELECT name FROM sqlite_master WHERE type='table'")
         var parents: [String: String] = [:]
         if tables.contains(where: { $0["name"] == "thread_spawn_edges" }) {
@@ -51,18 +75,18 @@ public actor LocalCodexSource {
         var projectNames: [String: String] = [:]
         let rootPrefix = root.path + "/"
         for row in rows {
-            guard let id = row["id"], let path = row["rollout_path"] else { continue }
+            guard let id = row.id, let path = row.rolloutPath else { continue }
             let file = URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath()
             let explicitParent = parents[id]
             // 有正式父子边时沿用原短路规则，不再额外解析可能很长的来源 JSON。
-            let label = taskLabels(id: id, title: row["title"] ?? "", source: explicitParent == nil ? row["source"] : nil)
+            let label = taskLabels(id: id, title: row.title ?? "", source: explicitParent == nil ? row.source : nil)
             // 同一快照中相同原始项目路径只派生一次名称，下一轮仍按当前字段重建。
-            let cwd = row["cwd"] ?? ""
+            let cwd = row.cwd ?? ""
             let project = projectNames[cwd] ?? URL(fileURLWithPath: cwd, isDirectory: true).lastPathComponent
             projectNames[cwd] = project
             var task = CodexTask(id: id, title: label.title, project: project,
-                                 createdAt: Date(timeIntervalSince1970: Double(row["created_at"] ?? "") ?? 0),
-                                 updatedAt: Date(timeIntervalSince1970: Double(row["updated_at"] ?? "") ?? 0),
+                                 createdAt: Date(timeIntervalSince1970: Double(row.createdAt ?? "") ?? 0),
+                                 updatedAt: Date(timeIntervalSince1970: Double(row.updatedAt ?? "") ?? 0),
                                  parentID: explicitParent ?? label.parentID, rolloutURL: file)
             if !file.path.hasPrefix(rootPrefix) {
                 task.activity.detail = "记录位于数据目录之外，未读取"; failures += 1
@@ -154,19 +178,27 @@ public actor LocalCodexSource {
             }
         }
         let ids = Set(tasks.map(\.id)); tails = tails.filter { ids.contains($0.key) }
-        labels = labels.filter { ids.contains($0.key) }
+        for id in labels.keys.filter({ !ids.contains($0) }) { removeCachedLabel(for: id) }
         return SourceSnapshot(tasks: tasks, quota: quota, warning: failures == 0 ? nil : "\(failures) 个任务的记录不可用，其状态显示为未知。", bytesRead: bytes, observedAt: now)
     }
-    /// 按完整原始字段判断复用，父子边仍逐轮覆盖；最多256项、每项原文4KiB，避免缓存长正文。
+    /// 按完整字段复用纯文本；最多2048项、单项原文4KiB，所有保留字符串的UTF8合计不超过1MiB。
     private func taskLabels(id: String, title: String, source: String?) -> TaskLabels {
         if let cached = labels[id], cached.rawTitle == title, cached.rawSource == source { return cached }
-        let value = TaskLabels(rawTitle: title, rawSource: source, title: Self.cleanTitle(title), parentID: Self.parentFromSource(source))
-        if title.utf8.count + (source?.utf8.count ?? 0) <= 4_096, labels[id] != nil || labels.count < 256 {
+        // 字段变化先释放旧占用；新内容超预算时仍返回当前解析值，不留下过期标签。
+        removeCachedLabel(for: id)
+        let cleanedTitle = Self.cleanTitle(title), parentID = Self.parentFromSource(source)
+        let rawBytes = title.utf8.count + (source?.utf8.count ?? 0)
+        let retainedBytes = id.utf8.count + rawBytes + cleanedTitle.utf8.count + (parentID?.utf8.count ?? 0)
+        let value = TaskLabels(rawTitle: title, rawSource: source, title: cleanedTitle, parentID: parentID, retainedUTF8Bytes: retainedBytes)
+        if rawBytes <= 4_096, labels.count < 2_048, retainedBytes <= 1_048_576 - labelUTF8Bytes {
             labels[id] = value
-        } else {
-            labels.removeValue(forKey: id)
+            labelUTF8Bytes += retainedBytes
         }
         return value
+    }
+    /// 统一更新缓存的文本预算，任务归档与字段替换都按实际保留项扣减一次。
+    private func removeCachedLabel(for id: String) {
+        if let previous = labels.removeValue(forKey: id) { labelUTF8Bytes -= previous.retainedUTF8Bytes }
     }
     private func databaseURL() throws -> URL {
         guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { throw CodexSourceError.missingDatabase }
@@ -177,6 +209,20 @@ public actor LocalCodexSource {
         }
         guard let url = candidates.max(by: { $0.0 < $1.0 })?.1 else { throw CodexSourceError.missingDatabase }
         return url
+    }
+    /// 仅物化固定主查询的行，结束后再读取边表与任务记录；每轮独立 prepare，并保留原错误分类。
+    private func queryThreadRows(_ database: OpaquePointer?, _ sql: String) throws -> [ThreadRow] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw CodexSourceError.incompatibleDatabase }
+        defer { sqlite3_finalize(statement) }
+        var rows: [ThreadRow] = []
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw CodexSourceError.databaseUnavailable }
+            rows.append(ThreadRow(statement: statement))
+        }
+        return rows
     }
     /// 每条查询在首行产生后读取列名与原索引，保留自动重编译、NULL 与别名覆盖语义。
     private func query(_ database: OpaquePointer?, _ sql: String) throws -> [[String: String]] {
