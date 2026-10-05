@@ -174,7 +174,9 @@ codex_top_maint rollback --archive /opt/codex-top/backups/SNAPSHOT.tar.age --ide
 
 ## Android 应用内更新
 
-本片增加静态发布支持，**尚未在远端部署或完成手机更新验收**。入口固定为同一业务 HTTPS origin 的 `/updates/android/manifest.json`；APK 位于同目录 `<versionCode>-<完整小写SHA256>.apk`。仅这两类路径由 Caddy 静态读取，其他 `/updates` 路径返回404，不列目录，不挂业务库、环境文件或 TLS 私钥到静态根目录。无新增进程。
+**2026-10-05 已在正式服务器发布12.10.6（71060），手机更新仍待验收**。入口固定为同一业务 HTTPS origin 的 `/updates/android/manifest.json`；APK 位于同目录 `<versionCode>-<完整小写SHA256>.apk`。仅这两类路径由 Caddy 静态读取，其他 `/updates` 路径返回404，不列目录，不挂业务库、环境文件或 TLS 私钥到静态根目录。无新增进程。
+
+本次先在目标既有Caddy镜像的独立无网、无宿主端口合成容器中完成正式模板解析及200／304／206、If-Range匹配与不匹配、9个禁止路径404验证，清理后13个既有容器保持。正式预检、仅代理升级与静态发布成功；代理健康、更新目录只读，其余12个既有容器（含业务）保持。公网清单、58,460,573字节完整APK的SHA、两项304、Range／If-Range精确206及6个禁止路径404实测通过。首轮整包读取60秒超时，重试以180秒预算完整成功，未记录总耗时，不据此声明速度。临时上传副本与回环隧道已清理／停止；完整SHA和待验项见[本次发布验收](../../docs/validation/mobile-update-20261005.md#正式发布与公网验证2026-10-05)。
 
 首次启用到既有部署时，保留旧 Caddyfile／发布记录，按以下步骤安装候选。不要把新版模板直接覆盖长期挂载文件，也不要覆盖正式 `.env`：
 
