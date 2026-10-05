@@ -2,6 +2,7 @@
 
 import copy
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -100,10 +101,13 @@ def container_fixture(role, release, running=True):
     else:
         mounts = [(m.ROOT / 'Caddyfile', '/etc/caddy/Caddyfile', False),
                   (m.ROOT / 'https/data', '/data', True), (m.ROOT / 'https/config', '/config', True)]
+        if m.caddy_digest(release) == m.CADDYFILE_SHA256:
+            mounts.append((m.ROOT / 'updates', '/updates', False))
         port, target = '443', '443/tcp'
     return {'Id': 'synthetic-' + role,
             'Image': release['image_id' if role == 'server' else 'https_image_id'],
-            'Config': {'User': '1000:1000', 'Labels': {'com.docker.compose.project': m.PROJECT, 'com.docker.compose.service': role}},
+            'Config': {'User': '1000:1000', 'Labels': {'com.docker.compose.project': m.PROJECT, 'com.docker.compose.service': role,
+                **({'io.codex-top.caddyfile-sha256': m.caddy_digest(release)} if role == 'https' else {})}},
             'Mounts': [{'Type': 'bind', 'Source': str(source), 'Destination': dest, 'RW': rw}
                        for source, dest, rw in mounts],
             'NetworkSettings': {'Networks': {m.NETWORK: {}}},
@@ -153,7 +157,13 @@ class ExternalCommands:
                 updated = copy.deepcopy(self.release)
                 updated['image_id' if role == 'server' else 'https_image_id'] = image
                 item = container_fixture(role, updated)
-                if current and current['Image'] != image:
+                # 实际 up 使用本次渲染的挂载与标签；旧代理模板变更也会重建实例。
+                service = model['services'][role]
+                item['Mounts'] = [{'Type': mount['type'], 'Source': mount['source'], 'Destination': mount['target'],
+                                   'RW': not mount.get('read_only', False)} for mount in service['volumes']]
+                item['Config']['Labels'].update(service.get('labels', {}))
+                if current and (current['Image'] != image or current['Mounts'] != item['Mounts']
+                                or current['Config']['Labels'] != item['Config']['Labels']):
                     item['Id'] = current['Id'] + '-new'
                 elif current:
                     item['Id'] = current['Id']
@@ -205,6 +215,9 @@ class BoundaryTests(unittest.TestCase):
             directory = self.root / 'https' / name
             directory.mkdir(parents=True)
             (directory / 'synthetic-state').write_text('current-' + name)
+        (self.root / 'updates/android').mkdir(parents=True, mode=0o755)
+        (self.root / 'updates').chmod(0o755)
+        (self.root / 'updates/android').chmod(0o755)
         (self.root / 'Caddyfile').write_text(self.release['caddyfile'])
         self.real_popen = subprocess.Popen
         self.age_exit = 0
@@ -727,6 +740,213 @@ class OperationTests(BoundaryTests):
             with tempfile.TemporaryDirectory(dir=self.root) as target, tarfile.open(fileobj=stream) as archive:
                 with self.subTest(name=name, kind=kind), self.assertRaises(RuntimeError):
                     m.unpack(archive, Path(target), 1 if kind == 'size' else 100000)
+
+
+
+
+class AndroidUpdateTests(BoundaryTests):
+    """真实静态发布与新旧代理互操作；Docker 仅在外部命令处替代。"""
+
+    def legacy_release(self):
+        """固定已部署旧模板，不通过当前实现反推或放宽允许的内容。"""
+        release = copy.deepcopy(self.release)
+        release['caddyfile'] = '''{
+    admin localhost:2019
+    auto_https disable_redirects
+    default_sni {$PUBLIC_IP}
+}
+
+https://{$PUBLIC_IP} {
+    tls {
+        issuer acme https://acme-v02.api.letsencrypt.org/directory {
+            profile shortlived
+            disable_http_challenge
+        }
+    }
+    reverse_proxy server:3005
+}
+'''
+        release['compose'] = release['compose'].replace(
+            '      - "' + str(self.root) + '/updates:/updates:ro"\n', '')
+        return release
+
+    def use_release(self, release):
+        """将独立夹具设为已运行的完整发布版本。"""
+        self.external.release = release
+        self.external.containers = {role: container_fixture(role, release) for role in m.ROLES}
+        (self.root / 'Caddyfile').write_text(release['caddyfile'])
+        (self.root / 'Caddyfile').chmod(0o644)
+        m.save_release(release)
+
+    def update_inputs(self, code=71060, body=b'PK synthetic signed artifact'):
+        """生成合成包与真实九字段清单，签名/Android 安装另验。"""
+        digest = hashlib.sha256(body).hexdigest()
+        manifest = {'schema': 1, 'packageName': m.ANDROID_PACKAGE, 'versionCode': code,
+                    'versionName': '12.10.6', 'minSdk': 23, 'abi': 'arm64-v8a',
+                    'apkUrl': self.release['config']['PUBLIC_URL'] + '/updates/android/' + str(code) + '-' + digest + '.apk',
+                    'sizeBytes': len(body), 'sha256': digest}
+        apk = self.root / ('input-' + str(code) + '.apk')
+        apk.write_bytes(body)
+        path = self.root / ('manifest-' + str(code) + '.json')
+        path.write_text(json.dumps(manifest))
+        return manifest, path, apk
+
+    def test_legacy_release_preflight_and_exact_mount_pairs(self):
+        """旧实例可被新维护器预检；新旧模板和挂载不可混用。"""
+        legacy = self.legacy_release()
+        self.assertEqual(m.caddy_digest(legacy), m.LEGACY_CADDYFILE_SHA256)
+        self.use_release(legacy)
+        self.host_boundaries()
+        m.preflight(self.release)
+        m.preflight(legacy)
+        self.assertEqual(len(m.validate_release(legacy)['services']['https']['volumes']), 3)
+        self.assertEqual(len(m.validate_release(self.release)['services']['https']['volumes']), 4)
+        for candidate in (dict(legacy, compose=self.release['compose']), dict(self.release, compose=legacy['compose'])):
+            with self.assertRaisesRegex(RuntimeError, '挂载'):
+                m.validate_release(candidate)
+        old, new = container_fixture('https', legacy), container_fixture('https', self.release)
+        for item in (old, new):
+            self.assertIn('https', m.own_containers([item]))
+        old['Config']['Labels']['io.codex-top.caddyfile-sha256'] = m.CADDYFILE_SHA256
+        with self.assertRaisesRegex(RuntimeError, '挂载'):
+            m.own_containers([old])
+        new['Config']['Labels']['io.codex-top.caddyfile-sha256'] = '0' * 64
+        with self.assertRaisesRegex(RuntimeError, '标签'):
+            m.own_containers([new])
+
+    def test_proxy_upgrade_and_old_backup_keep_business_boundary(self):
+        """实际旧归档→新代理→业务回滚仍保持当前新代理。"""
+        legacy = self.legacy_release()
+        self.use_release(legacy)
+        archive = m.backup(legacy, legacy['config'], resume=True)
+        before = copy.deepcopy(self.external.containers['server'])
+        data = (self.root / 'data/happier-server-light.sqlite').read_bytes()
+        self.host_boundaries()
+        self.external.commands.clear()
+        m.deploy_https(self.release)
+        self.assertEqual(self.external.containers['server'], before)
+        self.assertEqual((self.root / 'data/happier-server-light.sqlite').read_bytes(), data)
+        self.assertEqual(m.caddy_digest(m.load_release()), m.CADDYFILE_SHA256)
+        self.assertFalse(any(('up' in args or 'stop' in args) and args[-1] == 'server' for args in self.external.commands))
+        proxy = copy.deepcopy(self.external.containers['https'])
+        m.rollback(self.rollback_args(archive), self.release['config'])
+        self.assertEqual(self.external.containers['https'], proxy)
+        self.assertEqual(m.caddy_digest(m.load_release()), m.CADDYFILE_SHA256)
+
+    def test_proxy_failure_before_and_after_replacement(self):
+        """未替换恢复原模板/实例；替换后失败记录并停止新代理，业务不动。"""
+        self.host_boundaries()
+        legacy = self.legacy_release()
+        for after in (False, True):
+            with self.subTest(after=after):
+                self.use_release(legacy)
+                business = copy.deepcopy(self.external.containers['server'])
+                self.external.fail_up_before = None if after else 'https'
+                self.external.fail_up = 'https' if after else None
+                with self.assertRaisesRegex(RuntimeError, 'synthetic-up'):
+                    m.deploy_https(self.release)
+                expected = self.release if after else legacy
+                self.assertEqual(m.caddy_digest(m.load_release()), m.caddy_digest(expected))
+                self.assertEqual((self.root / 'Caddyfile').read_text(), expected['caddyfile'])
+                self.assertEqual(self.external.containers['https']['State']['Running'], not after)
+                self.assertEqual(self.external.containers['server'], business)
+
+    def test_publish_is_immutable_atomic_and_repeatable(self):
+        """清单换名时真实包已完整落盘，重复发布不换 APK inode，不触碰业务。"""
+        manifest, path, apk = self.update_inputs()
+        target = self.root / 'updates/android' / manifest['apkUrl'].rsplit('/', 1)[1]
+        current = target.parent / 'manifest.json'
+        replace, observations = Path.replace, []
+        def observe(source, destination):
+            """观察真实换名边界前的包，不替代发布函数。"""
+            if destination == current:
+                observations.append(target.read_bytes() == apk.read_bytes())
+            return replace(source, destination)
+        data = (self.root / 'data/happier-server-light.sqlite').read_bytes()
+        with patch.object(Path, 'replace', observe):
+            m.publish_android(self.release['config'], path, apk)
+            inode = target.stat().st_ino
+            m.publish_android(self.release['config'], path, apk)
+        self.assertEqual(observations, [True, True])
+        self.assertEqual(target.stat().st_ino, inode)
+        self.assertEqual(json.loads(current.read_text()), manifest)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(current.stat().st_mode & 0o777, 0o644)
+        self.assertEqual((self.root / 'data/happier-server-light.sqlite').read_bytes(), data)
+        self.assertEqual(list(target.parent.glob('.*')), [])
+        self.assertEqual(self.external.commands, [])
+
+    def test_bad_manifest_or_apk_keeps_previous(self):
+        """重复字段、错源/包/大小/版本、坏包均不能替换清单。"""
+        original, path, apk = self.update_inputs()
+        m.publish_android(self.release['config'], path, apk)
+        current = self.root / 'updates/android/manifest.json'
+        old = current.read_bytes()
+        mutations = [('apkUrl', original['apkUrl'].replace('https:', 'http:')),
+                     ('apkUrl', original['apkUrl'] + '?token=x'), ('packageName', 'other'),
+                     ('versionCode', True), ('versionCode', 0), ('sizeBytes', m.MAX_APK_BYTES + 1),
+                     ('abi', 'x86_64'), ('sha256', 'A' * 64), ('versionName', 'same code new name')]
+        for key, value in mutations:
+            with self.subTest(key=key, value=value):
+                path.write_text(json.dumps(dict(original, **{key: value})))
+                with self.assertRaises(RuntimeError):
+                    m.publish_android(self.release['config'], path, apk)
+                self.assertEqual(current.read_bytes(), old)
+        path.write_text(json.dumps(original)[:-1] + ',"schema":1}')
+        with self.assertRaisesRegex(RuntimeError, '重复'):
+            m.publish_android(self.release['config'], path, apk)
+        _, path, apk = self.update_inputs(71061)
+        apk.write_bytes(b'corrupt')
+        with self.assertRaisesRegex(RuntimeError, 'SHA256'):
+            m.publish_android(self.release['config'], path, apk)
+        self.assertEqual(current.read_bytes(), old)
+        self.assertEqual(list(current.parent.glob('.*')), [])
+
+    def test_replace_failure_keeps_previous_and_links_are_rejected(self):
+        """换名失败保留旧清单和完整可重试包；链接不被发布接管。"""
+        _, path, apk = self.update_inputs()
+        m.publish_android(self.release['config'], path, apk)
+        current = self.root / 'updates/android/manifest.json'
+        old = current.read_bytes()
+        manifest, path, apk = self.update_inputs(71061)
+        with patch.object(Path, 'replace', side_effect=OSError('synthetic-replace-failure')):
+            with self.assertRaises(OSError):
+                m.publish_android(self.release['config'], path, apk)
+        self.assertEqual(current.read_bytes(), old)
+        target = current.parent / manifest['apkUrl'].rsplit('/', 1)[1]
+        self.assertEqual(target.read_bytes(), apk.read_bytes())
+        self.assertEqual(list(current.parent.glob('.*')), [])
+        target.unlink()
+        target.symlink_to(apk)
+        with self.assertRaisesRegex(RuntimeError, '符号链接'):
+            m.publish_android(self.release['config'], path, apk)
+        target.unlink()
+        current.unlink()
+        current.symlink_to(path)
+        with self.assertRaisesRegex(RuntimeError, '符号链接'):
+            m.publish_android(self.release['config'], path, apk)
+
+    def test_proxy_upgrade_allows_health_logs_but_rejects_restart(self):
+        """正常探针日志滚动不算实例变化；业务重启事实仍明确拒绝。"""
+        self.host_boundaries()
+        external = self.external
+        for restarted in (False, True):
+            self.use_release(self.legacy_release())
+            def command(args, input_text=None):
+                """只在外部代理启动完成后注入真实容器元数据变化。"""
+                result = external(args, input_text=input_text)
+                if 'up' in args and args[-1] == 'https':
+                    state = external.containers['server']['State']
+                    state['Health']['Log'] = [{'Start': 'later', 'End': 'later', 'ExitCode': 0}]
+                    if restarted:
+                        external.containers['server']['RestartCount'] += 1
+                return result
+            with self.subTest(restarted=restarted), patch.object(m, 'run', side_effect=command):
+                if restarted:
+                    with self.assertRaisesRegex(RuntimeError, '业务实例发生变化'):
+                        m.deploy_https(self.release)
+                else:
+                    m.deploy_https(self.release)
 
 
 if __name__ == '__main__':

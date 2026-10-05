@@ -37,7 +37,11 @@ FIELDS = ('ROOT IMAGE PORT PUBLIC_URL CPUS MEMORY PIDS LOG_SIZE LOG_FILES '
 ROLES = ('server', 'https')
 HTTPS_FIELDS = tuple(key for key in FIELDS if key.startswith('HTTPS_'))
 # 白名单固定本批已审 Caddyfile；模板变更必须与维护校验共同审查，不能自证任意上游合法。
-CADDYFILE_SHA256 = 'd8d49d4a6ba8df8429973f5485be94a88e179d1b8e536f1c22a65883447e2cbc'
+CADDYFILE_SHA256 = '84aa8cc88e31b0a84de64ceb8c68c6cc9e46ab5026640f335b110badfec1274a'
+LEGACY_CADDYFILE_SHA256 = 'd8d49d4a6ba8df8429973f5485be94a88e179d1b8e536f1c22a65883447e2cbc'
+CADDY_MOUNTS = {LEGACY_CADDYFILE_SHA256: False, CADDYFILE_SHA256: True}
+ANDROID_PACKAGE = 'com.butang.codextop.nativepreview.beta'
+MAX_APK_BYTES = 256 * 1024 * 1024
 
 
 def require(condition, message):
@@ -113,14 +117,18 @@ def caddy_digest(release):
     return hashlib.sha256(release['caddyfile'].encode()).hexdigest()
 
 
-def expected_mounts(role):
-    """只定义业务与代理这两个角色的固定挂载；代理不接触业务库或宿主 socket。"""
+def expected_mounts(role, digest=CADDYFILE_SHA256):
+    """两个已审模板各自绑定唯一挂载集合；旧归档不被强加新目录。"""
     require(role in ROLES, '未知服务角色')
     if role == 'server':
         return {'/data': (str(ROOT / 'data'), False)}
-    return {'/etc/caddy/Caddyfile': (str(ROOT / 'Caddyfile'), True),
-            '/data': (str(ROOT / 'https/data'), False),
-            '/config': (str(ROOT / 'https/config'), False)}
+    require(digest in CADDY_MOUNTS, '既有代理的 Caddyfile 标签不属于已审版本')
+    mounts = {'/etc/caddy/Caddyfile': (str(ROOT / 'Caddyfile'), True),
+              '/data': (str(ROOT / 'https/data'), False),
+              '/config': (str(ROOT / 'https/config'), False)}
+    if CADDY_MOUNTS[digest]:
+        mounts['/updates'] = (str(ROOT / 'updates'), True)
+    return mounts
 
 def env_text(cfg):
     """把已验证配置写成确定顺序，不存放账号、密码或服务主密钥。"""
@@ -145,8 +153,8 @@ def validate_release(release):
             '仅接受两服务 schema=2 快照；旧快照需单独审核迁移')
     require(set(release['config']) == set(FIELDS), '归档配置字段不完整或含额外项')
     cfg = parse_env(env_text(release['config']))
-    require(isinstance(release['caddyfile'], str) and caddy_digest(release) == CADDYFILE_SHA256
-            and release['caddyfile'] == (HERE / 'Caddyfile').read_text(), 'Caddyfile 不符合当前已审固定模板')
+    require(isinstance(release['caddyfile'], str) and caddy_digest(release) in CADDY_MOUNTS,
+            'Caddyfile 不符合新旧已审固定模板')
     with compose_command(release) as command:
         model = json.loads(run(command + ['config', '--format', 'json']), parse_float=Decimal)
     require(set(model) <= {'services', 'networks', 'name'}
@@ -179,7 +187,7 @@ def validate_release(release):
         require(len(ports) == 1 and ports[0]['host_ip'] == host_ip
                 and str(ports[0]['published']) == published and ports[0]['target'] == target
                 and ports[0].get('protocol', 'tcp') == 'tcp', role + ' 端口边界不符')
-        expected = expected_mounts(role)
+        expected = expected_mounts(role, caddy_digest(release))
         mounts = service['volumes']
         require(len(mounts) == len(expected) and {mount['target'] for mount in mounts} == set(expected),
                 role + ' 挂载数量或目标不符')
@@ -245,7 +253,7 @@ def own_containers(containers):
         port = int(binding['HostPort'])
         require((role == 'server' and 1024 <= port <= 65535) or (role == 'https' and port == 443),
                 '既有容器端口范围不符')
-        expected = expected_mounts(role)
+        expected = expected_mounts(role, labels.get('io.codex-top.caddyfile-sha256'))
         mounts = item['Mounts']
         require(len(mounts) == len(expected) and {mount['Destination'] for mount in mounts} == set(expected),
                 '既有容器挂载目标不属于本部署')
@@ -290,6 +298,12 @@ def host_guard():
     for directory in (ROOT / 'https/data', ROOT / 'https/config'):
         require(directory.is_dir() and directory.stat().st_uid == 1000
                 and stat.S_IMODE(directory.stat().st_mode) == 0o700, 'TLS 目录需 UID 1000 持有且权限 700')
+    for directory in (ROOT / 'updates', ROOT / 'updates/android'):
+        private_path(directory)
+        if directory.exists():
+            require(directory.is_dir() and directory.stat().st_uid == 0
+                    and stat.S_IMODE(directory.stat().st_mode) == 0o755,
+                    '更新目录需 root 持有且权限 755')
     require(shutil.which('age'), '目标主机需预装 age；本工具不自动安装软件')
 
 
@@ -311,6 +325,8 @@ def preflight(release):
     memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
     available = int(memory['MemAvailable'].split()[0]) * 1024
     model = validate_release(release)
+    if CADDY_MOUNTS[caddy_digest(release)]:
+        check_update_directory()
     limits = sum(int(model['services'][role]['mem_limit']) for role in ROLES)
     require(available >= limits + int(cfg['MIN_FREE_MEMORY_BYTES']), '两服务合计内存不足以保留余量')
     require(Decimal(cfg['CPUS']) + Decimal(cfg['HTTPS_CPUS']) <= (os.cpu_count() or 1),
@@ -419,7 +435,14 @@ def start(release, role='server', restore_https=False):
             require(not proxy or not proxy['State']['Running'], 'TLS 灾备要求代理尚未运行或已停止')
         # 新业务可能已经迁移数据，因此启动前记录本次业务尝试；尚未操作的代理保持原版本。
         save_release(recorded)
+    proxy_release = None
     if role == 'https':
+        if owned.get('https') and not restore_https:
+            proxy_release = load_release()
+            require(owned['https']['Image'] == proxy_release['https_image_id']
+                    and owned['https']['Config']['Labels'].get('io.codex-top.caddyfile-sha256') == caddy_digest(proxy_release)
+                    and (ROOT / 'Caddyfile').read_text() == proxy_release['caddyfile'],
+                    '当前代理与记录或固定配置不一致')
         server = owned.get('server')
         require(server and server['Image'] == release['image_id']
                 and server['State']['Running'] and server['State'].get('Health', {}).get('Status') == 'healthy',
@@ -441,6 +464,8 @@ def start(release, role='server', restore_https=False):
             proxy = own_containers(inspect_containers()).get('https')
             original = owned.get('https')
             # 命令报错可能发生在替换之后；只在确认新实例及目标镜像时记录它，不把未替换的旧代理写成新版本。
+            if proxy and original and proxy['Id'] == original['Id'] and proxy_release:
+                materialize_https_config(proxy_release)
             if (proxy and proxy['Image'] == release['https_image_id']
                     and (not original or proxy['Id'] != original['Id'])):
                 save_release(release)
@@ -657,29 +682,186 @@ def rollback(args, policy):
         try:
             start(release, restore_https=restore_https)
             if restore_https:
-                start(release, 'https')
+                start(release, 'https', restore_https=True)
         except Exception:
             stop(release)
             raise
         print('原业务数据保留于：' + str(quarantine))
         print('业务恢复完成；TLS签发/信任需另验。下次发布前同步 .env 中镜像及资源。')
 
+def check_update_directory():
+    """公开资源只允许普通目录/文件；链接不得借静态服务读到私有目录。"""
+    for directory in (ROOT / 'updates', ROOT / 'updates/android'):
+        private_path(directory)
+        require(directory.is_dir() and stat.S_IMODE(directory.stat().st_mode) == 0o755,
+                '请先建立权限 755 的 updates/android 目录')
+    for path in (ROOT / 'updates').rglob('*'):
+        private_path(path)
+        require(path.is_dir() or path.is_file(), '更新目录含特殊文件')
+        require(not (path.stat().st_mode & 0o022), '更新资源不可由组或其他用户写入')
+
+
+def read_android_manifest(path, cfg):
+    """严格复核客户端的九字段合同与本部署唯一不可变 APK 地址。"""
+    def unique_object(pairs):
+        """拒绝重复字段，不允许 JSON 的后值覆盖发布身份。"""
+        result = {}
+        for key, value in pairs:
+            require(key not in result, '更新清单字段重复')
+            result[key] = value
+        return result
+
+    require(not path.is_symlink() and path.is_file(), '更新清单必须为普通文件')
+    with path.open('rb') as source:
+        raw = source.read(64 * 1024 + 1)
+    require(len(raw) <= 64 * 1024, '更新清单过大')
+    value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_object)
+    require(isinstance(value, dict) and set(value) == {
+        'schema', 'packageName', 'versionCode', 'versionName', 'minSdk',
+        'abi', 'apkUrl', 'sizeBytes', 'sha256'}, '更新清单字段不符')
+    for key in ('schema', 'versionCode', 'minSdk', 'sizeBytes'):
+        require(type(value[key]) is int, '更新清单需整数：' + key)
+    for key in ('packageName', 'versionName', 'abi', 'apkUrl', 'sha256'):
+        require(isinstance(value[key], str) and 0 < len(value[key]) <= 2048, '更新清单文本无效')
+    require(value['schema'] == 1 and value['packageName'] == ANDROID_PACKAGE
+            and value['abi'] == 'arm64-v8a' and 21 <= value['minSdk'] <= 2147483647
+            and 0 < value['versionCode'] <= 2100000000 and 0 < value['sizeBytes'] <= MAX_APK_BYTES
+            and re.fullmatch(r'[0-9a-f]{64}', value['sha256']), '更新包身份或大小无效')
+    filename = str(value['versionCode']) + '-' + value['sha256'] + '.apk'
+    require(value['apkUrl'] == cfg['PUBLIC_URL'] + '/updates/android/' + filename,
+            'APK 地址需为同 origin 的版本号-SHA 固定路径')
+    return value, filename
+
+
+def copy_verified_apk(source, output, manifest):
+    """固定缓冲复制并复核真实字节；源文件在复制期间变化也不能发布错误清单。"""
+    require(not source.is_symlink() and source.is_file(), 'APK 必须为普通文件')
+    digest, size = hashlib.sha256(), 0
+    with source.open('rb') as incoming:
+        require(stat.S_ISREG(os.fstat(incoming.fileno()).st_mode), 'APK 必须为普通文件')
+        while True:
+            chunk = incoming.read(64 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            require(size <= manifest['sizeBytes'], 'APK 超出声明大小')
+            digest.update(chunk)
+            if output is not None:
+                output.write(chunk)
+    require(size == manifest['sizeBytes'] and digest.hexdigest() == manifest['sha256'],
+            'APK 大小或 SHA256 不符')
+
+
+def sync_directory(directory):
+    """确保先落定包目录项，再允许原子清单指向该不可变文件。"""
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def publish_android(cfg, manifest_path, apk_path):
+    """只发布静态文件：不可变包先落盘，清单最后替换；失败保留原清单。"""
+    check_update_directory()
+    manifest, filename = read_android_manifest(manifest_path, cfg)
+    directory = ROOT / 'updates/android'
+    target, current = directory / filename, directory / 'manifest.json'
+    private_path(target)
+    private_path(current)
+    if current.exists():
+        previous, _ = read_android_manifest(current, cfg)
+        require(manifest['versionCode'] >= previous['versionCode'], '拒绝降低公开更新版本')
+        require(manifest['versionCode'] != previous['versionCode'] or manifest == previous,
+                '同版本清单不允许替换内容')
+    require(shutil.disk_usage(ROOT).free >= manifest['sizeBytes'] + int(cfg['MIN_FREE_DISK_BYTES']),
+            '发布后磁盘余量不足')
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix='.apk-', delete=False) as output:
+            temporary = Path(output.name)
+            copy_verified_apk(apk_path, output, manifest)
+            os.fchmod(output.fileno(), 0o644)
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            # link 不覆盖同名文件；重复发布仍核对已有包，不把名字当校验结果。
+            os.link(temporary, target)
+        except FileExistsError:
+            copy_verified_apk(target, None, manifest)
+            require(stat.S_IMODE(target.stat().st_mode) == 0o644, '已有 APK 需保持公开只读权限 644')
+        temporary.unlink()
+        temporary = None
+        sync_directory(directory)
+        with tempfile.NamedTemporaryFile(dir=directory, prefix='.manifest-', delete=False) as output:
+            temporary = Path(output.name)
+            output.write((json.dumps(manifest, ensure_ascii=False, separators=(',', ':')) + '\n').encode('utf-8'))
+            os.fchmod(output.fileno(), 0o644)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(current)
+        temporary = None
+        sync_directory(directory)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return manifest['apkUrl']
+
+
+def deploy_https(release):
+    """只升级代理，沿用当前业务快照；失败前未替换时恢复原代理，不启动业务。"""
+    current = load_release()
+    proposed = dict(release, https_image_id=release.get('https_image_id', release['config']['HTTPS_IMAGE']))
+    combined = with_current_proxy(current, proposed)
+    before = preflight(combined)
+    owned = own_containers(before)
+    server = owned.get('server')
+    proxy = owned.get('https')
+    require(server and server['Image'] == current['image_id'] and server['State']['Running']
+            and server['State'].get('Health', {}).get('Status') == 'healthy', '当前业务实例尚未健康')
+    try:
+        start(combined, 'https')
+    except Exception:
+        actual = own_containers(inspect_containers()).get('https')
+        if proxy and actual and proxy['Id'] == actual['Id'] and proxy['State']['Running']:
+            resume_backup_service(current, proxy, 'https')
+        raise
+    finally:
+        after = inspect_containers()
+        current_server = own_containers(after).get('server')
+        require(current_server and all(current_server[key] == server[key]
+                for key in ('Id', 'Image', 'RestartCount'))
+                and all(current_server['State'].get(key) == server['State'].get(key)
+                        for key in ('Running', 'Paused', 'Restarting', 'OOMKilled', 'Dead',
+                                    'Pid', 'ExitCode', 'StartedAt', 'FinishedAt'))
+                and current_server['State'].get('Health', {}).get('Status')
+                    == server['State'].get('Health', {}).get('Status'),
+                '代理维护期间业务实例发生变化，请核对')
+        require(neighbors(before) == neighbors(after), '代理维护期间其他容器变化，请核对；未操作业务容器')
+
+
 def main():
     """唯一维护入口；使用同一独占锁管理两角色，外部容器变化时停止两角色并报告。"""
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['check', 'preflight', 'deploy', 'backup', 'rollback'])
+    parser.add_argument('action', choices=['check', 'preflight', 'deploy', 'deploy-https', 'publish-android', 'backup', 'rollback'])
     parser.add_argument('--env', default=str(ROOT / '.env'))
     parser.add_argument('--archive')
     parser.add_argument('--identity')
+    parser.add_argument('--manifest', help='由实际签名 APK 生成的九字段清单')
+    parser.add_argument('--apk', help='与清单匹配的签名 APK')
     parser.add_argument('--accept-data-loss', action='store_true')
     parser.add_argument('--restore-https-state', action='store_true',
                         help='仅灾备：TLS目录必须为空且代理未运行；恢复归档代理和TLS状态')
     args = parser.parse_args()
     require(not args.restore_https_state or args.action == 'rollback', 'TLS 灾备选项仅适用于 rollback')
     cfg = parse_env(Path(args.env).read_text())
+    template = HERE / 'Caddyfile.next'
+    if not template.exists():
+        template = HERE / 'Caddyfile'
+    require(not template.is_symlink() and template.is_file(), '候选 Caddyfile 必须为普通文件')
     release = {'schema': 2, 'config': cfg, 'compose': (HERE / 'compose.yaml').read_text(),
-               'caddyfile': (HERE / 'Caddyfile').read_text()}
+               'caddyfile': template.read_text()}
     validate_release(release)
     if args.action == 'check':
         print('静态配置通过；未连接 Docker daemon，也未验证 Caddy 运行或证书。')
@@ -695,6 +877,22 @@ def main():
     private_path(lock_path)
     with lock_path.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.action == 'deploy-https':
+            deploy_https(release)
+            print('仅代理升级完成；业务未停启，长连接重连需另验。')
+            return
+        if args.action == 'publish-android':
+            require(args.manifest and args.apk, '发布需指定 --manifest 和 --apk')
+            current = load_release()
+            require(caddy_digest(current) == CADDYFILE_SHA256
+                    and current['config']['PUBLIC_URL'] == cfg['PUBLIC_URL']
+                    and (ROOT / 'Caddyfile').read_text() == current['caddyfile'], '请先启用本版 HTTPS 静态路由')
+            proxy = own_containers(inspect_containers()).get('https')
+            require(proxy and proxy['State']['Running'] and proxy['Image'] == current['https_image_id']
+                    and proxy['Config']['Labels'].get('io.codex-top.caddyfile-sha256') == CADDYFILE_SHA256,
+                    '运行中的代理未启用本版更新挂载')
+            print('静态更新已发布：' + publish_android(cfg, Path(args.manifest), Path(args.apk)))
+            return
         before = inspect_containers()
         state = ROOT / 'state'
         state.mkdir(mode=0o700, exist_ok=True)

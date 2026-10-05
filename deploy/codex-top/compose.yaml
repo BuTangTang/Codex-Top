@@ -64,6 +64,7 @@ services:
       - "/opt/codex-top/Caddyfile:/etc/caddy/Caddyfile:ro"
       - "/opt/codex-top/https/data:/data"
       - "/opt/codex-top/https/config:/config"
+      - "/opt/codex-top/updates:/updates:ro"
     networks:
       - private
     cpus: ${CODEX_TOP_HTTPS_CPUS:?填写代理 CPU 上限}

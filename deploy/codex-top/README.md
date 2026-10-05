@@ -13,7 +13,7 @@ HTTPS 接入由同一 `codex-top` 项目中的 `https` 服务提供，`manage.py
 | 根目录 | /opt/codex-top，root:root、700；data 为 1000:1000、700 |
 | Compose | 项目 codex-top，仅 server/https，独立普通 bridge 网络 codex-top-private |
 | 端口 | server 的 3005 只绑定指定宿主回环端口；https 只发布 TCP443，不占80、8088、UDP443 |
-| 数据 | server 只挂 data；https 只挂只读 Caddyfile 及 https/data、https/config，不使用 PVTC 数据库、网络或卷 |
+| 数据 | server 只挂 data；https 挂只读 Caddyfile、只读 updates 及私有 https/data、https/config，不使用 PVTC 数据库、网络或卷 |
 | 权限 | 两角色 UID1000、drop ALL、no-new-privileges；https 仅加 NET_BIND_SERVICE（版本、容器内443监听及健康命令已通过） |
 | 资源 | 两角色各自 CPU、内存、PIDs、日志大小与数量必填；合计预检，各自禁止额外 swap |
 | 备份 | age 公钥加密；容量、份数和保留余量必填，满额拒绝，不自动删除 |
@@ -53,6 +53,7 @@ sudo install -d -m 700 -o root -g root /opt/codex-top
 sudo install -d -m 700 -o 1000 -g 1000 /opt/codex-top/data
 sudo install -d -m 700 -o root -g root /opt/codex-top/https
 sudo install -d -m 700 -o 1000 -g 1000 /opt/codex-top/https/data /opt/codex-top/https/config
+sudo install -d -m 755 -o root -g root /opt/codex-top/updates /opt/codex-top/updates/android
 sudo install -m 600 compose.yaml manage.py /opt/codex-top/
 sudo install -m 644 Caddyfile /opt/codex-top/Caddyfile
 sudo install -m 600 .env.example /opt/codex-top/.env
@@ -61,9 +62,9 @@ sudoedit /opt/codex-top/.env
 
 若新目录继承宿主默认 ACL，`umask` 不能单独保证新文件600。首次安装应回读权限，必要时仅清除本项目新建目录继承的 ACL 并显式收紧权限；不修改 `/opt` 或其他服务的 ACL。
 
-升级只替换本部署包代码/模板、编辑既有 .env；不得用示例覆盖正式配置，保留 data/https/state/backups。Caddyfile 是无秘密模板，644 供容器 UID1000 只读；宿主父目录仍为 root:root、700。证书、ACME 私钥和账号状态只在两个私有 TLS 目录中。维护命令从发布记录物化固定 Caddyfile，并用内容指纹标签让配置变化触发代理重建，不绑定临时目录。
+升级替换本部署包代码和 compose.yaml，新模板先安装为 `/opt/codex-top/Caddyfile.next`，保留当前长期挂载的 Caddyfile，维护器启动代理时才物化候选；编辑既有 .env；不得用示例覆盖正式配置，保留 data/https/state/backups。Caddyfile 是无秘密模板，644 供容器 UID1000 只读；宿主父目录仍为 root:root、700。证书、ACME 私钥和账号状态只在两个私有 TLS 目录中。维护命令从发布记录物化固定 Caddyfile，并用内容指纹标签让配置变化触发代理重建，不绑定临时目录。
 
-两服务发布记录和归档使用 schema=2。已有数据但没有 state/release.json，或只有旧单服务记录/归档时拒绝自动接管，需要单独审核迁移；本包不会悄悄补造 TLS 状态。原有业务记录、主密钥和账号协议不变。
+两服务发布记录和归档使用 schema=2。维护器只接受两个固定模板摘要：旧版三挂载及新增 updates 只读挂载的本版；模板与对应挂载必须完整匹配，旧归档继续可校验。已有数据但没有 state/release.json，或只有旧单服务记录/归档时拒绝自动接管，需要单独审核迁移；本包不会悄悄补造 TLS 状态。原有业务记录、主密钥和账号协议不变。
 
 .env 不存密码、token 或主密钥，不支持引号、shell 插值。必填资源值由当前基线决定，不复用历史服务器余量。下列名称省略 CODEX_TOP_ 前缀：
 
@@ -169,3 +170,30 @@ codex_top_maint rollback --archive /opt/codex-top/backups/SNAPSHOT.tar.age --ide
 实际验收须覆盖：固定镜像 UID/capability 和健康命令、真实 Compose/Caddy 配置、无80/8088占用和无公网裸 HTTP、受信任 IP TLS、WebSocket 长连接及维护后重连、自动续期/失败监测、真实 age 完整恢复，以及 PVTC 前后基线。无完整验收前不记为云端功能完成。
 
 参考：[Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)、[Compose services](https://docs.docker.com/reference/compose-file/services/)、[age](https://github.com/FiloSottile/age)、[Expo FCM credentials](https://docs.expo.dev/push-notifications/fcm-credentials/)、[Expo sending notifications](https://docs.expo.dev/push-notifications/sending-notifications/)。
+
+
+## Android 应用内更新
+
+本片增加静态发布支持，**尚未在远端部署或完成手机更新验收**。入口固定为同一业务 HTTPS origin 的 `/updates/android/manifest.json`；APK 位于同目录 `<versionCode>-<完整小写SHA256>.apk`。仅这两类路径由 Caddy 静态读取，其他 `/updates` 路径返回404，不列目录，不挂业务库、环境文件或 TLS 私钥到静态根目录。无新增进程。
+
+首次启用到既有部署时，保留旧 Caddyfile／发布记录，按以下步骤安装候选。不要把新版模板直接覆盖长期挂载文件，也不要覆盖正式 `.env`：
+
+```sh
+sudo install -m 600 manage.py compose.yaml /opt/codex-top/
+sudo install -m 644 Caddyfile /opt/codex-top/Caddyfile.next
+sudo install -d -m 755 -o root -g root /opt/codex-top/updates /opt/codex-top/updates/android
+codex_top_maint preflight
+codex_top_maint deploy-https
+```
+
+`deploy-https` 只替换已核验的 Codex Top 代理，沿用发布记录中现行业务镜像、配置和同一 origin；不会备份、停止或启动业务容器。代理重建仍可能断开长连接，须验证客户端恢复。失败发生在替换前时恢复原模板并只恢复原代理实例；替换后失败保留新代理事实并停止该失败代理，业务保持。业务回滚继续保留当前代理；显式空 TLS 灾备仍按归档旧模板/旧挂载恢复。新旧模板以各自固定 SHA 准入，不能任意添加其他挂载。
+
+由安卓仓库 `scripts/codextop/create-update-manifest.py` 从已验签实际 APK 生成清单。传入维护器前必须完成原应用签名、包名与版本的构建验收；部署机不重新签名，也不把合成文件测试当安装验证。
+
+```sh
+codex_top_maint publish-android --manifest /absolute/path/manifest.json --apk /absolute/path/signed.apk
+```
+
+发布复核严格九字段合同（schema、packageName、versionCode、versionName、minSdk、abi、apkUrl、sizeBytes、sha256）、产品包名、arm64-v8a、同 origin 精确固定路径、大小不超过256MiB及真实文件哈希。流式校验复制使用64KiB缓冲。共享维护锁下先写完整不可变包、落盘，再原子替换清单；旧清单不会指向半包。同名包不覆盖、重复发布仍复核内容；降版或同版本不同清单拒绝。清单替换失败可能留下完整未引用包，可复用重试；不会自动删包、业务文件或记录。
+
+清单 `Cache-Control: no-cache`，APK `public, max-age=31536000, immutable`；ETag、条件读取与 Range 沿用 [Caddy file_server](https://caddyserver.com/docs/caddyfile/directives/file_server) 的实现。此处官方语法核对不代替目标 Caddy 实际解析及 HTTP200/304/206验收。`updates` 不进入账户/数据库灾备归档；保留可再发布的签名原包、清单与哈希。更新目录只放发布资源，root持有，不允许符号链接、特殊文件和组/其他用户可写资源。清理沿项目产物保留规则人工核对当前、上一版及设备仍在使用的包，不因新清单发布立即删除旧下载地址。

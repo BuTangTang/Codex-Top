@@ -11,5 +11,31 @@ https://{$PUBLIC_IP} {
             disable_http_challenge
         }
     }
-    reverse_proxy server:3005
+    # 只开放固定清单与不可变APK；更新目录其余路径不转发给业务。
+    route {
+        @manifest path /updates/android/manifest.json
+        handle @manifest {
+            header Cache-Control "no-cache"
+            header X-Content-Type-Options "nosniff"
+            uri strip_prefix /updates
+            root * /updates
+            file_server
+        }
+        @apk path_regexp android_apk ^/updates/android/[0-9]+-[0-9a-f]{64}[.]apk$
+        handle @apk {
+            header Cache-Control "public, max-age=31536000, immutable"
+            header Content-Type "application/vnd.android.package-archive"
+            header X-Content-Type-Options "nosniff"
+            uri strip_prefix /updates
+            root * /updates
+            file_server
+        }
+        @updates path /updates /updates/*
+        handle @updates {
+            respond 404
+        }
+        handle {
+            reverse_proxy server:3005
+        }
+    }
 }
