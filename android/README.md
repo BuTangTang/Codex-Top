@@ -1,8 +1,14 @@
-# Codex Top 安卓客户端
+# Codex Top 旧自研安卓客户端（历史目录）
 
-原生 Java / Android Views 客户端，最低 Android 11，当前版本 1.0.1。主仓库的 macOS 工程与运行实例保持原样；佳明接入按用户要求不在本轮范围内。
+> 本目录已退出当前手机端开发与验收线路。下方 1.x 的构建、安装、示例和通知说明仅保留历史用途，不用于安装“最新版 Codex Top”。
+>
+> 当前按用户指定的 **Telegram（ter）衍生版**继续，源码仓库为 `telegram-android-reference`，实际安装身份为 `com.butang.codextop.nativepreview.beta`，启动入口为 `org.telegram.messenger.DefaultIcon` → `org.telegram.ui.LaunchActivity`。`.beta` 是既有包身份，用户可见版本仍使用正式版本号。
+>
+> 本目录生成的 `com.butang.codextop.debug / MainActivity` 是另一款旧应用，不能按相同名称或图标替代当前版本。每次安装前核对设备、用户、包名和候选版本；安装后回读完整 APK SHA，再核对前台包与真实页面。当前版本与验收边界见 [STATUS](../docs/STATUS.md) 和 [Telegram 核对记录](../docs/validation/telegram-baseline-20261006.md)。保留旧账号和历史，避免以卸载或清数据处理入口混淆。
 
-## 当前能做什么
+以下记录旧原生 Java / Android Views 客户端初版 1.0.1 的范围，最低 Android 11，不表示当前 ter 版能力。主仓库的 macOS 工程与运行实例保持原样；佳明接入按用户要求不在本轮范围内。
+
+## 历史能力
 
 - 填写自有 HTTPS 服务地址，以账号密码登录；只加密保存本服务会话，不保存密码。
 - 单页紧凑通知列表，仅显示完成、待确认、失败；两行包含任务名称、状态、来源和时间，点开查看详情，右上角进入设置。取消统计、筛选、设备管理及底部导航。
@@ -15,7 +21,7 @@
 
 仅沿用登录、读取状态、退出三个接口，没有新增后端接口。账号服务器、电脑上传任务、电脑二维码授权、未来手机消息转发与全天持续推送尚未接入。本目录里的 Python 服务只用于本机合成联调，不能部署成生产账号服务，也不能由联调通过宣称真实任务链路已完成。
 
-## 构建 APK
+## 历史构建 APK（不用于当前 ter 版）
 
 前提：JDK 17、Android SDK 平台 35 / Build Tools 35，环境变量 `JAVA_HOME` 指向 JDK，`ANDROID_HOME` 指向 SDK。Gradle Wrapper 固定 8.9，包含官方 SHA-256 校验。首次构建需要网络下载依赖。
 
@@ -25,7 +31,7 @@
 
 如果 SDK/JDK 路径缺失，先配置上述环境变量再重试。不要把含本机完整路径的 `local.properties`、构建目录、会话或原始诊断提交到仓库。
 
-## 安装到小米 15
+## 历史安装流程（不用于当前 ter 版）
 
 1. 手机开启开发者选项和 USB 调试，连接电脑并接受该电脑的调试授权。
 2. 电脑运行 `adb devices`，预期设备状态为 `device`。后续命令中的 `<设备>` 替换为对应设备 ID，勿把 ID 写入公开报告。
