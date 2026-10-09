@@ -171,7 +171,11 @@ internal static class OrbFeedbackChecks
                 Check(Marker() == null && Descendants(window).OfType<TextBlock>().Any(t => t.Text == "1"), "feedback expires back to the remaining running count");
                 Check(!window.CompletionNotice.IsOpen, "completion notice automatically closes with its cue");
                 Append("request_user_input", true); await WaitFor(Phase.Waiting, true);
+                Check(AutomationProperties.GetName(shell).Contains("1 项待处理") && !AutomationProperties.GetName(shell).Contains("运行中"), "waiting-only summary does not fabricate a running task");
                 Append("task_started"); await WaitFor(Phase.Running);
+                Check(Marker() == null && Descendants(window).OfType<TextBlock>().Any(t => t.Text == "1"), "mixed running and waiting tasks retain the running count in the orb");
+                Check(AutomationProperties.GetName(shell).Contains("1 项运行中 · 1 项待处理"), "mixed summary exposes both running and waiting counts");
+                Check(shell.ToolTip is string tooltip && tooltip.Contains("1 项运行中 · 1 项待处理"), "orb hover explains the running count alongside pending input");
                 Append("task_complete"); await WaitFor(Phase.Completed);
                 Check(AutomationProperties.GetName(shell).Contains("待处理"), "completion does not conceal another task needing input");
                 store.Preferences.SetPlacement(Placement.Floating); store.Save();

@@ -180,6 +180,7 @@ public sealed class MonitorWindow : Window
     {
         if (store.Paused) return "任务刷新已暂停";
         int waiting = rows.Count(r => r.Activity.Phase is Phase.Waiting or Phase.Failed), running = rows.Count(r => r.Activity.Phase == Phase.Running);
+        if (running > 0 && waiting > 0) return $"{running} 项运行中 · {waiting} 项待处理";
         if (waiting > 0) return $"{waiting} 项待处理";
         if (running > 0) return $"{running} 项运行中";
         if (store.Loading) return "正在读取任务…";
