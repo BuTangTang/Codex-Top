@@ -263,7 +263,7 @@ import CodexTopCore
             let previousPhases = Dictionary(uniqueKeysWithValues: graph.roots.filter {
                 preferences.selectedIDs.contains($0.id)
             }.map { ($0.id, graph.activitySource(for: $0).activity.phase) })
-            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs)
+            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs, monitoredRootIDs: preferences.selectedIDs)
             guard !stopping, generation == sourceGeneration else { return }
             if tasks != snapshot.tasks {
                 tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)

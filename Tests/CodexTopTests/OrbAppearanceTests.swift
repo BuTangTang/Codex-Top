@@ -77,7 +77,7 @@ final class OrbAppearanceTests: XCTestCase {
         let store = TaskStore(stateDirectory: directory)
         defer { store.stop() }
         await store.refresh()
-        XCTAssertNotNil(store.sourceWarning)
+        XCTAssertNil(store.sourceWarning, "Unmonitored history must not produce a monitored-scope warning")
         XCTAssertEqual(store.orbPhase, .running)
         XCTAssertEqual(store.orbStatusLabel, "运行中")
         try (start + record("task_complete")).write(to: log)

@@ -47,6 +47,9 @@ app_path="$repo_root/dist/$app_name.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 install -m 755 "$bin_path/CodexTop" "$app_path/Contents/MacOS/CodexTop"
 install -m 644 LICENSE "$app_path/Contents/Resources/LICENSE"
+# 随原生解码器分发上游许可证，正式包不依赖本机 Homebrew。
+install -m 644 Sources/CZstd/vendor/LICENSE "$app_path/Contents/Resources/Zstandard-LICENSE"
+install -m 644 Sources/CZstd/vendor/COPYING "$app_path/Contents/Resources/Zstandard-COPYING"
 # 手机连接版从已验证的托管 payload 装入组件，不依赖用户安装 Node 或包管理器。
 if [[ "$with_connection" == true ]]; then
   mkdir -p "$app_path/Contents/Resources/connection"

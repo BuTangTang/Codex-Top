@@ -11,7 +11,8 @@ let package = Package(
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
-        .target(name: "CodexTopCore", dependencies: ["CSQLite"]),
+        .target(name: "CZstd", exclude: ["PROVENANCE.md", "vendor/LICENSE", "vendor/COPYING"], sources: ["CZstd.c", "vendor/lib/common", "vendor/lib/decompress"], publicHeadersPath: "include", cSettings: [.define("ZSTD_DISABLE_ASM")]),
+        .target(name: "CodexTopCore", dependencies: ["CSQLite", "CZstd"]),
         .executableTarget(name: "CodexTop", dependencies: ["CodexTopCore"]),
         .executableTarget(name: "CodexTopInspect", dependencies: ["CodexTopCore"]),
         .testTarget(name: "CodexTopCoreTests", dependencies: ["CodexTopCore", "CSQLite"]),

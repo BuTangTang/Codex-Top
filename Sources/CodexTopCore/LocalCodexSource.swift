@@ -1,10 +1,12 @@
 import Foundation
 import CSQLite
+import Darwin
 
 public actor LocalCodexSource {
     public let root: URL
     private var tails: [String: IncrementalRollout] = [:]
     private var recoveryCursor = 0
+    private let compressed = CompressedRolloutReader()
     private let replySource: DesktopReplyReceiptSource
     private var receivedReplies: [String: QuestionReplyReceipt] = [:]
     private var labels: [String: TaskLabels] = [:]
@@ -51,7 +53,7 @@ public actor LocalCodexSource {
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
     /// 先读取正式任务状态，再为关注中的待答任务核实桌面已接收的回答；辅助通道失败不影响主数据源。
-    public func snapshot(now: Date = .now, recoverTimingFor rootIDs: Set<String> = []) async throws -> SourceSnapshot {
+    public func snapshot(now: Date = .now, recoverTimingFor rootIDs: Set<String> = [], monitoredRootIDs: Set<String>? = nil) async throws -> SourceSnapshot {
         let database = try databaseURL()
         var connection: OpaquePointer?
         guard sqlite3_open_v2(database.path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -71,7 +73,9 @@ public actor LocalCodexSource {
                 if let child = edge["child_thread_id"], let parent = edge["parent_thread_id"] { parents[child] = parent }
             }
         }
-        var tasks: [CodexTask] = [], quota: QuotaSnapshot?, bytes = 0, failures = 0
+        var tasks: [CodexTask] = [], quota: QuotaSnapshot?, bytes = 0
+        var failures: Set<String> = []
+        var compressedCandidates: [String: URL] = [:]
         var projectNames: [String: String] = [:]
         let rootPrefix = root.path + "/"
         for row in rows {
@@ -89,8 +93,34 @@ public actor LocalCodexSource {
                                  updatedAt: Date(timeIntervalSince1970: Double(row.updatedAt ?? "") ?? 0),
                                  parentID: explicitParent ?? label.parentID, rolloutURL: file)
             if !file.path.hasPrefix(rootPrefix) {
-                task.activity.detail = "记录位于数据目录之外，未读取"; failures += 1
+                task.activity.detail = "记录位于数据目录之外，未读取"; failures.insert(id)
             } else {
+                var fileStat = stat()
+                let exists = file.path.withCString { lstat($0, &fileStat) }
+                let missing = exists != 0 && errno == ENOENT
+                if missing {
+                    let sibling = URL(fileURLWithPath: path + ".zst").resolvingSymlinksInPath()
+                    var siblingStat = stat()
+                    guard sibling.path.hasPrefix(rootPrefix) else {
+                        task.activity = TaskActivity(detail: "记录位于数据目录之外，未读取")
+                        failures.insert(id); tails.removeValue(forKey: id); compressed.forget(id)
+                        tasks.append(task); continue
+                    }
+                    let siblingResult = sibling.path.withCString { lstat($0, &siblingStat) }
+                    if siblingResult != 0 && (errno == EACCES || errno == EPERM) {
+                        task.activity = TaskActivity(detail: "无权读取任务记录")
+                        failures.insert(id); tails.removeValue(forKey: id); compressed.forget(id)
+                        tasks.append(task); continue
+                    }
+                    if siblingResult == 0 {
+                        compressedCandidates[id] = sibling
+                        tails.removeValue(forKey: id)
+                        task.activity = TaskActivity(detail: "历史记录已压缩，尚未读取")
+                        tasks.append(task)
+                        continue
+                    }
+                }
+                compressed.forget(id)
                 var tail = tails[id] ?? IncrementalRollout()
                 do {
                     bytes += try tail.refresh(url: file)
@@ -102,14 +132,39 @@ public actor LocalCodexSource {
                     if let candidate = tail.reducer.quota, quota == nil || candidate.observedAt > quota!.observedAt { quota = candidate }
                     tails[id] = tail
                 } catch {
-                    task.activity = TaskActivity(detail: "暂时无法读取任务记录")
-                    tails.removeValue(forKey: id); failures += 1
+                    let nsError = error as NSError
+                    let permission = (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError)
+                        || (nsError.domain == NSPOSIXErrorDomain && [Int(EACCES), Int(EPERM)].contains(nsError.code))
+                    task.activity = TaskActivity(detail: permission ? "无权读取任务记录" : missing ? "任务记录缺失" : "暂时无法读取任务记录")
+                    tails.removeValue(forKey: id); failures.insert(id)
                 }
             }
             tasks.append(task)
         }
         // 本轮仅复用不会被计时恢复改变的祖先映射，后续活动状态仍从当前 tasks 读取。
-        let taskRootIDs = rootIDs.isEmpty ? [:] : TaskGraph.resolveRootIDs(tasks: tasks)
+        let taskRootIDs = TaskGraph.resolveRootIDs(tasks: tasks)
+        let monitored = monitoredRootIDs ?? rootIDs
+        let selectedIDs = Set(tasks.filter { monitored.contains(taskRootIDs[$0.id] ?? $0.id) }.map(\.id))
+        let compressedIDs = selectedIDs.intersection(compressedCandidates.keys)
+        compressed.beginCycle(ids: compressedIDs)
+        var reading = 0, limited = 0
+        let ordered = tasks.indices.filter { compressedIDs.contains(tasks[$0].id) }.sorted {
+            let leftRoot = monitored.contains(tasks[$0].id), rightRoot = monitored.contains(tasks[$1].id)
+            return leftRoot != rightRoot ? leftRoot : tasks[$0].updatedAt > tasks[$1].updatedAt
+        }
+        for index in ordered {
+            let id = tasks[index].id
+            guard let url = compressedCandidates[id] else { continue }
+            let result = compressed.read(id: id, url: url, now: now)
+            tasks[index].activity = result.activity; bytes += result.bytes
+            switch result.category {
+            case .reading: reading += 1
+            case .limited: limited += 1
+            case .unavailable: failures.insert(id)
+            case .ready: break
+            }
+            if let candidate = result.quota, quota == nil || candidate.observedAt > quota!.observedAt { quota = candidate }
+        }
         if !rootIDs.isEmpty {
             let candidates = tasks.indices.filter { index in
                 let task = tasks[index]
@@ -135,9 +190,9 @@ public actor LocalCodexSource {
             }
         }
         let pending = Dictionary(uniqueKeysWithValues: tasks.compactMap { task -> (String, Date)? in
-            guard rootIDs.contains(taskRootIDs[task.id] ?? task.id), task.activity.phase == .waiting,
-                  let tail = tails[task.id], tail.isCaughtUp, let since = tail.reducer.awaitingReplySince else { return nil }
-            return (task.id, since)
+            guard rootIDs.contains(taskRootIDs[task.id] ?? task.id), task.activity.phase == .waiting else { return nil }
+            let since = tails[task.id].flatMap { $0.isCaughtUp ? $0.reducer.awaitingReplySince : nil } ?? compressed.awaitingReplySince(task.id)
+            return since.map { (task.id, $0) }
         })
         // 只缓存已核实的编号和时间；正式输入/新轮次清除问题后同步丢弃旧回执。
         receivedReplies = receivedReplies.filter { _, reply in
@@ -146,7 +201,7 @@ public actor LocalCodexSource {
         if !pending.isEmpty {
             let knownReplies = Array(receivedReplies.values)
             let needsReceipt = pending.filter { id, _ in
-                tails[id]?.reducer.activity(acknowledging: knownReplies, for: id, at: now).phase == .waiting
+                (tails[id]?.reducer.activity(acknowledging: knownReplies, for: id, at: now) ?? compressed.projectedActivity(id, receipts: knownReplies, now: now))?.phase == .waiting
             }
             for reply in await replySource.receipts(for: needsReceipt, now: now) {
                 guard pending[reply.threadID].map({ reply.receivedAt >= $0 }) == true else { continue }
@@ -160,7 +215,16 @@ public actor LocalCodexSource {
             }
             for index in tasks.indices where pending[tasks[index].id] != nil {
                 let task = tasks[index]
-                guard var tail = tails[task.id] else { continue }
+                guard var tail = tails[task.id] else {
+                    if let url = compressedCandidates[task.id] {
+                        let refreshed = compressed.read(id: task.id, url: url, now: now)
+                        tasks[index].activity = refreshed.category == .ready
+                            ? (compressed.projectedActivity(task.id, receipts: Array(receivedReplies.values), now: now) ?? refreshed.activity)
+                            : refreshed.activity
+                        bytes += refreshed.bytes
+                    }
+                    continue
+                }
                 // IPC 等待期间可能写入正式回复、停止或新问题，重新读取后才投影，正式事件始终优先。
                 do {
                     bytes += try tail.refresh(url: task.rolloutURL)
@@ -173,7 +237,7 @@ public actor LocalCodexSource {
                 } catch {
                     tasks[index].activity = TaskActivity(detail: "暂时无法读取任务记录")
                     tails.removeValue(forKey: task.id)
-                    failures += 1
+                    failures.insert(task.id)
                 }
             }
         }
@@ -183,7 +247,14 @@ public actor LocalCodexSource {
             tails = tails.filter { ids.contains($0.key) }
         }
         for id in labels.keys.filter({ !ids.contains($0) }) { removeCachedLabel(for: id) }
-        return SourceSnapshot(tasks: tasks, quota: quota, warning: failures == 0 ? nil : "\(failures) 个任务的记录不可用，其状态显示为未知。", bytesRead: bytes, observedAt: now)
+        // 显式关注范围用于正式界面；旧只读调用保持普通文件诊断兼容，不自动解压全库。
+        let failureCount = monitoredRootIDs == nil && rootIDs.isEmpty ? failures.count : failures.intersection(selectedIDs).count
+        var reasons: [String] = []
+        if failureCount > 0 { reasons.append("\(failureCount) 条记录不可用") }
+        if reading > 0 { reasons.append("\(reading) 条读取中") }
+        if limited > 0 { reasons.append("\(limited) 条受限") }
+        let warning = reasons.isEmpty ? nil : (monitoredRootIDs == nil && rootIDs.isEmpty ? "记录检查：" : "关注范围：") + reasons.joined(separator: "，")
+        return SourceSnapshot(tasks: tasks, quota: quota, warning: warning, bytesRead: bytes, observedAt: now)
     }
     /// 按完整字段复用纯文本；最多2048项、单项原文4KiB，所有保留字符串的UTF8合计不超过1MiB。
     private func taskLabels(id: String, title: String, source: String?) -> TaskLabels {

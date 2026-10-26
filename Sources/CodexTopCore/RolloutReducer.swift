@@ -115,6 +115,13 @@ public struct RolloutReducer: Sendable {
         }
     }
 
+    /// 压缩扫描用保守估算限制归约元数据，避免异常历史累积大量待答编号。
+    var retainedMetadataBytes: Int {
+        waitingCallIDs.reduce(0) { $0 + $1.utf8.count + 128 }
+        + replyQuestions.reduce(0) { $0 + $1.key.utf8.count + $1.value.items.count * 64 + 256 }
+        + (activity.turnID?.utf8.count ?? 0) + activity.detail.utf8.count + 1_024
+    }
+
     /// 仅可识别的活动轮次异步提问允许查询辅助证据；审批、结束和缺失元数据沿用原状态。
     public var awaitingReplySince: Date? {
         guard activity.phase == .waiting, asynchronousQuestion, !turnEnded, !untrackedWait,
