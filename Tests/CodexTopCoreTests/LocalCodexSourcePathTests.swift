@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import CSQLite
+import Darwin
 @testable import CodexTopCore
 
 final class LocalCodexSourcePathTests: XCTestCase {
@@ -167,6 +168,145 @@ final class LocalCodexSourcePathTests: XCTestCase {
         let recovered = try await source.snapshot(now: now)
         XCTAssertEqual(recovered.tasks.first?.activity.phase, .completed)
         XCTAssertNil(recovered.warning)
+    }
+
+    /// 快速路径中的百分号、空格、中文和保留字符保持同一实际文件，不重复解码路径。
+    func testAbsoluteSpecialCharactersKeepFileIdentityAcrossSnapshots() async throws {
+        let fixture = try makeFixture()
+        let file = fixture.root.appendingPathComponent("中文目录/会话 空格 %20 #?.jsonl")
+        try writeEvent("task_complete", to: file)
+        try addTask(path: file.path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        for _ in 0..<2 {
+            let snapshot = try await source.snapshot(now: now)
+            XCTAssertEqual(snapshot.tasks.first?.activity.phase, .completed)
+            XCTAssertNil(snapshot.warning)
+            assertResolvedPath(snapshot, input: file.path)
+        }
+        try FileManager.default.removeItem(at: file)
+        let missing = try await source.snapshot(now: now)
+        XCTAssertEqual(missing.tasks.first?.activity.phase, .unknown)
+        try writeEvent("task_started", to: file)
+        let recovered = try await source.snapshot(now: now)
+        XCTAssertEqual(recovered.tasks.first?.activity.phase, .running)
+        assertResolvedPath(recovered, input: file.path)
+    }
+
+    /// 父目录内的直接缺失叶创建、删除、目录重建后，下一快照必须看到当前文件。
+    func testMissingDirectLeafRecoversAfterCreateAndDirectoryReplacement() async throws {
+        let fixture = try makeFixture()
+        let directory = fixture.root.appendingPathComponent("history", isDirectory: true)
+        let file = directory.appendingPathComponent("later.jsonl")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try addTask(path: file.path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        for _ in 0..<2 {
+            let missing = try await source.snapshot(now: now)
+            XCTAssertEqual(missing.tasks.first?.activity.phase, .unknown)
+        }
+        try writeEvent("task_complete", to: file)
+        let created = try await source.snapshot(now: now)
+        XCTAssertEqual(created.tasks.first?.activity.phase, .completed)
+        try FileManager.default.removeItem(at: directory)
+        let removed = try await source.snapshot(now: now)
+        XCTAssertEqual(removed.tasks.first?.activity.phase, .unknown)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        _ = try await source.snapshot(now: now)
+        try writeEvent("task_started", to: file)
+        let replaced = try await source.snapshot(now: now)
+        XCTAssertEqual(replaced.tasks.first?.activity.phase, .running)
+    }
+
+    /// 缺失结果不能掩盖父目录权限失败，恢复权限并创建文件后立即恢复。
+    func testMissingDirectLeafDoesNotCacheParentPermissionFailure() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("root绕过目录访问权限，不能验证本反例") }
+        let fixture = try makeFixture()
+        let directory = fixture.root.appendingPathComponent("private", isDirectory: true)
+        let file = directory.appendingPathComponent("later.jsonl")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { _ = chmod(directory.path, 0o700) }
+        try addTask(path: file.path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        _ = try await source.snapshot(now: now)
+        XCTAssertEqual(chmod(directory.path, 0), 0)
+        let blocked = try await source.snapshot(now: now)
+        XCTAssertEqual(blocked.tasks.first?.activity.phase, .unknown)
+        XCTAssertEqual(blocked.tasks.first?.activity.detail, "无权读取任务记录")
+        XCTAssertEqual(chmod(directory.path, 0o700), 0)
+        try writeEvent("task_complete", to: file)
+        let recovered = try await source.snapshot(now: now)
+        XCTAssertEqual(recovered.tasks.first?.activity.phase, .completed)
+    }
+
+    /// 已缓存的缺失叶不能跟随祖先链接跨目录复用，外部目标保持拒读。
+    func testMissingLeafAncestorRetargetsAndReturns() async throws {
+        let fixture = try makeFixture()
+        let first = fixture.root.appendingPathComponent("first", isDirectory: true)
+        let second = fixture.root.appendingPathComponent("second", isDirectory: true)
+        let link = fixture.root.appendingPathComponent("alias", isDirectory: true)
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try writeEvent("task_started", to: second.appendingPathComponent("later.jsonl"))
+        try writeEvent("task_complete", to: fixture.outside.appendingPathComponent("later.jsonl"))
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: first)
+        let path = link.appendingPathComponent("later.jsonl").path
+        try addTask(path: path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        _ = try await source.snapshot(now: now)
+        try replaceLink(link, destination: fixture.outside)
+        let escaped = try await source.snapshot(now: now)
+        assertBlocked(escaped)
+        try replaceLink(link, destination: second)
+        let recovered = try await source.snapshot(now: now)
+        XCTAssertEqual(recovered.tasks.first?.activity.phase, .running)
+        assertResolvedPath(recovered, input: path)
+    }
+
+    /// 即使外部程序恢复目录mtime，创建叶文件引起的ctime仍使缺失证据失效。
+    func testMissingLeafCreationWithRestoredParentModificationDate() async throws {
+        let fixture = try makeFixture()
+        let directory = fixture.root.appendingPathComponent("history", isDirectory: true)
+        let file = directory.appendingPathComponent("later.jsonl")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: directory.path)
+        try addTask(path: file.path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        _ = try await source.snapshot(now: now)
+        try writeEvent("task_complete", to: file)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: directory.path)
+        let recovered = try await source.snapshot(now: now)
+        XCTAssertEqual(recovered.tasks.first?.activity.phase, .completed)
+    }
+
+    /// 在同一1500条合成快照上观测暖轮询CPU，不用机器相关耗时作为正确性断言。
+    func testLargeMixedHistorySnapshotCost() async throws {
+        let fixture = try makeFixture()
+        var database: OpaquePointer?, insert: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(fixture.database.path, &database), SQLITE_OK)
+        defer { sqlite3_finalize(insert); sqlite3_close(database) }
+        XCTAssertEqual(sqlite3_prepare_v2(database, "INSERT INTO threads VALUES(?, '合成任务', '/synthetic', ?, 1, 2, 0)", -1, &insert, nil), SQLITE_OK)
+        for index in 0..<1500 {
+            let path = fixture.root.appendingPathComponent("history/task-\(index).jsonl")
+            if index < 500 { try writeEvent("task_complete", to: path) }
+            else { try Data().write(to: path.appendingPathExtension("zst")) }
+            for (column, value) in ["task-\(index)", path.path].enumerated() {
+                XCTAssertEqual(value.withCString { sqlite3_bind_text(insert, Int32(column + 1), $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }, SQLITE_OK)
+            }
+            XCTAssertEqual(sqlite3_step(insert), SQLITE_DONE); sqlite3_reset(insert)
+        }
+        let source = LocalCodexSource(root: fixture.root)
+        _ = try await source.snapshot(now: now)
+        var time = timespec(); clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time)
+        let start = Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+        for _ in 0..<20 {
+            let value = try await source.snapshot(now: now)
+            XCTAssertEqual(value.tasks.count, 1500)
+            XCTAssertEqual(value.tasks.filter { $0.activity.phase == .completed }.count, 500)
+            XCTAssertEqual(value.bytesRead, 0)
+        }
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time)
+        let duration = Double(time.tv_sec) + Double(time.tv_nsec) / 1e9 - start
+        print("Mixed history snapshot CPU: rows=1500 iterations=20 seconds=\(duration)")
     }
 
     /// 创建独立合成数据库与外部对照目录，测试结束只删除该临时目录。
