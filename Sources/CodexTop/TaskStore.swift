@@ -89,6 +89,11 @@ import CodexTopCore
         if sourceWarning != nil && tasks.isEmpty { return "任务状态暂时无法更新" }
         return orbPhase.label
     }
+    /// 关注记录的读取统计只保留诊断数据，不占用监控面板；来源整体失败仍明确提示。
+    var panelWarning: String? {
+        guard let sourceWarning, !sourceWarning.hasPrefix("关注范围：") else { return nil }
+        return sourceWarning
+    }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
     /// 本次计算只取一次图和选择集合，预先计算排序键，保持状态、时间及并列输入顺序。
     var selected: [CodexTask] {

@@ -241,7 +241,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
         let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separator
         let messageScale = max(0.8, store.uiScale) / store.uiScale
-        return height + (store.sourceWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
+        return height + (store.panelWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
     }
     private var floatingSize: CGSize {
         if store.placement == .orb { return CGSize(width: 44, height: 44) }

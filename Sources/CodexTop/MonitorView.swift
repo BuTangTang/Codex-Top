@@ -86,7 +86,7 @@ struct MonitorView: View {
                         }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
                     }
                 }
-                if let warning = store.sourceWarning {
+                if let warning = store.panelWarning {
                     Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
                         .lineLimit(3).padding(.horizontal, 20).padding(.vertical, 10)
                 }
