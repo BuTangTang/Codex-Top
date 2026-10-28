@@ -63,17 +63,30 @@ final class CompressedRolloutReader {
         }
         deinit { ctz_destroy(decoder); try? handle.close() }
 
-        /// 按换行归约，超长行不持有正文，记录证据缺口以防错误终态。
+        /// 按连续字节段归约，避免逐字节扩容；跨块长行仍按原上限标记证据缺口。
         func consume(_ count: Int) throws {
-            for byte in output.prefix(count) {
-                if byte == 10 {
-                    if !skipped && !line.isEmpty { reducer.consume(line)
-                        if reducer.retainedMetadataBytes > 1_024 * 1_024 { throw POSIXError(.ENOMEM) }
+            try output.withUnsafeBufferPointer { buffer in
+                guard let base = buffer.baseAddress else { return }
+                var offset = 0
+                while offset < count {
+                    let newline = memchr(base.advanced(by: offset), 10, count - offset)
+                    let end = newline.map { base.distance(to: $0.assumingMemoryBound(to: UInt8.self)) } ?? count
+                    let length = end - offset
+                    if !skipped {
+                        if line.count + length <= 65_536 {
+                            line.append(base.advanced(by: offset), count: length)
+                        } else {
+                            line.removeAll(keepingCapacity: true); skipped = true; hasGap = true
+                        }
                     }
-                    line.removeAll(keepingCapacity: true); skipped = false
-                } else if !skipped {
-                    if line.count < 65_536 { line.append(byte) }
-                    else { line.removeAll(keepingCapacity: true); skipped = true; hasGap = true }
+                    if newline != nil {
+                        if !skipped && !line.isEmpty {
+                            reducer.consume(line)
+                            if reducer.retainedMetadataBytes > 1_024 * 1_024 { throw POSIXError(.ENOMEM) }
+                        }
+                        line.removeAll(keepingCapacity: true); skipped = false
+                    }
+                    offset = end + 1
                 }
             }
         }

@@ -11,6 +11,57 @@ public actor LocalCodexSource {
     private var receivedReplies: [String: QuestionReplyReceipt] = [:]
     private var labels: [String: TaskLabels] = [:]
     private var labelUTF8Bytes = 0
+    // 只复用 URL 值对象；每轮仍重新核实父目录和末级文件类型，不缓存文件状态。
+    private var recordURLValues: [String: URL] = [:]
+
+    /// 同轮记录共用已解析父目录；末级链接仍完整解析，缓存不跨快照保留。
+    private func resolvedRecordURL(_ path: String, parents: inout [String: URL]) -> (url: URL, error: Int32) {
+        // 不拆分全部路径分量，也不为每条记录构造中间 NSURL。
+        guard path.hasPrefix("/"), !path.hasSuffix("/"),
+              path.withCString({ strstr($0, "/../") == nil && strstr($0, "/./") == nil }),
+              !path.hasSuffix("/.."), !path.hasSuffix("/."),
+              let slash = path.utf8.lastIndex(of: 47) else {
+            return inspectRecordURL(URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath())
+        }
+        let parentPath = slash == path.startIndex ? "/" : String(path[..<slash])
+        let resolved: URL
+        if let cached = parents[parentPath] {
+            resolved = cached
+        } else {
+            resolved = URL(fileURLWithPath: parentPath, isDirectory: true).resolvingSymlinksInPath()
+            var parentInfo = stat()
+            guard resolved.path.withCString({ stat($0, &parentInfo) }) == 0,
+                  (parentInfo.st_mode & S_IFMT) == S_IFDIR else {
+                return inspectRecordURL(URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath())
+            }
+            parents[parentPath] = resolved
+        }
+        let leaf = String(path[path.index(after: slash)...])
+        let candidatePath = (resolved.path == "/" ? "/" : resolved.path + "/") + leaf
+        let candidate: URL
+        if let cached = recordURLValues[candidatePath] { candidate = cached }
+        else {
+            candidate = URL(fileURLWithPath: candidatePath, isDirectory: false)
+            // 数量与单项长度同时设限，避免长期运行时积累任意历史路径。
+            if recordURLValues.count < 4096 && candidatePath.utf8.count <= 1024 {
+                recordURLValues[candidatePath] = candidate
+            }
+        }
+        var info = stat()
+        let result = candidate.path.withCString { lstat($0, &info) }
+        // 悬空或有效的末级符号链接均交回原解析器，保留目录边界与恢复行为。
+        if result == 0 && (info.st_mode & S_IFMT) == S_IFREG { return (candidate, 0) }
+        // 已核实父目录存在时，缺失末级文件不需要重新遍历所有祖先。
+        if result != 0 && errno == ENOENT { return (candidate, ENOENT) }
+        return inspectRecordURL(URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath())
+    }
+
+    /// 返回本次解析时的文件可达性，调用处复用同一次检查，避免再做一次系统调用。
+    private func inspectRecordURL(_ url: URL) -> (url: URL, error: Int32) {
+        var info = stat()
+        let result = url.path.withCString { lstat($0, &info) }
+        return (url, result == 0 ? 0 : errno)
+    }
 
     /// 只保存纯文本的解析结果；原始字段改变即重算，不缓存路径、文件或活动状态。
     private struct TaskLabels {
@@ -77,10 +128,12 @@ public actor LocalCodexSource {
         var failures: Set<String> = []
         var compressedCandidates: [String: URL] = [:]
         var projectNames: [String: String] = [:]
+        var resolvedParents: [String: URL] = [:]
         let rootPrefix = root.path + "/"
         for row in rows {
             guard let id = row.id, let path = row.rolloutPath else { continue }
-            let file = URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath()
+            let location = resolvedRecordURL(path, parents: &resolvedParents)
+            let file = location.url
             let explicitParent = parents[id]
             // 有正式父子边时沿用原短路规则，不再额外解析可能很长的来源 JSON。
             let label = taskLabels(id: id, title: row.title ?? "", source: explicitParent == nil ? row.source : nil)
@@ -95,24 +148,21 @@ public actor LocalCodexSource {
             if !file.path.hasPrefix(rootPrefix) {
                 task.activity.detail = "记录位于数据目录之外，未读取"; failures.insert(id)
             } else {
-                var fileStat = stat()
-                let exists = file.path.withCString { lstat($0, &fileStat) }
-                let missing = exists != 0 && errno == ENOENT
+                let missing = location.error == ENOENT
                 if missing {
-                    let sibling = URL(fileURLWithPath: path + ".zst").resolvingSymlinksInPath()
-                    var siblingStat = stat()
+                    let siblingLocation = resolvedRecordURL(path + ".zst", parents: &resolvedParents)
+                    let sibling = siblingLocation.url
                     guard sibling.path.hasPrefix(rootPrefix) else {
                         task.activity = TaskActivity(detail: "记录位于数据目录之外，未读取")
                         failures.insert(id); tails.removeValue(forKey: id); compressed.forget(id)
                         tasks.append(task); continue
                     }
-                    let siblingResult = sibling.path.withCString { lstat($0, &siblingStat) }
-                    if siblingResult != 0 && (errno == EACCES || errno == EPERM) {
+                    if siblingLocation.error == EACCES || siblingLocation.error == EPERM {
                         task.activity = TaskActivity(detail: "无权读取任务记录")
                         failures.insert(id); tails.removeValue(forKey: id); compressed.forget(id)
                         tasks.append(task); continue
                     }
-                    if siblingResult == 0 {
+                    if siblingLocation.error == 0 {
                         compressedCandidates[id] = sibling
                         tails.removeValue(forKey: id)
                         task.activity = TaskActivity(detail: "历史记录已压缩，尚未读取")

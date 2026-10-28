@@ -99,6 +99,20 @@ final class CompressedRolloutTests: XCTestCase {
         }
     }
 
+    /// 解码块边界两侧和恰好64KiB的合法行保持完整，超过一字节仍受限。
+    func testLineLengthAtOutputBlockBoundary() throws {
+        let url = try directory().appendingPathComponent("boundary.zst")
+        for length in [65_535, 65_536, 65_537] {
+            var line = Data(event("task_complete").dropLast())
+            line.append(Data(repeating: 32, count: length - line.count))
+            line.append(10)
+            try frame(Data([10]) + line).write(to: url)
+            let result = finish(CompressedRolloutReader(), url: url)
+            XCTAssertEqual(result.category, length <= 65_536 ? .ready : .limited)
+            XCTAssertEqual(result.activity.phase, length <= 65_536 ? .completed : .unknown)
+        }
+    }
+
     /// 全局每轮只推进一个任务，取消关注后释放其占用。
     func testSingleDecoderAndCancellation() throws {
         let url = try directory().appendingPathComponent("task.zst")

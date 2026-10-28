@@ -65,12 +65,13 @@ private struct OrbPanelView: View {
         (store.statusSummary.phase == .failed ? TaskPhase.failed : .waiting).tint(store.theme.colorScheme)
     }
     private var contentAlignment: Alignment { state.expansionDirection == .up ? .bottom : .top }
+    /// 圆环与面板共享外壳，收起后卸载任务列表以减少隐藏计算。
     var body: some View {
         ZStack(alignment: contentAlignment) {
             GlassFill()
             attentionTint.opacity(showsAttention && !usesTwinArc ? (store.theme == .light ? 0.04 : 0.16) : 0)
                 .allowsHitTesting(false)
-            MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, collapse: closeTasks,
+            MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, contentVisible: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
                         draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
                 .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)

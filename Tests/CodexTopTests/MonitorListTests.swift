@@ -6,6 +6,35 @@ import CodexTopCore
 @testable import CodexTop
 
 final class MonitorListTests: XCTestCase {
+    /// 收起后移除实际滚动列表，再次展开恢复内容，后台任务状态不受隐藏影响。
+    @MainActor func testHiddenPanelReleasesListAndReopens() async throws {
+        let fixture = try makeFixture(count: 30)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        let host = NSHostingView(rootView: MonitorView(store: store, compact: false, showFinished: .constant(false),
+            animationsActive: false, contentVisible: true, pickTasks: {}, settings: {}))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 410, height: 340),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        defer { window.close() }
+        flushLayout(host)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNotNil(findScroll(in: host))
+        let running = store.runningCount
+        host.rootView.contentVisible = false
+        flushLayout(host)
+        try await Task.sleep(for: .milliseconds(500))
+        flushLayout(host)
+        XCTAssertNil(findScroll(in: host))
+        await store.refresh()
+        XCTAssertEqual(store.runningCount, running)
+        host.rootView.contentVisible = true
+        flushLayout(host)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertNotNil(findScroll(in: host))
+    }
+
     @MainActor
     func testFloatingViewportKeepsRunningRowAndMovesFooterWithItsHeight() async throws {
         let fixture = try makeFixture(count: 60)

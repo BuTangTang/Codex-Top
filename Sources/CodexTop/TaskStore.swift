@@ -276,7 +276,12 @@ import CodexTopCore
             }
             if historicalQuota != snapshot.quota { historicalQuota = snapshot.quota }
             updateQuota()
-            if sourceWarning != snapshot.warning { sourceWarning = snapshot.warning; needsLayout = true }
+            if sourceWarning != snapshot.warning {
+                let previousPanelWarning = panelWarning
+                sourceWarning = snapshot.warning
+                // 隐藏的读取统计不改变面板几何；整体故障提示仍立即重排。
+                if previousPanelWarning != panelWarning { needsLayout = true }
+            }
             lastRefresh = snapshot.observedAt
             var nextPreferences = preferences
             MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)

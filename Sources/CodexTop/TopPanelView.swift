@@ -56,8 +56,9 @@ struct TopPanelView: View {
         .environment(\.colorScheme, store.theme == .light ? .light : .dark)
     }
 
+    /// 状态栏面板随展开进度控制列表是否保留。
     private var statusPopover: some View {
-        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, animationsActive: state.progress > 0, collapse: close,
+        MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, animationsActive: state.progress > 0, contentVisible: state.progress > 0, collapse: close,
                     pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
             .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
             .scaleEffect(store.uiScale, anchor: .topLeading)
@@ -68,6 +69,7 @@ struct TopPanelView: View {
             .accessibilityHidden(state.progress < 0.99)
     }
 
+    /// 刘海过渡保持原几何，收起后允许任务列表释放。
     private var topSurface: some View {
         GeometryReader { geometry in
             let outline = TopSurfaceOutline(progress: state.progress, attached: state.cameraHeight > 0)
@@ -79,7 +81,7 @@ struct TopPanelView: View {
                         .fill(.black).frame(width: state.cameraWidth, height: state.cameraHeight)
                         .allowsHitTesting(false)
                 }
-                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false, animationsActive: state.progress > 0, collapse: close,
+                MonitorView(store: store, compact: false, showFinished: $monitorState.expandedFinished, drawsSurface: false, animationsActive: state.progress > 0, contentVisible: state.progress > 0, collapse: close,
                             pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged)
                     .frame(width: state.expandedSize.width / store.uiScale, height: max(1, (state.expandedSize.height - state.cameraHeight) / store.uiScale))
                     .scaleEffect(store.uiScale, anchor: .top)

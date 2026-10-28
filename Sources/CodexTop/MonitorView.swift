@@ -23,6 +23,7 @@ struct MonitorView: View {
     @Binding var showFinished: Bool
     var drawsSurface = true
     var animationsActive = true
+    var contentVisible = true
     var collapse: (() -> Void)? = nil
     var pickTasks: () -> Void
     var settings: () -> Void
@@ -35,6 +36,7 @@ struct MonitorView: View {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
     @StateObject private var menuPresenter = MonitorMenuPresenter()
+    @State private var retainsClosingContent = false
     private var compactTypography: Bool { compact || windowCompactTypography }
 
     private var runningBoundaryID: String? {
@@ -44,10 +46,21 @@ struct MonitorView: View {
         return tasks[index].id
     }
 
+    /// 收起动画结束后卸载列表内容，避免隐藏列表继续排序和生成行视图。
     var body: some View {
         Group {
-            if drawsSurface { PanelSurface { panelContent } }
-            else { panelContent }
+            if contentVisible || retainsClosingContent {
+                if drawsSurface { PanelSurface { panelContent } }
+                else { panelContent }
+            }
+        }
+        .task(id: contentVisible) {
+            // 展开立即生成内容；关闭保留短暂过渡，重新展开会取消释放任务。
+            if contentVisible { retainsClosingContent = true }
+            else {
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                retainsClosingContent = false
+            }
         }
         .foregroundStyle(Palette.primary(store.theme.colorScheme))
         .tint(Palette.accent)
