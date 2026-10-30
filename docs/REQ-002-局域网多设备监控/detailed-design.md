@@ -169,44 +169,37 @@ Claude Code 的待审批识别、手机操作回传、额度来源三项仍未�
 
 #### 11.2 子任务数（G1）
 
-需求 D-83e、D-83l：聊天页显示子任务数，口径与 Mac 一致，不估算。以下静态核实于2026-10-30完成（Mac `Sources/CodexTopCore`、happier `apps/cli/src/backends/codex/directSessions`，只读），未运行、未测性能。
+需求 D-83e、D-83l：聊天页显示子任务数，口径与 Mac 一致，不估算。以下为2026-10-30静态核实（Mac `Sources/CodexTopCore`，happier `apps/cli/src/backends/codex`，只读），未运行、未测性能。
 
-**已确定的口径（Mac）**
+**Mac 口径（已确定）**
 
-- 数据：`LocalCodexSource` 读 Codex 状态库 `threads` 表中 `archived=0` 的全部会话；父子关系取 `thread_spawn_edges` 表，没有该表或没有边时取会话 `source` 字段里的 `subagent.thread_spawn.parent_thread_id`。
-- 归根：`TaskGraph.resolveRootIDs` 沿父编号逐级向上，直到父编号不在快照里为止；`children[根]` 是归到该根的**全部后代**（任意层级），不是直接子节点。快照即 `TaskStore` 的全部任务，不受关注列表影响。
-- 中间层缺失时链路断开：若某个中间后代已归档（不在快照里），它下面的后代会各自成为根，不计入原根。
+- 数据源是 Codex 状态库：`LocalCodexSource.databaseURL()` 在 Codex 主目录下选版本号最大的 `state_N.sqlite`，不看 `CODEX_SQLITE_HOME`；要求 `threads` 表含 `id`、`title`、`cwd`、`rollout_path`、`created_at`、`updated_at`、`archived` 列，否则判为不兼容。
+- 取 `archived=0` 的全部会话；父子关系先取 `thread_spawn_edges` 表，没有边的会话再看 `source` 字段里的 `subagent.thread_spawn.parent_thread_id`。
+- `TaskGraph.resolveRootIDs` 沿父编号逐级向上，父编号不在快照里就停；有环时取环上最小编号为根。`children[根]` 是归到该根的全部后代（任意层级），中间层已归档时其下后代不计入原根。
 - 显示：`MonitorView` 在任务未结束且数量大于0时写“· N 个子任务”。
 
-**happier 现状**
+**权威来源的选择**
 
-- `collectCodexDirectTranscriptRolloutStreams` 从主会话开始广度遍历：读每个会话的记录文件，用 `discoverSpawnedThreadIds` 找 `subagent-spawn` 事件，把发现的子线程加入队列，所以也是全部后代。
-- 每个记录文件最多扫 1 MiB 或 512 行（`CHILD_DISCOVERY_MAX_BYTES`／`_ITEMS`），超出则本次结果不缓存，超出部分里派生的子任务会漏掉。
-- `collectCodexSessionRolloutFiles` 同时读 `sessions` 与 `archived_sessions` 目录，已归档的后代也会被发现。
-- 发现结果按记录文件指纹缓存（最多128项、1 MiB）；文件追加后指纹变化，需重扫。
+- 正文派生事件（`discoverSpawnedThreadIds`）不是 Mac 的数据源：它会读归档目录，单文件扫描有1 MiB／512行上限，派生事件与状态库的边是否总一致无法静态证明，归档目录与状态库 `archived` 是否等价也无法静态证明。因此正文发现集合**证据不足，不作为计数来源**；即使少量运行样本与 Mac 相等，也不能据此宣称普遍准确。
+- 可复用的权威来源：happier 已能只读打开 Codex 状态库（`utils/sqlite/sqliteSync` 的 `openSqliteDatabaseSync`，`connectedServices/reconcileCodexResumeRolloutPath.ts` 查询 `threads.rollout_path`），但目前只查这一列，没有读取 `archived`、`thread_spawn_edges`、`source`，需新增查询。计数改为在 happier 中用与 Mac 相同的数据和规则计算。
+- 选库差异（已确定）：happier 固定使用 `state_5.sqlite`，并按 `CODEX_SQLITE_HOME` 定位（`codexStateFileNames.ts`）；Mac 选最高版本且不看该变量。两边可能读到不同的库。
 
-**两边集合的差异（逐项）**
+**`childTaskCountComplete` 为 true 的充分条件**（全部满足才显示）
 
-| 情形 | Mac | happier | 对齐办法 |
-|---|---|---|---|
-| 多层后代 | 计入 | 计入 | 一致 |
-| 已归档的后代 | 不计 | 计入 | happier 计数时排除只在 `archived_sessions` 中找到的后代 |
-| 中间层已归档、其下后代未归档 | 下层不计入原根 | 沿归档的中间层继续找到并计入 | 同上排除后，下层是否还会经由归档中间层被找到，需在实现时按 Mac 规则截断 |
-| 派生事件在单文件1 MiB／512行之后 | 计入（来自状态库的边） | 漏计 | 截断时标记不完整，手机不显示 |
-| 状态库有边、记录文件里无派生事件，或反之 | 以状态库为准 | 以记录事件为准 | 静态无法判断两者是否总一致，需运行比对 |
+1. happier 按 Mac 的选库规则找到的库，与它实际打开的是同一个文件：Codex 主目录下版本号最大的 `state_N.sqlite`；若设置了 `CODEX_SQLITE_HOME` 且不等于 Codex 主目录，无法证明与 Mac 同库，判为不完整。
+2. 表结构通过与 Mac 相同的列检查；`thread_spawn_edges` 缺失时与 Mac 一样改用 `source` 字段，不算不完整。
+3. 会话、边、来源字段在同一个只读事务里读取，读取过程中没有出错或被锁超时。
+4. 根会话在库中存在且 `archived=0`。
+5. 计数规则与 `TaskGraph.resolveRootIDs` 一致（含逐级归根、中间层断链、环的处理），并以从 Mac 测试移植的同一组测试数据验证。
 
-**字段放在哪里**
+任一条件不满足，回包不带 `childTaskCount` 或带 `childTaskCountComplete=false`，手机不显示，不显示近似值。回包里另带所用库的版本号（如 `state_5`），便于和 Mac 核对。
 
-| | 放在正文回包（`transcript.page`／`readAfter`） | 放在状态回包（`status.get`） |
-|---|---|---|
-| 额外读盘 | 无：这两个接口已经调用 `collectCodexDirectTranscriptRolloutStreams`，计数只是取集合大小 | 有：状态路径现在不做子线程发现，需要新增有界扫描；运行中文件不断追加，缓存经常失效 |
-| 更新时机 | 聊天页打开时随读正文和增量读更新 | 随状态刷新更新，聊天页未打开时也有 |
-| 与显示位置的关系 | 子任务数只显示在聊天页，聊天页打开时正在读正文，时机吻合 | 列表不显示子任务数，状态路径的额外更新用不上 |
-| 准确性 | 与状态路径相同算法，差异只来自上表 | 同左 |
+**载体与开销**
 
-**建议**：放在正文回包，字段为 `childTaskCount`（排除只在归档目录找到的后代后的数量）和 `childTaskCountComplete`（任一文件扫描被截断、或某个已发现后代找不到记录文件时为 false）。手机只在字段存在、`childTaskCountComplete` 为 true、任务未结束且数量大于0时显示“· N 个子任务”；否则不显示，不显示近似值。以上开销比较是按代码路径推断，未做性能测量。
+- 仍放在正文回包（`transcript.page`／`readAfter`），因为只在聊天页显示。
+- 之前“无需额外读盘”的结论只适用于沿用正文发现集合的做法；改用状态库后，每次回包需要读一次状态库的会话与边，是额外读取。缓解办法：按库文件及其 `-wal` 文件的大小和修改时间缓存计算结果，二者不变则复用。实际开销未测量。
 
-**仅剩的运行验证**：用真实或合成数据比对同一会话 happier 的计数与 Mac `TaskGraph.children` 是否相等，覆盖归档后代、中间层归档、超长父记录三种情形；真机核对手机与 Mac 显示同一数字。
+**仅剩的运行验证**：同一会话 happier 计数与 Mac 显示相等（作为补充证据，不替代上述充分条件）；真机核对手机与 Mac 显示同一数字。
 
 **依赖**：happier 改动需推送，现有 happier 分支因 GitHub 缺 workflow 权限尚未推送，只能先本地提交。
 
@@ -253,41 +246,50 @@ Claude Code 的待审批识别、手机操作回传、额度来源三项仍未�
 
 #### 11.5 三期 B：Claude Code 可操作（保留最终范围）
 
-D-83g：B 段保留发送、回答提问、审批和 Claude Code 额度，最终范围不缩减。以下为2026-10-30的静态核实（happier、ter 源码只读，加 Claude Code 公开官方文档），未运行、未发真实请求。每项分开写已确定的约束、现有能力、候选方案和仅剩的运行验证；候选方案需写成设计交审后再实施。
+D-83g：B 段保留发送、回答提问、审批和 Claude Code 额度，最终范围不缩减。以下为2026-10-30的静态核实（happier、ter 源码只读，加 Claude Code 公开官方文档 code.claude.com/docs），未运行、未发真实请求。
 
 **共同约束（已确定）**
 
-- 手机端 ter 只使用 `daemon.directSessions.*` 这一组接口（列表、正文、发送、控制读写、状态、关注等），没有接入 happier 自己的会话协议（会话消息、`agentState.requests`、权限回复），也没有调用接管接口。
-- happier 的直连发送 `daemon.directSessions.send` 在 provider 没有 `send` 时返回 `provider_unavailable`；Claude 的 provider（`claude/directSessions/providerOps.ts`）只有列表、活动时间、正文分页、增量读、关注和接管参数，没有 `send`、`readControl`、`control`。
-- REQ-003 R-14：hooks 只上报会话编号、事件类型和时间，不记录命令内容等；R-15：hooks 必须很快结束，本应用未运行或出错时 Claude Code 照常工作。R-24：除 hooks 条目外不修改 Claude Code 的任何文件。这些是已确认范围，本设计不改动。
-- 官方文档（code.claude.com/docs/en/hooks）：`PermissionRequest` 钩子可用 `hookSpecificOutput.decision.behavior` 返回允许或拒绝；`PreToolUse` 可用 `permissionDecision` 加 `updatedInput` 回答 `AskUserQuestion`；钩子默认同步执行、默认超时600秒。要靠钩子从手机作答，钩子必须读取命令内容并同步等待手机，**与 R-14、R-15 直接冲突**，因此不作为可实施方案；如以后要走这条路，须另立需求经用户确认，不在本设计内。
+- 手机端 ter 只使用 `daemon.directSessions.*` 接口，没有接入 happier 自己的会话协议，也没有调用接管接口。
+- happier 的 `daemon.directSessions.send` 在 provider 没有 `send` 时返回 `provider_unavailable`；Claude 的 provider 没有 `send`、`readControl`、`control`。
+- REQ-003 R-14（hooks 只上报会话编号、事件类型和时间）、R-15（hooks 必须很快结束）、R-24（除 hooks 条目外不改 Claude Code 文件）为已确认范围，本设计不改动。
+- 官方 hooks 文档：`PermissionRequest` 可用 `decision.behavior` 允许或拒绝，`PreToolUse` 可回答 `AskUserQuestion`，钩子默认同步、默认超时600秒。从手机作答需要钩子读取命令内容并同步等待，与 R-14、R-15 冲突，**不作为可实施方案**。
+- 官方会话文档：“If you resume the same session in two terminals without forking, messages from both interleave into one transcript.” 即 Claude Code 对同一会话没有互斥。文档同时说明记录文件的条目格式是内部格式、会随版本变化。
 
-**发送消息**
+**发送消息（候选甲：为 Claude provider 新增 `send`）**
 
-- 现有能力：happier 有接管接口 `daemon.directSessions.takeover`（`rpcHandlers.directSessions.ts` 约第1002行），用 `resolveTakeoverSpawnOptions` 以 `resume=原会话编号` 启动 happier 自己管理的 Claude 进程；它只能识别 happier 自己启动的进程（会话标记 `findTrustedDirectSessionOwner`），识别不了 Claude 桌面 App 或终端里开着的同一会话。happier 的 `sdk/query.ts` 已能以 `--output-format stream-json`、`--resume`、`--permission-prompt-tool stdio` 启动 Claude Code。官方命令行文档列有 `-p`／`--print` 与 `--resume`。
-- 候选甲：为 Claude provider 新增 `send`，由 happier 后台以恢复会话的无界面方式追加一轮，复用 `sdk/query.ts`。手机继续走现有 `directSessions.send`，只按来源路由。
-- 候选乙：手机调用接管接口，再改用 happier 会话协议发消息。需要 ter 新增整套 happier 会话协议，改动远大于甲。
-- 需新增：Claude provider 的 `send`；发送前判断该会话是否正在别处运行（REQ-003 第6节已发现 Claude Code 有运行中会话登记，happier 尚未读取），正在运行则拒绝并说明；请求关联沿用现有 `localId` 去重；发送时带上手机所见的记录末端作为期望锚点，锚点变化时拒绝，避免在用户已在电脑上继续之后再插入一轮。锚点可选记录行的 `uuid` 字段（happier 的 Claude 记录测试样例中每行带 `uuid`），或现有增量读游标（`claudeForward`：文件路径加字节偏移，见 `readAfterClaudeTranscript.ts`）；二者在设计交审时择一。
-- 依赖外部：Claude Code 恢复会话的行为（同一会话是否允许两个进程并存、桌面 App 是否显示外部追加的轮次）官方文档未写明。
-- 仅剩运行验证：空闲会话追加一轮后记录完整、桌面 App 重新打开可见；会话在桌面 App 或终端运行时被识别并拒绝；记录未被写坏。
+协议草案，沿用 happier 现有 Codex 发送的去重做法（`desktop/desktopSessionControl.ts`：按账号的私有目录存“意图”与“回执”，独占创建意图后才投递，已有意图一律不重投）：
+
+| 项 | 规定 |
+|---|---|
+| 身份范围 | 账号（回执目录按账号摘要分开）＋电脑（daemon 本机）＋来源（解析后的 Claude 配置目录）＋远端会话编号＋`localId`。意图键为这几项的摘要，不含正文或路径原文 |
+| 期望锚点 | 手机发送时附上它看到的记录末端：记录文件相对路径＋末端字节偏移（即现有增量读游标 `claudeForward` 的内容），以及该处最后一行的 `uuid`（若该行有）。投递前 happier 核对：文件相同、文件长度恰好等于该偏移（期间没有新内容）、`uuid` 若带则相符；任一不符拒绝为 `anchor_changed`；文件比偏移短或换了文件（截断、轮换、压缩重写）拒绝为 `anchor_invalid`。不依赖条目格式中除行边界、`uuid` 以外的字段 |
+| 内容摘要 | 期望锚点＋正文＋附件清单的摘要 |
+| 同一 `localId`、内容相同 | 有回执则原样返回回执；只有意图没有回执，返回 `delivery_outcome_unknown`，不重投 |
+| 同一 `localId`、内容不同 | 拒绝为 `local_id_conflict`；手机编辑后重发须换新的 `localId` |
+| 回包丢失后重试 | 手机用原 `localId` 与原锚点重试，按上两行处理 |
+| 重启 | 意图与回执是磁盘上的私有文件，daemon 或手机重启后仍按上面规则去重；手机待发记录保留原 `localId` 与锚点 |
+| 锚点失效后 | 手机刷新正文、取得新锚点，作为新消息（新 `localId`）由用户再次发送，不自动重投 |
+
+本地可保证的（静态可证明，沿用现有实现模式）：同一账号、同一电脑上，同一 `localId` 不会被投递两次；内容冲突能识别；结果不明时保持“未知”，不宣称成功。
+
+不能保证、运行测试也无法证明的：恰好一次送达；投递后 Claude Code 一定处理了这一轮；检查之后没有别的进程写同一会话。锚点核对和运行中会话登记都只是检查那一刻的情况，检查之后桌面 App 或终端仍可能开始写入，官方文档也确认两个进程会交错写入。
+
+**结论**：在现有约束下，没有任何路径能提供可靠的互斥或所有权证据。happier 接管启动的进程（`daemon.directSessions.takeover`）同样无法阻止桌面 App 或终端再打开同一会话。官方文档中的后台会话转交（`claude --resume <会话> "提示"` 交给正在运行的后台会话）要求在终端里交互执行，带重定向或 `--output-format` 等参数时直接退出、什么也不发，happier 无法使用。因此发送设计为：**所有路径一律拒绝**，返回 `exclusive_owner_unavailable` 并说明原因；协议和去重按上表实现、可单独测试，但发送入口不开放。开放的外部依赖：Claude Code 提供可在程序中使用的会话独占或所有权机制，或可把提示无界面地交给正在运行的会话。
 
 **回答提问与审批**
 
-- 现有能力：happier 对自己启动的 Claude 运行已有权限处理：`utils/permissionHandler.ts` 通过 `--permission-prompt-tool stdio` 收到权限请求，写入 happier 会话的 `agentState.requests`；`utils/askUserQuestionAnswersForClaude.ts` 已有回答 `AskUserQuestion` 的转换。官方文档说明在 `-p` 模式下权限请求交给 `--permission-prompt-tool` 或 Agent SDK 的 `canUseTool`。
-- 可覆盖范围（已确定）：只有经 happier 发起的轮次（发送候选甲或乙）可以从手机作答；在 Claude 桌面 App 或终端里由用户自己发起的轮次，没有不违反 R-14／R-15 的作答通道，手机只能显示状态，回到电脑处理。
-- 需新增：Claude provider 的 `readControl`／`control`，把 happier 收到的权限请求和提问映射成手机现有的提问、审批界面所用的结构（`DesktopQuestion`、`DesktopApproval`），请求关联用 happier 的请求编号加会话编号；手机的提问、审批界面只按来源路由，不另做界面。“本会话始终允许”映射到权限请求的 `permission_suggestions`／`updatedPermissions`，范围以官方字段为准。
-- 依赖：发送候选甲先落地；“本会话始终允许”在恢复会话方式下的持久范围需运行确认。
-- 仅剩运行验证：允许、拒绝、本会话始终允许各一次；重复提交与迟到回答不生效；电脑端先处理后手机提交被拒。
+- 现有能力（已确定）：happier 对自己启动的 Claude 运行，用 `--permission-prompt-tool stdio` 接收权限请求（`utils/permissionHandler.ts`），写入 happier 会话的 `agentState.requests`；会话重置、中止或释放时取消未决请求（`cancelPendingRequests`）。`utils/askUserQuestionAnswersForClaude.ts` 有 `AskUserQuestion` 的作答转换。
+- 关联键（草案）：电脑编号、来源（`claude`）、Claude 配置目录、远端会话编号、关联的 happier 会话编号、运行身份（happier 启动的这次 Claude 进程）、请求编号（权限请求在 happier 中的编号），再加手机生成的 `operationId`。手机作答沿用 Codex 回答提问、审批的“操作意图”去重做法（`desktopSessionControl.ts` 的 `answer-operation`／`approval-operation` 意图文件）：同一 `operationId` 内容相同返回原结果，内容不同拒绝。
+- 失效规则（草案）：请求只在同一运行身份存活且该请求仍未决时有效。运行进程退出、重置或中止后，happier 已取消的请求再提交，拒绝为 `owner_changed`；电脑端先处理，拒绝为 `request_resolved`；请求不存在，拒绝为 `request_not_found`。不在新进程上重放旧决定。
+- 当前候选的能力边界：只有经 happier 发起的轮次能从手机作答。由于发送入口按上文一律拒绝，目前没有从手机发起的轮次，这一能力实际上也不可用。
+- 需求覆盖：REQ-002 D-02“手机支持查看待批准操作，由用户确认或拒绝”没有限定由谁发起；D-83g 保留“回答提问、审批”。因此在 Claude 桌面 App 或终端里由用户发起的轮次，其提问与审批也在最终目标内，**保留为最终目标缺口**，不缩减范围、不改 REQ-003。可行路径依赖外部：Claude Code 提供可供第三方程序使用的作答接口；或另立需求重新讨论 hooks（不在本设计内）。
 
 **Claude Code 额度**
 
-- 官方来源（已确定）：状态栏命令的输入 JSON 含 `rate_limits.five_hour.used_percentage`／`resets_at` 与 `rate_limits.seven_day.used_percentage`／`resets_at`（code.claude.com/docs/en/statusline）；只对 Pro、Max 订阅者，且在会话第一次请求之后出现。
-- 约束：要收到这些字段需在 Claude Code 设置里配置 `statusLine` 命令，这超出 REQ-003 R-11～R-13 只加 hooks 条目、R-24 不改其他文件的范围，**不作为可实施方案**；如需要须另立需求。
-- 现有能力：happier `connectedServices/quotaFetcher.ts` 已有 Claude 订阅额度读取，含 `five_hour`、`seven_day`，使用 happier“已连接服务”中保存的 Claude OAuth 凭据访问 `api.anthropic.com/api/oauth/usage`。该地址不在公开官方文档中，属未公开接口。另有 `rate_limit_event`（`createClaudeSessionTranscriptProjector`）只在 happier 自己运行 Claude 时收到。
-- 候选：复用 `quotaFetcher`，新增 Claude 的额度读取接口给手机。依赖用户在 happier 中连接 Claude 账号（凭据由用户自己完成），以及未公开接口的稳定性；数字须与 Claude Code 自身显示核对一致才可展示，否则继续写“暂无法读取”。
-- 仅剩运行验证：已连接账号时读取成功、两条进度和重置时间与 Claude Code 自身显示一致；未连接或接口变化时显示“暂无法读取”。
-
-B 段各项可以分别交付；每项的设计交审通过后再拆实施任务。
+- 官方状态栏输入含 `rate_limits.five_hour`／`seven_day` 的 `used_percentage` 与 `resets_at`（仅 Pro、Max，且在首次请求后）。取得它需在 Claude Code 设置里配置 `statusLine`，超出 R-24，**不作为可实施方案**。
+- 现有能力：happier `connectedServices/quotaFetcher.ts` 经“已连接服务”中的 Claude OAuth 凭据读取5小时与7天额度，访问的地址不在公开官方文档中。
+- 候选：复用 `quotaFetcher` 提供额度读取接口。依赖用户在 happier 中连接 Claude 账号、未公开接口的稳定性；读数须与 Claude Code 自身显示核对一致才展示，否则写“暂无法读取”。
 
 #### 11.6 产品决定记录（Codex 依授权决定）
 
@@ -300,6 +302,14 @@ B 段各项可以分别交付；每项的设计交审通过后再拆实施任务
 | D-83k | 多电脑开关二期再显示，保留偏好 | 11.1 第5项，11.3 |
 | D-83l | 子任务数口径与 Mac 一致，不估算 | 11.2 |
 | — | 6个旧测试记为未运行，不扩大访问 | 11.1 |
+
+#### 11.7 规划状态（2026-10-30）
+
+| 类别 | 项目 |
+|---|---|
+| 本轮规划已闭合（设计草案已成稿，待用户审核） | G1 的权威来源、完整条件、载体与验收（11.2）；发送协议草案（身份范围、锚点、去重、重试、重启、锚点失效）及“一律拒绝”的开放条件（11.5）；审批与提问的关联键、失效规则、能力边界与需求缺口（11.5）；额度的可选来源与不可采用项（11.5）；一期修正、二期、三期 A 的设计（11.1、11.3、11.4）；对应验收场景见对照文档 |
+| 外部技术阻碍 | Claude Code 没有可供程序使用的会话独占或所有权机制，也没有可无界面交给运行中会话的方式（阻碍发送，并因此阻碍经 happier 发起轮次的作答）；在桌面 App 或终端发起的轮次没有第三方作答接口（最终目标缺口）；Claude 额度读取依赖未公开接口与用户在 happier 中连接账号；happier 推送缺 GitHub workflow 权限；6个旧测试缺 jar |
+| 需要用户实施指令 | 一期修正 T12～T19；G1 实现 T21；二期 T22～T25；三期 A T26～T29；三期 B 中不受外部阻碍的部分（发送协议与去重的实现和单元测试、额度读取接口）；各项运行验证与真机验收 |
 
 ## 2026-10-05 D-37 应用内更新实现增量
 
