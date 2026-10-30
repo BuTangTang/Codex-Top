@@ -147,7 +147,7 @@ Claude Code 的待审批识别、手机操作回传、额度来源三项仍未�
 
 ### 11. 复核补充与代选决定（v0.3 草案，2026-10-30，待用户审核）
 
-一期已在实体手机 Android110 上线。本节根据只读复核（ter `b28e40f`、happier `bf9bfc3cd`）补充二期、三期的实现前提，并按需求 [D-83g～D-83l](requirement.md#三页界面整理与多来源增量需求-d-83v022026-10-29-已通过未实施) 写入代选决定。这些决定由 Codex 依用户授权代选，未经用户逐项确认。**本节仍是设计草案**，不改变第1～10节已通过的内容，不授权实施；逐条对照、风险和验收场景见 [D-83 需求对照](../validation/d83-trace-20261030.md)。
+一期已在实体手机 Android110 上线。本节根据只读复核（ter `b28e40f`、happier `bf9bfc3cd`）补充二期、三期的实现前提，并按需求 [D-83g～D-83l](requirement.md#三页界面整理与多来源增量需求-d-83v022026-10-29-已通过未实施) 写入产品决定。产品方向已由 Codex 依据用户明确授权决定（来源：2026-10-30 用户原话“由你代选产品方案，继续完善规划”）。**本节仍是设计草案**，不改变第1～10节已通过的内容，不授权实施；逐条对照、风险和验收场景见 [D-83 需求对照](../validation/d83-trace-20261030.md)。
 
 #### 11.1 下次实施的一期修正
 
@@ -169,14 +169,46 @@ Claude Code 的待审批识别、手机操作回传、额度来源三项仍未�
 
 #### 11.2 子任务数（G1）
 
-需求 D-83e、D-83l：聊天页显示子任务数，口径与 Mac 一致，不估算。
+需求 D-83e、D-83l：聊天页显示子任务数，口径与 Mac 一致，不估算。以下静态核实于2026-10-30完成（Mac `Sources/CodexTopCore`、happier `apps/cli/src/backends/codex/directSessions`，只读），未运行、未测性能。
 
-- **口径**：Mac `MonitorView` 显示 `TaskGraph.children[根].count`，即当前快照里归到该根任务下的全部后代（逐级向上归根，不论是否在运行），只在任务未结束时显示。手机取同一口径。
-- **数据来源**：happier `collectCodexDirectTranscriptRolloutStreams` 读正文时已用 `discoverSpawnedThreadIds` 找出派生线程（带缓存）。需核实：它是否逐级找全后代；与 Mac 的 `resolveRootIDs` 结果是否一致。
-- **协议**：增加可选字段 `childTaskCount`；缺少该字段时手机不显示，不用0代替。放在状态（`STATUS`）回包里显示最及时，但 happier 目前只在读正文时做子线程发现；放在正文页回包里没有额外开销，但只在读正文时更新。T20 核实状态路径做发现的开销后二选一，结论写回本节。
-- **显示**：聊天页标题下状态行在状态文字后加“· N 个子任务”，与 Mac 写法相同；任务已结束或 N 为0时不显示。会话列表不显示（D-83e）。
-- **验收**：合成数据（含多层后代）下 happier 计数与 Mac `TaskGraph` 一致；真机核对同一会话手机与 Mac 显示同一数字；字段缺失时不显示。
-- **依赖**：happier 改动需推送，现有 happier 分支因 GitHub 缺 workflow 权限尚未推送，只能先本地提交。
+**已确定的口径（Mac）**
+
+- 数据：`LocalCodexSource` 读 Codex 状态库 `threads` 表中 `archived=0` 的全部会话；父子关系取 `thread_spawn_edges` 表，没有该表或没有边时取会话 `source` 字段里的 `subagent.thread_spawn.parent_thread_id`。
+- 归根：`TaskGraph.resolveRootIDs` 沿父编号逐级向上，直到父编号不在快照里为止；`children[根]` 是归到该根的**全部后代**（任意层级），不是直接子节点。快照即 `TaskStore` 的全部任务，不受关注列表影响。
+- 中间层缺失时链路断开：若某个中间后代已归档（不在快照里），它下面的后代会各自成为根，不计入原根。
+- 显示：`MonitorView` 在任务未结束且数量大于0时写“· N 个子任务”。
+
+**happier 现状**
+
+- `collectCodexDirectTranscriptRolloutStreams` 从主会话开始广度遍历：读每个会话的记录文件，用 `discoverSpawnedThreadIds` 找 `subagent-spawn` 事件，把发现的子线程加入队列，所以也是全部后代。
+- 每个记录文件最多扫 1 MiB 或 512 行（`CHILD_DISCOVERY_MAX_BYTES`／`_ITEMS`），超出则本次结果不缓存，超出部分里派生的子任务会漏掉。
+- `collectCodexSessionRolloutFiles` 同时读 `sessions` 与 `archived_sessions` 目录，已归档的后代也会被发现。
+- 发现结果按记录文件指纹缓存（最多128项、1 MiB）；文件追加后指纹变化，需重扫。
+
+**两边集合的差异（逐项）**
+
+| 情形 | Mac | happier | 对齐办法 |
+|---|---|---|---|
+| 多层后代 | 计入 | 计入 | 一致 |
+| 已归档的后代 | 不计 | 计入 | happier 计数时排除只在 `archived_sessions` 中找到的后代 |
+| 中间层已归档、其下后代未归档 | 下层不计入原根 | 沿归档的中间层继续找到并计入 | 同上排除后，下层是否还会经由归档中间层被找到，需在实现时按 Mac 规则截断 |
+| 派生事件在单文件1 MiB／512行之后 | 计入（来自状态库的边） | 漏计 | 截断时标记不完整，手机不显示 |
+| 状态库有边、记录文件里无派生事件，或反之 | 以状态库为准 | 以记录事件为准 | 静态无法判断两者是否总一致，需运行比对 |
+
+**字段放在哪里**
+
+| | 放在正文回包（`transcript.page`／`readAfter`） | 放在状态回包（`status.get`） |
+|---|---|---|
+| 额外读盘 | 无：这两个接口已经调用 `collectCodexDirectTranscriptRolloutStreams`，计数只是取集合大小 | 有：状态路径现在不做子线程发现，需要新增有界扫描；运行中文件不断追加，缓存经常失效 |
+| 更新时机 | 聊天页打开时随读正文和增量读更新 | 随状态刷新更新，聊天页未打开时也有 |
+| 与显示位置的关系 | 子任务数只显示在聊天页，聊天页打开时正在读正文，时机吻合 | 列表不显示子任务数，状态路径的额外更新用不上 |
+| 准确性 | 与状态路径相同算法，差异只来自上表 | 同左 |
+
+**建议**：放在正文回包，字段为 `childTaskCount`（排除只在归档目录找到的后代后的数量）和 `childTaskCountComplete`（任一文件扫描被截断、或某个已发现后代找不到记录文件时为 false）。手机只在字段存在、`childTaskCountComplete` 为 true、任务未结束且数量大于0时显示“· N 个子任务”；否则不显示，不显示近似值。以上开销比较是按代码路径推断，未做性能测量。
+
+**仅剩的运行验证**：用真实或合成数据比对同一会话 happier 的计数与 Mac `TaskGraph.children` 是否相等，覆盖归档后代、中间层归档、超长父记录三种情形；真机核对手机与 Mac 显示同一数字。
+
+**依赖**：happier 改动需推送，现有 happier 分支因 GitHub 缺 workflow 权限尚未推送，只能先本地提交。
 
 #### 11.3 二期：多台电脑汇总
 
@@ -219,19 +251,45 @@ Claude Code 的待审批识别、手机操作回传、额度来源三项仍未�
 - **通知（D-46）**：Claude 状态接通前不发完成或待处理通知，不按修改时间猜。状态接通并验收后，Claude 会话的完成与待处理通知按 D-46 现有规则走 happier 任务事件推送，按来源区分文案（如“请回到 Claude Code 查看”），去重与点击直达规则不变。
 - **依赖**：REQ-003 Mac 端第一阶段（状态规则与 hooks 事件文件）；happier 推送权限。
 
-#### 11.5 三期 B：Claude Code 可操作（保留最终范围，先做可行性）
+#### 11.5 三期 B：Claude Code 可操作（保留最终范围）
 
-D-83g 要求 B 段保留发送、回答提问、审批和 Claude Code 额度。happier 现在这些都没有，每项先做可行性核实，结论写成设计交审，通过后再实施。不可行的项如实记录并回报，不以替代品冒充。
+D-83g：B 段保留发送、回答提问、审批和 Claude Code 额度，最终范围不缩减。以下为2026-10-30的静态核实（happier、ter 源码只读，加 Claude Code 公开官方文档），未运行、未发真实请求。每项分开写已确定的约束、现有能力、候选方案和仅剩的运行验证；候选方案需写成设计交审后再实施。
 
-| 项 | 待核实的做法 | 主要依赖与冲突 | 可行的判定 | 验收（可行时） |
-|---|---|---|---|---|
-| 发送消息 | 一是 happier 用 Claude Code 的恢复会话方式在同一会话追加一轮；二是 happier 已有的 `resolveTakeoverSpawnOptions` 接管方式 | 会话正在桌面 App 或终端里运行时，两个进程同时写同一会话记录会冲突，需先用运行中会话登记判断，正在运行时拒绝发送并说明 | 空闲会话发送后，原会话记录多出这一轮，桌面 App 重新打开能看到；正在运行的会话被拒绝且不损坏记录 | 合成项目实测空闲、运行中两种；手机回执与记录一致；失败不丢草稿 |
-| 回答提问、审批 | 一是 Claude Code hooks 在工具调用前等待手机决定并返回允许或拒绝；二是只对 happier 接管启动的会话，由 happier 自己的权限通道转发 | 做法一与 REQ-003 R-14（hooks 只记元数据）、R-15（hooks 必须很快结束）冲突，需先改 REQ-003 需求并经用户审核；做法二只覆盖接管的会话 | 手机看到的命令与电脑上待批准的一致；允许、拒绝、本会话始终允许三种结果都回到 Claude Code；超时或断网时电脑端照常可操作 | 三种结果各测一次；重复提交与迟到回答不生效；电脑端先处理后手机的提交被拒 |
-| Claude Code 额度 | 寻找本机可读、由 Claude Code 自己产生的额度来源（5小时与7天两个窗口） | 目前未找到可读来源；不能用估算或第三方数字 | 找到稳定来源且字段含义可核对 | 两条进度与 Claude Code 自身显示一致；读不到时仍写“暂无法读取” |
+**共同约束（已确定）**
 
-B 段的协议在 happier 的 `DirectSessionProviderOps` 中为 Claude 增加 `send`、`readControl`／`control`、额度读取；手机沿用现有提问、审批界面，只按来源路由。B 段各项可以分别交付。
+- 手机端 ter 只使用 `daemon.directSessions.*` 这一组接口（列表、正文、发送、控制读写、状态、关注等），没有接入 happier 自己的会话协议（会话消息、`agentState.requests`、权限回复），也没有调用接管接口。
+- happier 的直连发送 `daemon.directSessions.send` 在 provider 没有 `send` 时返回 `provider_unavailable`；Claude 的 provider（`claude/directSessions/providerOps.ts`）只有列表、活动时间、正文分页、增量读、关注和接管参数，没有 `send`、`readControl`、`control`。
+- REQ-003 R-14：hooks 只上报会话编号、事件类型和时间，不记录命令内容等；R-15：hooks 必须很快结束，本应用未运行或出错时 Claude Code 照常工作。R-24：除 hooks 条目外不修改 Claude Code 的任何文件。这些是已确认范围，本设计不改动。
+- 官方文档（code.claude.com/docs/en/hooks）：`PermissionRequest` 钩子可用 `hookSpecificOutput.decision.behavior` 返回允许或拒绝；`PreToolUse` 可用 `permissionDecision` 加 `updatedInput` 回答 `AskUserQuestion`；钩子默认同步执行、默认超时600秒。要靠钩子从手机作答，钩子必须读取命令内容并同步等待手机，**与 R-14、R-15 直接冲突**，因此不作为可实施方案；如以后要走这条路，须另立需求经用户确认，不在本设计内。
 
-#### 11.6 代选决定记录
+**发送消息**
+
+- 现有能力：happier 有接管接口 `daemon.directSessions.takeover`（`rpcHandlers.directSessions.ts` 约第1002行），用 `resolveTakeoverSpawnOptions` 以 `resume=原会话编号` 启动 happier 自己管理的 Claude 进程；它只能识别 happier 自己启动的进程（会话标记 `findTrustedDirectSessionOwner`），识别不了 Claude 桌面 App 或终端里开着的同一会话。happier 的 `sdk/query.ts` 已能以 `--output-format stream-json`、`--resume`、`--permission-prompt-tool stdio` 启动 Claude Code。官方命令行文档列有 `-p`／`--print` 与 `--resume`。
+- 候选甲：为 Claude provider 新增 `send`，由 happier 后台以恢复会话的无界面方式追加一轮，复用 `sdk/query.ts`。手机继续走现有 `directSessions.send`，只按来源路由。
+- 候选乙：手机调用接管接口，再改用 happier 会话协议发消息。需要 ter 新增整套 happier 会话协议，改动远大于甲。
+- 需新增：Claude provider 的 `send`；发送前判断该会话是否正在别处运行（REQ-003 第6节已发现 Claude Code 有运行中会话登记，happier 尚未读取），正在运行则拒绝并说明；请求关联沿用现有 `localId` 去重；发送时带上手机所见的记录末端作为期望锚点，锚点变化时拒绝，避免在用户已在电脑上继续之后再插入一轮。锚点可选记录行的 `uuid` 字段（happier 的 Claude 记录测试样例中每行带 `uuid`），或现有增量读游标（`claudeForward`：文件路径加字节偏移，见 `readAfterClaudeTranscript.ts`）；二者在设计交审时择一。
+- 依赖外部：Claude Code 恢复会话的行为（同一会话是否允许两个进程并存、桌面 App 是否显示外部追加的轮次）官方文档未写明。
+- 仅剩运行验证：空闲会话追加一轮后记录完整、桌面 App 重新打开可见；会话在桌面 App 或终端运行时被识别并拒绝；记录未被写坏。
+
+**回答提问与审批**
+
+- 现有能力：happier 对自己启动的 Claude 运行已有权限处理：`utils/permissionHandler.ts` 通过 `--permission-prompt-tool stdio` 收到权限请求，写入 happier 会话的 `agentState.requests`；`utils/askUserQuestionAnswersForClaude.ts` 已有回答 `AskUserQuestion` 的转换。官方文档说明在 `-p` 模式下权限请求交给 `--permission-prompt-tool` 或 Agent SDK 的 `canUseTool`。
+- 可覆盖范围（已确定）：只有经 happier 发起的轮次（发送候选甲或乙）可以从手机作答；在 Claude 桌面 App 或终端里由用户自己发起的轮次，没有不违反 R-14／R-15 的作答通道，手机只能显示状态，回到电脑处理。
+- 需新增：Claude provider 的 `readControl`／`control`，把 happier 收到的权限请求和提问映射成手机现有的提问、审批界面所用的结构（`DesktopQuestion`、`DesktopApproval`），请求关联用 happier 的请求编号加会话编号；手机的提问、审批界面只按来源路由，不另做界面。“本会话始终允许”映射到权限请求的 `permission_suggestions`／`updatedPermissions`，范围以官方字段为准。
+- 依赖：发送候选甲先落地；“本会话始终允许”在恢复会话方式下的持久范围需运行确认。
+- 仅剩运行验证：允许、拒绝、本会话始终允许各一次；重复提交与迟到回答不生效；电脑端先处理后手机提交被拒。
+
+**Claude Code 额度**
+
+- 官方来源（已确定）：状态栏命令的输入 JSON 含 `rate_limits.five_hour.used_percentage`／`resets_at` 与 `rate_limits.seven_day.used_percentage`／`resets_at`（code.claude.com/docs/en/statusline）；只对 Pro、Max 订阅者，且在会话第一次请求之后出现。
+- 约束：要收到这些字段需在 Claude Code 设置里配置 `statusLine` 命令，这超出 REQ-003 R-11～R-13 只加 hooks 条目、R-24 不改其他文件的范围，**不作为可实施方案**；如需要须另立需求。
+- 现有能力：happier `connectedServices/quotaFetcher.ts` 已有 Claude 订阅额度读取，含 `five_hour`、`seven_day`，使用 happier“已连接服务”中保存的 Claude OAuth 凭据访问 `api.anthropic.com/api/oauth/usage`。该地址不在公开官方文档中，属未公开接口。另有 `rate_limit_event`（`createClaudeSessionTranscriptProjector`）只在 happier 自己运行 Claude 时收到。
+- 候选：复用 `quotaFetcher`，新增 Claude 的额度读取接口给手机。依赖用户在 happier 中连接 Claude 账号（凭据由用户自己完成），以及未公开接口的稳定性；数字须与 Claude Code 自身显示核对一致才可展示，否则继续写“暂无法读取”。
+- 仅剩运行验证：已连接账号时读取成功、两条进度和重置时间与 Claude Code 自身显示一致；未连接或接口变化时显示“暂无法读取”。
+
+B 段各项可以分别交付；每项的设计交审通过后再拆实施任务。
+
+#### 11.6 产品决定记录（Codex 依授权决定）
 
 | 需求编号 | 决定 | 落在本节 |
 |---|---|---|
