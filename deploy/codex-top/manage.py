@@ -34,6 +34,11 @@ FIELDS = ('ROOT IMAGE PORT PUBLIC_URL CPUS MEMORY PIDS LOG_SIZE LOG_FILES '
           'MIN_FREE_MEMORY_BYTES MIN_FREE_DISK_BYTES BACKUP_MAX_BYTES BACKUP_MAX_COUNT '
           'BACKUP_RECIPIENT WAIT_SECONDS STOP_SECONDS HTTPS_IMAGE HTTPS_CPUS HTTPS_MEMORY '
           'HTTPS_PIDS HTTPS_LOG_SIZE HTTPS_LOG_FILES').split()
+RPC_TRACE_FIELDS = ('RPC_RETURN_TRACE', 'RPC_RETURN_TRACE_UNTIL_MS', 'RPC_RETURN_TRACE_METHOD')
+RPC_TRACE_MAX_MS = 10 * 60 * 1000
+FCM_FIELDS = ('FCM_PROJECT_ID', 'FCM_SERVICE_ACCOUNT_FILE')
+FCM_TARGET = '/run/codex-top/fcm.json'
+FCM_LABEL = 'io.codex-top.fcm-config-sha256'
 ROLES = ('server', 'https')
 HTTPS_FIELDS = tuple(key for key in FIELDS if key.startswith('HTTPS_'))
 # 白名单固定本批已审 Caddyfile；模板变更必须与维护校验共同审查，不能自证任意上游合法。
@@ -78,13 +83,15 @@ def parse_env(text):
         if not line or line.startswith('#'):
             continue
         key, sep, value = line.partition('=')
-        require(sep and key in [PREFIX + k for k in FIELDS] and key not in values,
+        require(sep and key in [PREFIX + k for k in list(FIELDS) + list(RPC_TRACE_FIELDS) + list(FCM_FIELDS)] and key not in values,
                 '配置存在未知项或重复项')
         require(value and not any(c.isspace() or c in "\"'$\\#" or ord(c) == 96 for c in value),
                 '配置需填写无引号、无插值的单个值：' + key)
         values[key] = value
-    require(set(values) == {PREFIX + k for k in FIELDS}, '配置必填项不完整')
-    cfg = {k: values[PREFIX + k] for k in FIELDS}
+    require({PREFIX + k for k in FIELDS} <= set(values), '配置必填项不完整')
+    cfg = {k: values[PREFIX + k] for k in list(FIELDS) + list(RPC_TRACE_FIELDS) + list(FCM_FIELDS) if PREFIX + k in values}
+    rpc_trace_environment(cfg)
+    fcm_environment(cfg)
     require(cfg['ROOT'] == str(ROOT), '数据根目录必须为 /opt/codex-top')
     for key in ('IMAGE', 'HTTPS_IMAGE'):
         require(re.fullmatch(r'(?:sha256:|[a-zA-Z0-9._:/-]+@sha256:)[0-9a-f]{64}', cfg[key]),
@@ -104,6 +111,73 @@ def parse_env(text):
     return cfg
 
 
+def fcm_environment(cfg):
+    """仅完整显式二元组启用固定FCM项目；默认不生成环境或挂载。"""
+    present = set(FCM_FIELDS) & set(cfg)
+    require(not present or present == set(FCM_FIELDS), 'FCM 配置必须同时填写两个选项')
+    if not present:
+        return {}
+    require(cfg['FCM_PROJECT_ID'] == 'codex-top' and cfg['FCM_SERVICE_ACCOUNT_FILE'] == FCM_TARGET,
+            'FCM 仅允许 codex-top 项目及固定容器密钥路径')
+    return {'HAPPIER_' + key: cfg[key] for key in FCM_FIELDS}
+
+
+def fcm_digest():
+    """指纹只覆盖已审公开配置和固定挂载路径，绝不读取或散列密钥正文。"""
+    value = {'project': 'codex-top', 'source': str(ROOT / 'secrets/fcm.json'), 'target': FCM_TARGET}
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def check_fcm_secret(cfg):
+    """启用时只检查普通文件、所有者及权限；缺省不访问密钥路径，不自动创建或修复。"""
+    if not fcm_environment(cfg):
+        return
+    directory = ROOT / 'secrets'
+    secret = directory / 'fcm.json'
+    private_path(secret)
+    require(directory.is_dir(), 'FCM secrets 目录不存在')
+    info = directory.stat()
+    require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700, 'FCM secrets 目录需 root 持有且权限 700')
+    require(secret.is_file(), 'FCM 密钥必须为预先安装的普通文件')
+    info = secret.stat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == 1000 and stat.S_IMODE(info.st_mode) == 0o400
+            and 0 < info.st_size <= 65536, 'FCM 密钥需 UID 1000 持有、权限 400 且大小在 1..65536 字节')
+
+
+def rpc_trace_environment(cfg):
+    """仅允许完整诊断三元组；历史截止时间只做结构校验，不妨碍备份与恢复。"""
+    present = set(RPC_TRACE_FIELDS) & set(cfg)
+    require(not present or present == set(RPC_TRACE_FIELDS), 'RPC 诊断配置必须同时填写三个选项')
+    if not present:
+        return {}
+    require(cfg['RPC_RETURN_TRACE'] == '1', 'RPC 诊断开关仅接受 1；关闭时删除三个选项')
+    require(cfg['RPC_RETURN_TRACE_METHOD'] in ('send', 'readAfter'), 'RPC 诊断方法只允许 send/readAfter')
+    require(isinstance(cfg['RPC_RETURN_TRACE_UNTIL_MS'], str)
+            and re.fullmatch(r'[0-9]{13}', cfg['RPC_RETURN_TRACE_UNTIL_MS']), 'RPC 诊断截止需为 13 位绝对毫秒时间')
+    return {'HAPPIER_' + key: cfg[key] for key in RPC_TRACE_FIELDS}
+
+
+def rpc_trace_window_active(cfg):
+    """只在新启用边界检查有限窗口；关闭时不读取时钟。"""
+    if not rpc_trace_environment(cfg):
+        return True
+    remaining = int(cfg['RPC_RETURN_TRACE_UNTIL_MS']) - int(time.time() * 1000)
+    return 0 < remaining <= RPC_TRACE_MAX_MS
+
+
+def without_rpc_trace(release):
+    """恢复/到期时生成关闭诊断的发布副本，不改原归档，不延长旧窗口。"""
+    if not rpc_trace_environment(release['config']):
+        return release
+    model = validate_release(release)
+    for key in RPC_TRACE_FIELDS:
+        model['services']['server']['environment'].pop('HAPPIER_' + key)
+    config = {key: value for key, value in release['config'].items() if key not in RPC_TRACE_FIELDS}
+    result = dict(release, config=config, compose=json.dumps(model, default=str))
+    validate_release(result)
+    return result
+
+
 def public_ip(cfg):
     """要求唯一 origin 为规范的 https://IPv4；443 固定，不接受另一份 IP 配置。"""
     origin = urlsplit(cfg['PUBLIC_URL'])
@@ -117,11 +191,14 @@ def caddy_digest(release):
     return hashlib.sha256(release['caddyfile'].encode()).hexdigest()
 
 
-def expected_mounts(role, digest=CADDYFILE_SHA256):
+def expected_mounts(role, digest=CADDYFILE_SHA256, fcm=False):
     """两个已审模板各自绑定唯一挂载集合；旧归档不被强加新目录。"""
     require(role in ROLES, '未知服务角色')
     if role == 'server':
-        return {'/data': (str(ROOT / 'data'), False)}
+        mounts = {'/data': (str(ROOT / 'data'), False)}
+        if fcm:
+            mounts[FCM_TARGET] = (str(ROOT / 'secrets/fcm.json'), True)
+        return mounts
     require(digest in CADDY_MOUNTS, '既有代理的 Caddyfile 标签不属于已审版本')
     mounts = {'/etc/caddy/Caddyfile': (str(ROOT / 'Caddyfile'), True),
               '/data': (str(ROOT / 'https/data'), False),
@@ -132,7 +209,8 @@ def expected_mounts(role, digest=CADDYFILE_SHA256):
 
 def env_text(cfg):
     """把已验证配置写成确定顺序，不存放账号、密码或服务主密钥。"""
-    return ''.join(PREFIX + k + '=' + cfg[k] + '\n' for k in FIELDS)
+    return ''.join(PREFIX + k + '=' + cfg[k] + '\n'
+                   for k in list(FIELDS) + list(RPC_TRACE_FIELDS) + list(FCM_FIELDS) if k in cfg)
 
 
 @contextlib.contextmanager
@@ -144,14 +222,31 @@ def compose_command(release):
                    'CODEX_TOP_CADDYFILE_SHA256=' + caddy_digest(release) + '\n')
         (directory / '.env').write_text(env_text(release['config']) + derived)
         (directory / 'compose.yaml').write_text(release['compose'])
-        yield compose_cli() + ['--project-name', PROJECT, '--env-file', directory / '.env',
-                               '-f', directory / 'compose.yaml']
+        command = compose_cli() + ['--project-name', PROJECT, '--env-file', directory / '.env',
+                                   '-f', directory / 'compose.yaml']
+        trace_env = rpc_trace_environment(release['config'])
+        if trace_env:
+            # 固定环境 overlay 不接受任意字段；旧配置不生成额外文件/变量。
+            overlay = directory / 'rpc-trace.json'
+            overlay.write_text(json.dumps({'services': {'server': {'environment': trace_env}}}))
+            command += ['-f', overlay]
+        fcm_env = fcm_environment(release['config'])
+        if fcm_env:
+            # 独立可选overlay只增加固定只读文件；create_host_path=false禁止缺文件时创建目录。
+            overlay = directory / 'fcm.json'
+            overlay.write_text(json.dumps({'services': {'server': {
+                'environment': fcm_env, 'labels': {FCM_LABEL: fcm_digest()},
+                'volumes': [{'type': 'bind', 'source': str(ROOT / 'secrets/fcm.json'),
+                             'target': FCM_TARGET, 'read_only': True, 'bind': {'create_host_path': False}}]}}}))
+            command += ['-f', overlay]
+        yield command
 
 def validate_release(release):
     """精确校验两个固定角色、端口/挂载/配额及模板，拒绝第三服务和不受控代理配置。"""
     require(isinstance(release, dict) and release.get('schema') == 2,
             '仅接受两服务 schema=2 快照；旧快照需单独审核迁移')
-    require(set(release['config']) == set(FIELDS), '归档配置字段不完整或含额外项')
+    require(set(FIELDS) <= set(release['config'])
+            <= set(FIELDS) | set(RPC_TRACE_FIELDS) | set(FCM_FIELDS), '归档配置字段不完整或含额外项')
     cfg = parse_env(env_text(release['config']))
     require(isinstance(release['caddyfile'], str) and caddy_digest(release) in CADDY_MOUNTS,
             'Caddyfile 不符合新旧已审固定模板')
@@ -172,6 +267,8 @@ def validate_release(release):
                   'HAPPIER_FEATURE_AUTH_LOGIN__KEY_CHALLENGE_ENABLED': 'true',
                   'AUTH_ANONYMOUS_SIGNUP_ENABLED': 'false', 'AUTH_SIGNUP_PROVIDERS': '',
                   'AUTH_REQUIRED_LOGIN_PROVIDERS': ''}
+    server_env.update(rpc_trace_environment(cfg))
+    server_env.update(fcm_environment(cfg))
     for role in ROLES:
         service = model['services'][role]
         prefix = '' if role == 'server' else 'HTTPS_'
@@ -187,7 +284,7 @@ def validate_release(release):
         require(len(ports) == 1 and ports[0]['host_ip'] == host_ip
                 and str(ports[0]['published']) == published and ports[0]['target'] == target
                 and ports[0].get('protocol', 'tcp') == 'tcp', role + ' 端口边界不符')
-        expected = expected_mounts(role, caddy_digest(release))
+        expected = expected_mounts(role, caddy_digest(release), bool(fcm_environment(cfg)))
         mounts = service['volumes']
         require(len(mounts) == len(expected) and {mount['target'] for mount in mounts} == set(expected),
                 role + ' 挂载数量或目标不符')
@@ -195,6 +292,8 @@ def validate_release(release):
             source, readonly = expected[mount['target']]
             require(mount['type'] == 'bind' and mount['source'] == source
                     and bool(mount.get('read_only')) == readonly, role + ' 挂载越界')
+            if mount['target'] == FCM_TARGET:
+                require(mount.get('bind', {}).get('create_host_path') is False, 'FCM 挂载禁止自动创建宿主路径')
         require(set(service['networks']) == {'private'}, role + ' 连接了其他网络')
         require(service['cap_drop'] == ['ALL'] and service['security_opt'] == ['no-new-privileges:true']
                 and service.get('cap_add', []) == ([] if role == 'server' else ['NET_BIND_SERVICE']),
@@ -212,7 +311,8 @@ def validate_release(release):
         expected_env = server_env if role == 'server' else {
             'PUBLIC_IP': public_ip(cfg), 'XDG_DATA_HOME': '/data', 'XDG_CONFIG_HOME': '/config'}
         require(service['environment'] == expected_env, role + ' 环境变量越界')
-        labels = {} if role == 'server' else {'io.codex-top.caddyfile-sha256': caddy_digest(release)}
+        labels = ({FCM_LABEL: fcm_digest()} if fcm_environment(cfg) else {}) if role == 'server' else {
+            'io.codex-top.caddyfile-sha256': caddy_digest(release)}
         require(service.get('labels', {}) == labels, role + ' 配置标签不符')
         health = (['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:3005/ready'] if role == 'server'
                   else ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:2019/config/'])
@@ -253,7 +353,18 @@ def own_containers(containers):
         port = int(binding['HostPort'])
         require((role == 'server' and 1024 <= port <= 65535) or (role == 'https' and port == 443),
                 '既有容器端口范围不符')
-        expected = expected_mounts(role, labels.get('io.codex-top.caddyfile-sha256'))
+        fcm = FCM_LABEL in labels
+        if fcm:
+            require(role == 'server' and labels[FCM_LABEL] == fcm_digest(), '既有 FCM 配置指纹不符')
+        fcm_env = {}
+        for entry in item['Config'].get('Env') or []:
+            key, sep, value = entry.partition('=')
+            if key.startswith('HAPPIER_FCM_'):
+                require(sep and key not in fcm_env, '既有 FCM 环境重复或格式不符')
+                fcm_env[key] = value
+        approved_fcm = fcm_environment({'FCM_PROJECT_ID': 'codex-top', 'FCM_SERVICE_ACCOUNT_FILE': FCM_TARGET})
+        require(fcm_env == (approved_fcm if fcm else {}), '既有 FCM 环境与配置指纹不符')
+        expected = expected_mounts(role, labels.get('io.codex-top.caddyfile-sha256'), fcm)
         mounts = item['Mounts']
         require(len(mounts) == len(expected) and {mount['Destination'] for mount in mounts} == set(expected),
                 '既有容器挂载目标不属于本部署')
@@ -310,6 +421,7 @@ def host_guard():
 def preflight(release):
     """只读核对双镜像、合计预算、回环/443 端口和网络端点；不拉取、不签发。"""
     cfg = release['config']
+    check_fcm_secret(cfg)
     run(['age', '-a', '-r', cfg['BACKUP_RECIPIENT']], input_text='')
     for role in ROLES:
         key = 'IMAGE' if role == 'server' else 'HTTPS_IMAGE'
@@ -421,6 +533,8 @@ def materialize_https_config(release):
 
 def start(release, role='server', restore_https=False):
     """按角色推进记录并启动；业务尝试保留当前代理，显式空 TLS 灾备使用完整归档版本。"""
+    if role == 'server':
+        check_fcm_secret(release['config'])
     require(role in ROLES, '未知服务角色')
     owned = own_containers(inspect_containers())
     if role == 'server':
@@ -456,6 +570,10 @@ def start(release, role='server', restore_https=False):
         image_id = release['image_id' if role == 'server' else 'https_image_id']
         require(own and own['Image'] == image_id and own['State']['Running']
                 and own['State'].get('Health', {}).get('Status') == 'healthy', role + ' 启动后镜像或健康不符')
+        if role == 'server':
+            expected_fcm = fcm_digest() if fcm_environment(release['config']) else None
+            require(own['Config'].get('Labels', {}).get(FCM_LABEL) == expected_fcm,
+                    '启动后的 FCM 配置指纹与本次发布不一致')
         if role == 'https':
             save_release(release)
     except Exception:
@@ -539,6 +657,7 @@ def resume_backup_roles(release, original, resume_server):
 def backup(release, policy, resume):
     """短停两服务归档业务/TLS；升级快照也恢复原代理，异常只恢复原来运行的实例。"""
     validate_release(release)
+    check_fcm_secret(release['config'])
     original = own_containers(inspect_containers())
     require('server' in original, '缺少业务容器，拒绝生成误标备份')
     for role, item in original.items():
@@ -638,6 +757,7 @@ def rollback(args, policy):
                 process.wait()
         release = json.loads((temp / 'release.json').read_text())
         validate_release(release)
+        release = without_rpc_trace(release)
         restore_https = getattr(args, 'restore_https_state', False)
         if restore_https:
             require(release['config']['PUBLIC_URL'] == policy['PUBLIC_URL'], '灾备 PUBLIC_URL 与当前入口不一致')
@@ -866,6 +986,8 @@ def main():
     if args.action == 'check':
         print('静态配置通过；未连接 Docker daemon，也未验证 Caddy 运行或证书。')
         return
+    if args.action in ('preflight', 'deploy'):
+        require(rpc_trace_window_active(cfg), 'RPC 诊断新启用需为未来且不超过 10 分钟的绝对截止时间')
     require(Path(args.env) == ROOT / '.env' and HERE == ROOT, '实际操作只允许已安装的 /opt/codex-top 包')
     host_guard()
     before = preflight(release) if args.action in ('preflight', 'deploy') else inspect_containers()
@@ -907,10 +1029,15 @@ def main():
                 require(args.archive and args.identity, '回滚必须指定 --archive 和 --identity')
                 rollback(args, cfg)
             else:
+                # 再查短停前边界；历史读取/备份/回滚不会走这项新启用校验。
+                require(rpc_trace_window_active(cfg), 'RPC 诊断窗口已失效；尚未停止服务')
                 owned = own_containers(before)
                 if owned or any((ROOT / 'data').iterdir()):
                     backup(load_release(), cfg, resume=False)
                 try:
+                    if not rpc_trace_window_active(release['config']):
+                        release = without_rpc_trace(release)
+                        print('RPC 诊断窗口已失效，关闭诊断并继续正常业务发布；未延长截止时间。')
                     start(release)
                     start(release, 'https')
                 except Exception:

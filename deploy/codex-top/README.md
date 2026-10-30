@@ -78,6 +78,24 @@ sudoedit /opt/codex-top/.env
 - BACKUP_RECIPIENT：age 公钥。离机运行 `age-keygen -o codex-top-backup.key` 创建私钥，只将公钥写入配置。业务运行不需要私钥。
 - WAIT_SECONDS/STOP_SECONDS：启动健康等待和优雅停止的秒数。
 
+### 可选的一次 RPC 回包诊断
+
+默认不配置诊断，旧 `.env` 与 schema=2 归档保持兼容。只有已安装并核验支持该功能的固定业务镜像，才能使用下列三个可选项；维护器支持配置不代表现网镜像已包含诊断代码。需要启用时在既有 `.env` 同时填写，名称均带 `CODEX_TOP_` 前缀：
+
+| 配置 | 允许值 |
+| --- | --- |
+| RPC_RETURN_TRACE | 仅 `1`；关闭时删除全部三个选项 |
+| RPC_RETURN_TRACE_METHOD | `send` 或 `readAfter`，不接受其他 RPC 方法 |
+| RPC_RETURN_TRACE_UNTIL_MS | 明确的 13 位绝对 Unix 毫秒截止时间 |
+
+维护器只为此完整三元组生成固定环境 overlay，向 server 精确加入同名 `HAPPIER_` 前缀的三个变量；不向 https 注入，不接受任意环境扩展，不修改端口、挂载、权限和资源。默认无三元组时不生成 overlay，原 Compose 模板无需新增默认变量。
+
+新 `preflight` / `deploy` 要求截止时间在未来且不超过 10 分钟；部署在短停前复核。完整备份耗时可能用尽窗口，若备份后已失效，维护器明确报告关闭诊断，并继续正常业务发布，不延长窗口、不让诊断过期导致业务持续停服。服务自身也在请求认领/回调时检查截止时间。因此即使新业务健康，也可能没有发生本次观测，须以有限诊断记录为准。
+
+归档读取、备份、停止与恢复只验证诊断配置的结构，不因历史截止已过而拒绝。回滚生成关闭诊断的目标副本并记录实际配置，不改原归档，也不重新武装仍在未来的旧窗口。保留兼容新旧发布记录的维护器；不要直接降级到不认识可选字段的旧脚本。诊断结束后删除 `.env` 中全部三个可选项，以免下次新发布被过期配置拒绝。
+
+业务诊断是每进程最多认领一个所选方法、最多 10 条有限元数据，到期清理；窗口内进程重启可能重新认领，验收必须同时记录 restart。`send` 不会被后台 `readAfter` 抢占，但首个匹配 SEND 即使后来被拒绝也可能消耗额度。`caller_flush` 只表示进入 Engine.IO 的 flush 边界，不证明 TCP、手机或界面收到。诊断不增加发送重试、正文记录、网络监听端口或常驻轮询。
+
 ```sh
 # 静态解析，不访问 Docker daemon；开发机使用独立合成配置。
 python3 manage.py check --env /absolute/path/to/synthetic.env
@@ -199,3 +217,21 @@ codex_top_maint publish-android --manifest /absolute/path/manifest.json --apk /a
 发布复核严格九字段合同（schema、packageName、versionCode、versionName、minSdk、abi、apkUrl、sizeBytes、sha256）、产品包名、arm64-v8a、同 origin 精确固定路径、大小不超过256MiB及真实文件哈希。流式校验复制使用64KiB缓冲。共享维护锁下先写完整不可变包、落盘，再原子替换清单；旧清单不会指向半包。同名包不覆盖、重复发布仍复核内容；降版或同版本不同清单拒绝。清单替换失败可能留下完整未引用包，可复用重试；不会自动删包、业务文件或记录。
 
 清单 `Cache-Control: no-cache`，APK `public, max-age=31536000, immutable`；ETag、条件读取与 Range 沿用 [Caddy file_server](https://caddyserver.com/docs/caddyfile/directives/file_server) 的实现。此处官方语法核对不代替目标 Caddy 实际解析及 HTTP200/304/206验收。`updates` 不进入账户/数据库灾备归档；保留可再发布的签名原包、清单与哈希。更新目录只放发布资源，root持有，不允许符号链接、特殊文件和组/其他用户可写资源。清理沿项目产物保留规则人工核对当前、上一版及设备仍在使用的包，不因新清单发布立即删除旧下载地址。
+
+
+## 独立 Android FCM 可选配置
+
+默认关闭，旧 `.env` 和 Compose 不需要密钥文件。启用时在现有 `.env` 同时增加：
+
+```dotenv
+CODEX_TOP_FCM_PROJECT_ID=codex-top
+CODEX_TOP_FCM_SERVICE_ACCOUNT_FILE=/run/codex-top/fcm.json
+```
+
+维护器只接受这两个固定值，生成临时可选 overlay：只向 server 注入同名 `HAPPIER_FCM_*` 变量，并将宿主 `/opt/codex-top/secrets/fcm.json` 只读绑定到容器 `/run/codex-top/fcm.json`。Compose 禁止为缺失文件自动创建宿主目录；https 不获得密钥挂载。配置指纹只覆盖公开项目、文件位置，纳入发布记录和既有容器白名单，不包含密钥正文或密钥摘要。
+
+正式启用前由已授权的秘密安装流程准备目录及文件：`secrets` 目录由 root 持有、权限 700；`fcm.json` 为 UID 1000 持有的普通文件、权限 400，大小不超过 64 KiB。路径不能经过符号链接。维护器只校验文件元数据，不读取密钥内容、不自动创建文件、不改变所有者或权限。缺文件或权限不符会在部署预检、备份停服前及业务启动前拒绝；静态 `check` 只验证配置，不表示凭据有效或推送送达。
+
+密钥不进入 `.env`、Git、release.json 或现有业务／TLS备份。灾备恢复启用FCM的版本前，必须通过秘密管理流程重新安装该文件；旧归档未启用时仍按旧挂载运行。关闭时删除上述两个配置项，并使用本版源 Compose 模板执行正常发布，使环境和挂载一起移除；不直接编辑归档来掩盖仍在运行的挂载。RPC 限时诊断 overlay 与此配置独立，关闭诊断不会关闭FCM。
+
+此处合成验证只覆盖配置、归属及元数据边界；服务账号权限、真实 Compose、服务器发送和实体 Android 后台／锁屏／系统回收后送达需另行验收。

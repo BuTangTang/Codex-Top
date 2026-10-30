@@ -22,6 +22,7 @@ services:
       AUTH_ANONYMOUS_SIGNUP_ENABLED: "false"
       AUTH_SIGNUP_PROVIDERS: ""
       AUTH_REQUIRED_LOGIN_PROVIDERS: ""
+    # FCM 仅由 manage.py 在显式启用时生成固定只读 overlay；默认不要求密钥文件。
     volumes:
       - "/opt/codex-top/data:/data"
     networks:

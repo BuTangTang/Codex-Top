@@ -51,6 +51,24 @@ def render_fixture(command):
     # 环境名可含数字，尤其是配置指纹的 SHA256；不要把未展开值误当真实 Compose 结果。
     text = re.sub(r'\$\{([A-Z_][A-Z0-9_]*)(?::\?[^}]*)?\}', lambda match: env[match[1]], text)
     model = yaml.safe_load(text)
+    # 仅模拟 Compose 多文件映射合并；环境 overlay 来自实际维护器写出的文件。
+    def merge_mapping(target, incoming):
+        """模拟本次overlay涉及的映射及以容器目标为键的卷合并，不掩盖额外挂载。"""
+        for key, value in incoming.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                merge_mapping(target[key], value)
+            elif key == 'volumes' and isinstance(value, list) and isinstance(target.get(key), list):
+                def destination(mount):
+                    """长短卷语法均按容器目标合并，与Compose同类卷规则一致。"""
+                    return mount['target'] if isinstance(mount, dict) else mount.split(':')[1]
+                combined = {destination(mount): mount for mount in target[key]}
+                combined.update({destination(mount): mount for mount in value})
+                target[key] = list(combined.values())
+            else:
+                target[key] = value
+    files = [command[i + 1] for i, value in enumerate(command) if value == '-f']
+    for filename in files[1:]:
+        merge_mapping(model, yaml.safe_load(Path(filename).read_text()))
     for service in model['services'].values():
         if isinstance(service.get('networks'), list):
             service['networks'] = {name: None for name in service['networks']}
@@ -97,6 +115,8 @@ def container_fixture(role, release, running=True):
     cfg = release['config']
     if role == 'server':
         mounts = [(m.ROOT / 'data', '/data', True)]
+        if m.fcm_environment(cfg):
+            mounts.append((m.ROOT / 'secrets/fcm.json', m.FCM_TARGET, False))
         port, target = cfg['PORT'], '3005/tcp'
     else:
         mounts = [(m.ROOT / 'Caddyfile', '/etc/caddy/Caddyfile', False),
@@ -106,8 +126,11 @@ def container_fixture(role, release, running=True):
         port, target = '443', '443/tcp'
     return {'Id': 'synthetic-' + role,
             'Image': release['image_id' if role == 'server' else 'https_image_id'],
-            'Config': {'User': '1000:1000', 'Labels': {'com.docker.compose.project': m.PROJECT, 'com.docker.compose.service': role,
-                **({'io.codex-top.caddyfile-sha256': m.caddy_digest(release)} if role == 'https' else {})}},
+            'Config': {'User': '1000:1000',
+                       'Env': [key + '=' + value for key, value in m.fcm_environment(cfg).items()] if role == 'server' else [],
+                       'Labels': {'com.docker.compose.project': m.PROJECT, 'com.docker.compose.service': role,
+                **({'io.codex-top.caddyfile-sha256': m.caddy_digest(release)} if role == 'https' else
+                   {m.FCM_LABEL: m.fcm_digest()} if m.fcm_environment(cfg) else {})}},
             'Mounts': [{'Type': 'bind', 'Source': str(source), 'Destination': dest, 'RW': rw}
                        for source, dest, rw in mounts],
             'NetworkSettings': {'Networks': {m.NETWORK: {}}},
@@ -130,6 +153,7 @@ class ExternalCommands:
         self.fail_up_before = None
         self.fail_inspects = 0
         self.foreign_network = False
+        self.up_models = []
 
     def __call__(self, args, input_text=None):
         """响应白名单命令；任何新增或意外外部操作都明确失败，不回落真实 Docker。"""
@@ -150,6 +174,7 @@ class ExternalCommands:
                     callback(role)
                 return ''
             if 'up' in args:
+                self.up_models.append((role, copy.deepcopy(model)))
                 if self.fail_up_before == role:
                     raise RuntimeError('synthetic-up-before-failure')
                 current = self.containers.get(role)
@@ -400,6 +425,177 @@ class StaticConfigTests(BoundaryTests):
         with self.assertRaisesRegex(RuntimeError, '合计内存'):
             m.preflight(self.release)
         self.assertFalse(any('up' in args for args in self.external.commands))
+
+
+class RpcTraceConfigTests(BoundaryTests):
+    """真实配置/发布/归档 owner；仅时钟和系统外部命令使用合成边界。"""
+
+    NOW = 1800000000
+    TRACE_KEYS = ('RPC_RETURN_TRACE', 'RPC_RETURN_TRACE_UNTIL_MS', 'RPC_RETURN_TRACE_METHOD')
+
+    def trace_release(self, remaining_ms=60000, method='send'):
+        release = copy.deepcopy(self.release)
+        release['config'].update(RPC_RETURN_TRACE='1', RPC_RETURN_TRACE_METHOD=method,
+                                 RPC_RETURN_TRACE_UNTIL_MS=str(self.NOW * 1000 + remaining_ms))
+        return release
+
+    def trace_env(self, release):
+        return {'HAPPIER_' + key: release['config'][key] for key in self.TRACE_KEYS}
+
+    def install_synthetic_config(self, release):
+        (self.root / '.env').write_text(m.env_text(release['config']))
+        (self.root / 'compose.yaml').write_text(release['compose'])
+        (self.root / 'Caddyfile').chmod(0o644)
+        patch.object(m, 'HERE', self.root).start()
+        patch.object(m, 'host_guard').start()  # 外部 Linux/root/cgroup 检查，不替代维护流程。
+        self.host_boundaries()
+
+    def run_main(self, action):
+        previous_umask = os.umask(0o077)
+        try:
+            with patch.object(sys, 'argv', ['manage.py', action, '--env', str(self.root / '.env')]):
+                m.main()
+        finally:
+            os.umask(previous_umask)
+
+    def test_old_config_keeps_identical_bytes_and_no_trace_environment(self):
+        original = ''.join('CODEX_TOP_' + key + '=' + self.release['config'][key] + '\n' for key in m.FIELDS)
+        with patch.object(m.time, 'time', side_effect=AssertionError('default must not read clock')):
+            self.assertEqual(m.env_text(self.release['config']), original)
+            self.assertEqual(m.parse_env(original), self.release['config'])
+            model = m.validate_release(self.release)
+            self.save_current()
+            self.assertEqual(m.load_release(), self.release)
+        self.assertFalse(any(key.startswith('HAPPIER_RPC_RETURN_TRACE')
+                             for service in model['services'].values() for key in service['environment']))
+
+    def test_optional_tuple_roundtrip_and_exact_rendered_environments(self):
+        baseline = m.validate_release(self.release)
+        for method in ('send', 'readAfter'):
+            release = self.trace_release(method=method)
+            with self.subTest(method=method):
+                self.assertEqual(m.parse_env(m.env_text(release['config'])), release['config'])
+                model = m.validate_release(release)
+                self.assertEqual(model['services']['server']['environment'],
+                                 baseline['services']['server']['environment'] | self.trace_env(release))
+                self.assertEqual(model['services']['https'], baseline['services']['https'])
+
+    def test_partial_unknown_or_malformed_trace_configuration_is_rejected(self):
+        base = m.env_text(self.release['config'])
+        values = self.trace_release()['config']
+        lines = ['CODEX_TOP_' + key + '=' + values[key] + '\n' for key in self.TRACE_KEYS]
+        invalid = [base + ''.join(line for bit, line in enumerate(lines) if mask & (1 << bit))
+                   for mask in range(1, 7)]
+        valid = base + ''.join(lines)
+        invalid += [valid.replace('TRACE=1\n', 'TRACE=0\n'),
+                    valid.replace('METHOD=send', 'METHOD=upload'),
+                    valid.replace(values['RPC_RETURN_TRACE_UNTIL_MS'], '123456789012'),
+                    valid.replace(values['RPC_RETURN_TRACE_UNTIL_MS'], '12345678901234'),
+                    valid.replace(values['RPC_RETURN_TRACE_UNTIL_MS'], '180000006000x'),
+                    valid + lines[0], valid + 'CODEX_TOP_RPC_RETURN_TRACE_SECRET=x\n',
+                    base + 'HAPPIER_RPC_RETURN_TRACE=1\n']
+        for i, text in enumerate(invalid):
+            with self.subTest(case=i), self.assertRaises(RuntimeError):
+                m.parse_env(text)
+        release = self.trace_release()
+        release['config']['RPC_RETURN_TRACE_SECRET'] = 'x'
+        with self.assertRaises(RuntimeError):
+            m.validate_release(release)
+
+    def test_trace_does_not_relax_environment_or_permission_guards(self):
+        release = self.trace_release()
+        original = m.validate_release(release)
+        for mutate in (lambda model: model['services']['server']['environment'].update(UNREVIEWED='1'),
+                       lambda model: model['services']['https']['environment'].update(HAPPIER_RPC_RETURN_TRACE='1'),
+                       lambda model: model['services']['server']['ports'][0].update(host_ip='0.0.0.0'),
+                       lambda model: model['services']['server']['cap_drop'].clear()):
+            model = copy.deepcopy(original)
+            mutate(model)
+            with self.subTest(mutation=mutate), self.assertRaises(RuntimeError):
+                m.validate_release(dict(release, compose=json.dumps(model, default=str)))
+        # 默认配置下，即使 compose 自行注入白名单诊断变量也不可启用。
+        model = m.validate_release(self.release)
+        model['services']['server']['environment'].update(self.trace_env(release))
+        with self.assertRaises(RuntimeError):
+            m.validate_release(dict(self.release, compose=json.dumps(model, default=str)))
+
+    def test_expired_release_remains_readable_and_backup_preserves_deadline(self):
+        release = self.trace_release(remaining_ms=-1)
+        with patch.object(m.time, 'time', return_value=self.NOW):
+            m.save_release(release)
+            self.assertEqual(m.load_release(), release)
+            archive = m.backup(release, release['config'], resume=True)
+            with tarfile.open(archive) as stored:
+                self.assertEqual(json.load(stored.extractfile('release.json')), release)
+        self.assertTrue(all(item['State']['Running'] for item in self.external.containers.values()))
+
+    def test_new_deploy_rejects_invalid_window_before_stopping(self):
+        self.save_current()
+        for remaining in (-1, 0, 600001):
+            release = self.trace_release(remaining_ms=remaining)
+            self.install_synthetic_config(release)
+            with self.subTest(remaining=remaining), patch.object(m.time, 'time', return_value=self.NOW):
+                with self.assertRaisesRegex(RuntimeError, '诊断'):
+                    self.run_main('deploy')
+            self.assertFalse(any('stop' in args or 'up' in args for args in self.external.commands))
+
+    def test_static_check_and_backup_accept_expired_config_but_new_preflight_rejects(self):
+        self.release = self.trace_release(remaining_ms=-1)
+        self.save_current()
+        self.install_synthetic_config(self.release)
+        with patch.object(m.time, 'time', return_value=self.NOW):
+            self.run_main('check')
+            with self.assertRaisesRegex(RuntimeError, '诊断'):
+                self.run_main('preflight')
+            self.assertFalse(any('stop' in args or 'up' in args for args in self.external.commands))
+            self.run_main('backup')
+        archive, = (self.root / 'backups').iterdir()
+        with tarfile.open(archive) as stored:
+            self.assertEqual(json.load(stored.extractfile('release.json')), self.release)
+
+    def test_new_deploy_uses_all_three_trace_values_without_refreshing_deadline(self):
+        self.save_current()
+        release = self.trace_release(remaining_ms=600000)
+        self.install_synthetic_config(release)
+        with patch.object(m.time, 'time', return_value=self.NOW):
+            self.run_main('deploy')
+        server_model, = [model for role, model in self.external.up_models if role == 'server']
+        for key, value in self.trace_env(release).items():
+            self.assertEqual(server_model['services']['server']['environment'][key], value)
+        self.assertEqual(m.load_release()['config'], release['config'])
+
+    def test_deadline_expiring_during_backup_starts_business_with_diagnostic_off(self):
+        self.save_current()
+        release = self.trace_release(remaining_ms=1000)
+        self.install_synthetic_config(release)
+        now = [self.NOW]
+        self.external.after_stop = lambda role: now.__setitem__(0, self.NOW + 2)
+        output = io.StringIO()
+        with patch.object(m.time, 'time', side_effect=lambda: now[0]), patch('sys.stdout', output):
+            self.run_main('deploy')
+        self.assertIn('诊断', output.getvalue())
+        self.assertIn('关闭', output.getvalue())
+        self.assertTrue(all(item['State']['Running'] for item in self.external.containers.values()))
+        server_model, = [model for role, model in self.external.up_models if role == 'server']
+        self.assertFalse(any(key.startswith('HAPPIER_RPC_RETURN_TRACE')
+                             for key in server_model['services']['server']['environment']))
+        self.assertFalse(set(self.TRACE_KEYS) & set(m.load_release()['config']))
+
+    def test_rollback_of_past_or_future_trace_archive_does_not_rearm(self):
+        self.save_current()
+        self.host_boundaries()
+        for remaining in (-1, 60000):
+            with self.subTest(remaining=remaining):
+                self.release = self.trace_release(remaining_ms=remaining)
+                archive = self.make_archive(marker='trace' + str(remaining))
+                original = archive.read_bytes()
+                with patch.object(m.time, 'time', return_value=self.NOW):
+                    m.rollback(self.rollback_args(archive), self.release['config'])
+                self.assertFalse(set(self.TRACE_KEYS) & set(m.load_release()['config']))
+                model = self.external.up_models[-1][1]
+                self.assertFalse(any(key.startswith('HAPPIER_RPC_RETURN_TRACE')
+                                     for key in model['services']['server']['environment']))
+                self.assertEqual(archive.read_bytes(), original)
 
 
 class OperationTests(BoundaryTests):
@@ -947,6 +1143,169 @@ https://{$PUBLIC_IP} {
                         m.deploy_https(self.release)
                 else:
                     m.deploy_https(self.release)
+
+
+class FcmOptionalTests(BoundaryTests):
+    """仅验证可选FCM配置及合成文件元数据，不读取真实密钥。"""
+
+    def enabled_release(self):
+        """以固定项目和容器路径创建显式启用副本。"""
+        release = copy.deepcopy(self.release)
+        release['config'].update(FCM_PROJECT_ID='codex-top', FCM_SERVICE_ACCOUNT_FILE='/run/codex-top/fcm.json')
+        return release
+
+    def test_default_has_no_fcm_mount_or_environment(self):
+        """旧配置不要求凭据文件，环境序列化维持原字节。"""
+        original = ''.join('CODEX_TOP_' + key + '=' + self.release['config'][key] + '\n' for key in m.FIELDS)
+        self.assertEqual(m.env_text(self.release['config']), original)
+        self.assertEqual(m.fcm_environment(self.release['config']), {})
+        with patch.object(Path, 'stat', side_effect=AssertionError('disabled must not inspect credential')):
+            m.check_fcm_secret(self.release['config'])
+        model = m.validate_release(self.release)
+        self.assertEqual(len(model['services']['server']['volumes']), 1)
+
+    def test_enabled_overlay_is_fixed_and_archivable(self):
+        """环境、只读挂载和配置指纹进入release，未启用的代理保持原样。"""
+        release = self.enabled_release()
+        model = m.validate_release(release)
+        server = model['services']['server']
+        self.assertEqual(server['environment']['HAPPIER_FCM_PROJECT_ID'], 'codex-top')
+        self.assertEqual(server['environment']['HAPPIER_FCM_SERVICE_ACCOUNT_FILE'], '/run/codex-top/fcm.json')
+        mount = next(value for value in server['volumes'] if value['target'] == '/run/codex-top/fcm.json')
+        self.assertEqual(mount['source'], str(self.root / 'secrets/fcm.json'))
+        self.assertTrue(mount['read_only'])
+        self.assertFalse(mount['bind']['create_host_path'])
+        self.assertEqual(server['labels'][m.FCM_LABEL], m.fcm_digest())
+        m.save_release(release)
+        self.assertEqual(m.load_release()['config'], release['config'])
+        self.assertEqual(m.validate_release(dict(release, compose=json.dumps(model, default=str))), model)
+
+    def test_partial_or_unapproved_config_rejected(self):
+        """缺项、项目漂移、任意宿主或容器路径都不能扩大允许范围。"""
+        base = m.env_text(self.release['config'])
+        for suffix in ('CODEX_TOP_FCM_PROJECT_ID=codex-top\n',
+                       'CODEX_TOP_FCM_SERVICE_ACCOUNT_FILE=/run/codex-top/fcm.json\n',
+                       'CODEX_TOP_FCM_PROJECT_ID=other\nCODEX_TOP_FCM_SERVICE_ACCOUNT_FILE=/run/codex-top/fcm.json\n',
+                       'CODEX_TOP_FCM_PROJECT_ID=codex-top\nCODEX_TOP_FCM_SERVICE_ACCOUNT_FILE=/tmp/fcm.json\n'):
+            with self.subTest(suffix=suffix), self.assertRaises(RuntimeError):
+                m.parse_env(base + suffix)
+
+    def test_missing_secret_rejected_before_file_read(self):
+        """启用但尚未安装密钥时静态检查可过，部署前检查必须拒绝且不读正文。"""
+        release = self.enabled_release()
+        m.validate_release(release)
+        with patch.object(Path, 'read_text', side_effect=AssertionError('credential content must not be read')):
+            with self.assertRaises(RuntimeError):
+                m.check_fcm_secret(release['config'])
+
+
+    def test_fcm_and_rpc_overlay_preserve_each_other(self):
+        """诊断关闭转换只移除诊断变量，不删除FCM环境、指纹或卷。"""
+        release = self.enabled_release()
+        release['config'].update(RPC_RETURN_TRACE='1', RPC_RETURN_TRACE_METHOD='send',
+                                 RPC_RETURN_TRACE_UNTIL_MS='1800000060000')
+        model = m.validate_release(release)
+        self.assertEqual(model['services']['server']['environment']['HAPPIER_RPC_RETURN_TRACE'], '1')
+        clean = m.without_rpc_trace(release)
+        self.assertNotIn('RPC_RETURN_TRACE', clean['config'])
+        self.assertEqual(m.validate_release(clean)['services']['server']['labels'][m.FCM_LABEL], m.fcm_digest())
+
+    def test_existing_container_requires_matching_fingerprint_environment_and_mount(self):
+        """容器标签不能单独授权挂载；三个归属证据都必须匹配。"""
+        release = self.enabled_release()
+        item = container_fixture('server', release)
+        self.assertEqual(set(m.own_containers([item])), {'server'})
+        mutations = (
+            lambda value: value['Config']['Labels'].pop(m.FCM_LABEL),
+            lambda value: value['Config']['Labels'].update({m.FCM_LABEL: '0' * 64}),
+            lambda value: value['Config'].update(Env=[]),
+            lambda value: value['Mounts'][-1].update(RW=True),
+            lambda value: value['Mounts'][-1].update(Source='/tmp/unreviewed.json'),
+        )
+        for mutate in mutations:
+            changed = copy.deepcopy(item)
+            mutate(changed)
+            with self.subTest(mutation=mutate), self.assertRaises(RuntimeError):
+                m.own_containers([changed])
+
+    def test_compose_allowlist_still_rejects_extra_mounts_and_fcm_on_proxy(self):
+        """模拟卷合并不能覆盖并掩盖未审的宿主挂载，代理不得获得FCM配置。"""
+        release = self.enabled_release()
+        original = m.validate_release(release)
+        for mutate in (
+                lambda model: model['services']['server']['volumes'].append(
+                    {'type': 'bind', 'source': '/tmp/extra', 'target': '/extra', 'read_only': True}),
+                lambda model: model['services']['https']['environment'].update(HAPPIER_FCM_PROJECT_ID='codex-top')):
+            model = copy.deepcopy(original)
+            mutate(model)
+            with self.subTest(mutation=mutate), self.assertRaises(RuntimeError):
+                m.validate_release(dict(release, compose=json.dumps(model, default=str)))
+        default = m.validate_release(self.release)
+        default['services']['server']['environment'].update(m.fcm_environment(release['config']))
+        with self.assertRaises(RuntimeError):
+            m.validate_release(dict(self.release, compose=json.dumps(default, default=str)))
+
+    def test_secret_metadata_and_symlinks_checked_without_reading_content(self):
+        """真实临时文件只模拟Linux所有者，权限及符号链接判断仍执行实际逻辑。"""
+        release = self.enabled_release()
+        directory = self.root / 'secrets'
+        directory.mkdir(mode=0o700)
+        secret = directory / 'fcm.json'
+        secret.write_text('synthetic-fcm-placeholder')
+        secret.chmod(0o400)
+        original_stat = Path.stat
+        owners = {directory: 0, secret: 1000}
+
+        def synthetic_stat(path, *args, **kwargs):
+            """只替换目标Linux UID，保留合成文件的实际类型、权限和大小。"""
+            value = original_stat(path, *args, **kwargs)
+            fields = list(value)
+            if path in owners:
+                fields[4] = owners[path]
+            return os.stat_result(fields)
+
+        with patch.object(Path, 'stat', synthetic_stat), patch.object(Path, 'read_text', side_effect=AssertionError('must not read secret')):
+            m.check_fcm_secret(release['config'])
+            for mode in (0o600, 0o440, 0o444):
+                secret.chmod(mode)
+                with self.subTest(mode=mode), self.assertRaises(RuntimeError):
+                    m.check_fcm_secret(release['config'])
+            secret.chmod(0o400)
+            owners[secret] = 0
+            with self.assertRaises(RuntimeError):
+                m.check_fcm_secret(release['config'])
+            owners[secret] = 1000
+            secret.unlink()
+            secret.symlink_to(self.root / 'data/handy-master-secret.txt')
+            with self.assertRaises(RuntimeError):
+                m.check_fcm_secret(release['config'])
+
+    def test_missing_secret_stops_before_container_mutation(self):
+        """部署预检及启动拒绝缺密钥，不让失败路径先操作正常容器。"""
+        release = self.enabled_release()
+        for action in (m.start, m.preflight):
+            with self.subTest(action=action), patch.object(m, 'run', side_effect=AssertionError('must reject before Docker')):
+                with self.assertRaises(RuntimeError):
+                    action(release)
+
+
+    def test_backup_missing_secret_does_not_stop_either_role(self):
+        """备份在停止代理之前就拒绝缺失密钥，不留下先停代理的副作用。"""
+        release = self.enabled_release()
+        with self.assertRaises(RuntimeError):
+            m.backup(release, release['config'], resume=True)
+        self.assertFalse(any('stop' in command for command in self.external.commands))
+
+    def test_secret_directory_is_excluded_from_existing_archive(self):
+        """现有真实归档流程不把独立secrets目录或合成凭据带入release备份。"""
+        directory = self.root / 'secrets'
+        directory.mkdir()
+        (directory / 'fcm.json').write_text('synthetic-fcm-not-for-backup')
+        archive = m.backup(self.release, self.release['config'], resume=True)
+        with tarfile.open(archive, 'r:') as bundle:
+            names = bundle.getnames()
+            self.assertFalse(any(name.startswith('secrets') for name in names))
+            self.assertNotIn(b'synthetic-fcm-not-for-backup', bundle.extractfile('release.json').read())
 
 
 if __name__ == '__main__':
