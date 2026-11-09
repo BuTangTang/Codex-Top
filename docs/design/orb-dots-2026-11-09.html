@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>任务点阵 细化</title>
+<style>
+  body { margin: 0; padding: 24px 32px 48px; background: #ECEDEF; font: 13px -apple-system, "PingFang SC", sans-serif; color: #1d1f23; }
+  h1 { font-size: 18px; margin: 0 0 4px; } p.hint { margin: 0 0 16px; color: #5b616b; max-width: 1100px; line-height: 1.6; }
+  table { border-collapse: separate; border-spacing: 0; background: #fff; border-radius: 12px; padding: 6px 12px; }
+  th { font-weight: 500; color: #6b717b; font-size: 12px; padding: 8px 4px; }
+  td { padding: 10px 4px; text-align: center; vertical-align: middle; border-top: 1px solid #f0f1f3; }
+  td.lab { text-align: left; width: 160px; padding-right: 12px; } td.lab b { font-size: 14px; } td.lab small { display: block; color: #8a9099; margin-top: 4px; line-height: 1.45; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .row1 { display: flex; gap: 6px; align-items: center; }
+  canvas.zoom { width: 66px; height: 66px; image-rendering: pixelated; }
+  canvas.real { width: 44px; height: 44px; image-rendering: pixelated; }
+  .bg { display: inline-flex; padding: 5px; border-radius: 8px; } .dark { background: #2b2d31; } .light { background: #d5d8de; }
+  .live { width: 88px; height: 88px; display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes breathe { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+  .rot { transform-origin: 22px 22px; animation: spin 2.4s linear infinite; }
+  .breathe { animation: breathe 2s ease-in-out infinite; }
+</style></head>
+<body>
+<h1>任务点阵：三种细化</h1>
+<p class="hint">共同的改动：点的圆心对齐到整像素（1 倍屏不发虚）；亮点更大、空位更小更淡，对比更清楚；待处理琥珀、失败红排在顶部最前，然后是运行蓝；运行时一颗“彗星”带着渐隐尾巴绕圈扫过（不再是点自己闪）；待处理的点会呼吸；超过 12 个任务时全亮，数字照常。每格上面是会动的放大样子，下面依次是 1 倍像素放大、深色桌面实际大小、浅色桌面实际大小。</p>
+<table id="t"><tr><th></th><th>2 个运行</th><th>3 运行 + 1 待处理</th><th>2 运行 + 1 失败</th><th>15 个运行</th><th>全部完成</th><th>空闲</th></tr></table>
+<script>
+const C = { blue:'#4E9BFF', amber:'#F5AE3D', red:'#F2675F', green:'#3FCB86', disk:'#15181D', fg:'#FFFFFF', dim:'#8A919B' };
+const pos = (r, i, n = 12, snap = true) => { const a = (i * 360 / n - 90) * Math.PI / 180; let x = 22 + r * Math.cos(a), y = 22 + r * Math.sin(a); if (snap) { x = Math.round(x); y = Math.round(y); } return [x, y]; };
+const num = (t, color, size = 16) => `<text x="22" y="${22 + size * 0.36}" text-anchor="middle" font-size="${size}" font-weight="800" fill="${color}" font-family="-apple-system, SF Pro Display" style="font-variant-numeric: tabular-nums">${t}</text>`;
+function slots(s) {
+  const out = [];
+  if (s.done) { for (let i = 0; i < 12; i++) out.push(C.green); return out; }
+  for (let i = 0; i < s.waiting; i++) out.push(C.amber);
+  for (let i = 0; i < s.failed; i++) out.push(C.red);
+  for (let i = 0; i < s.running; i++) out.push(C.blue);
+  return out.slice(0, 12);
+}
+function center(s) {
+  const attn = s.waiting + s.failed;
+  if (s.done) return num('✓', C.green, 16);
+  if (attn) return num(attn, s.failed ? C.red : C.amber, 17);
+  if (s.running) return num(s.running > 99 ? '99+' : s.running, C.fg, 17);
+  return num('0', C.dim, 16);
+}
+// 彗星：一段渐隐的白色短弧，跟着 2.4 秒一圈转
+function comet(r, w, live, id) {
+  const a0 = -90 * Math.PI / 180, a1 = (-90 + 75) * Math.PI / 180;
+  const p = a => [22 + r * Math.cos(a), 22 + r * Math.sin(a)];
+  const [x0, y0] = p(a0), [x1, y1] = p(a1);
+  return `<g class="${live ? 'rot' : ''}"><defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".9"/></linearGradient></defs>
+    <path d="M${x0} ${y0} A${r} ${r} 0 0 1 ${x1} ${y1}" stroke="url(#${id})" stroke-width="${w}" fill="none" stroke-linecap="round" style="mix-blend-mode: overlay"/></g>`;
+}
+let uid = 0;
+
+// D1 精致点阵：12 个固定位置，亮点 6pt、空位 2.5pt
+function d1(s, live) {
+  const lit = slots(s), id = 'k' + (uid++);
+  let o = `<circle cx="22" cy="22" r="22" fill="${C.disk}"/>`;
+  for (let i = 0; i < 12; i++) {
+    const [x, y] = pos(16, i);
+    if (i < lit.length) {
+      const breathe = live && lit[i] === C.amber ? 'class="breathe"' : '';
+      o += `<circle cx="${x}" cy="${y}" r="3" fill="${lit[i]}" ${breathe}/>`;
+    } else o += `<circle cx="${x}" cy="${y}" r="1.25" fill="#fff" opacity=".22"/>`;
+  }
+  if (s.running && !s.done) o += comet(16, 6.4, live, id);
+  return o + center(s);
+}
+
+// D2 刻度：12 根径向短刻度，像表盘；亮的刻度粗而长
+function d2(s, live) {
+  const lit = slots(s), id = 'k' + (uid++);
+  let o = `<circle cx="22" cy="22" r="22" fill="${C.disk}"/>`;
+  for (let i = 0; i < 12; i++) {
+    const on = i < lit.length;
+    const [xa, ya] = pos(on ? 13.5 : 16, i, 12, false), [xb, yb] = pos(19, i, 12, false);
+    const breathe = live && on && lit[i] === C.amber ? 'class="breathe"' : '';
+    o += `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="${on ? lit[i] : '#fff'}" stroke-opacity="${on ? 1 : .2}" stroke-width="${on ? 3.2 : 1.6}" stroke-linecap="round" ${breathe}/>`;
+  }
+  if (s.running && !s.done) o += comet(16.4, 7, live, id);
+  return o + center(s);
+}
+
+// D3 自适应点数：几个任务就几个点，均匀分布；任务少时点更大，超过 12 个按 12 个画
+function d3(s, live) {
+  const lit = slots(s), id = 'k' + (uid++);
+  let o = `<circle cx="22" cy="22" r="22" fill="${C.disk}"/>`;
+  const n = lit.length;
+  if (!n) {
+    o += `<circle cx="22" cy="22" r="16" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1.5" stroke-dasharray="1.5 6.88"/>`;
+  } else {
+    const r = n <= 2 ? 4 : n <= 4 ? 3.6 : n <= 8 ? 3.2 : 2.8;
+    for (let i = 0; i < n; i++) {
+      const [x, y] = pos(16, i, n);
+      const breathe = live && lit[i] === C.amber ? 'class="breathe"' : '';
+      o += `<circle cx="${x}" cy="${y}" r="${r}" fill="${lit[i]}" ${breathe}/>`;
+    }
+    o += `<circle cx="22" cy="22" r="16" fill="none" stroke="#fff" stroke-opacity=".08" stroke-width="1"/>`;
+  }
+  if (s.running && !s.done) o += comet(16, 7, live, id);
+  return o + center(s);
+}
+
+const svg = (body, size) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 44 44">${body}</svg>`;
+const rows = [
+  ['D1 精致点阵', '固定 12 个位置；亮点 6pt、空位只留 2.5pt 小淡点，主次分明。最接近你选的 D，也最整齐。', d1],
+  ['D2 表盘刻度', '把点换成 12 根径向刻度，亮的刻度粗而长，像手表表盘。更有“仪表”感，1 倍屏上线条很利落。', d2],
+  ['D3 自适应点数', '几个任务就几个点，均匀分布一圈；任务少时点更大。最简洁，但看不出“满了没有”。', d3],
+];
+const states = [
+  { running: 2, waiting: 0, failed: 0 }, { running: 3, waiting: 1, failed: 0 }, { running: 2, waiting: 0, failed: 1 },
+  { running: 15, waiting: 0, failed: 0 }, { running: 0, waiting: 0, failed: 0, done: true }, { running: 0, waiting: 0, failed: 0 },
+];
+(async () => {
+  const t = document.getElementById('t');
+  const only = new URLSearchParams(location.search).get('only');
+  for (const [name, desc, fn] of rows.filter(r => !only || r[0].startsWith(only))) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="lab"><b>${name}</b><small>${desc}</small></td>`;
+    for (const s of states) {
+      const td = document.createElement('td');
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const live = document.createElement('div'); live.className = 'bg dark'; live.innerHTML = svg(fn(s, true), 88).replace('<svg ', '<svg class="live" ');
+      cell.appendChild(live);
+      const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(fn(s, false), 44)); await img.decode();
+      const mk = cls => { const c = document.createElement('canvas'); c.width = 44; c.height = 44; c.className = cls; c.getContext('2d').drawImage(img, 0, 0, 44, 44); return c; };
+      const r1 = document.createElement('div'); r1.className = 'row1';
+      r1.appendChild(mk('zoom'));
+      const d = document.createElement('span'); d.className = 'bg dark'; d.appendChild(mk('real')); r1.appendChild(d);
+      const l = document.createElement('span'); l.className = 'bg light'; l.appendChild(mk('real')); r1.appendChild(l);
+      cell.appendChild(r1); td.appendChild(cell); tr.appendChild(td);
+    }
+    t.appendChild(tr);
+  }
+})();
+</script>
+</body></html>

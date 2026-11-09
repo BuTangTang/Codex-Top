@@ -67,9 +67,11 @@ struct UsageSummaryButton: View {
     }
     private func summary(at date: Date, abbreviated: Bool) -> some View {
         HStack(spacing: 6) {
-            if !abbreviated { Image(systemName: "chart.bar.xaxis").font(.system(size: 14)) }
+            // 有 Claude Code 任务时写明这是 Codex 的额度（R-22）。
+            if store.hasClaudeTasks { Text("Codex").foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             if let quota = store.quota {
-                Text(UsageText.summary(quota, at: date, abbreviated: abbreviated)).monospacedDigit()
+                if abbreviated { Text(UsageText.summary(quota, at: date, abbreviated: true)).monospacedDigit() }
+                else { bars(quota, at: date) }
                 if UsageText.historical(quota, at: date) || store.quotaWarning != nil {
                     Image(systemName: "clock").foregroundStyle(TaskPhase.waiting.tint(store.theme.colorScheme))
                 }
@@ -77,6 +79,26 @@ struct UsageSummaryButton: View {
                 Text(store.demo ? (abbreviated ? "演示 · 查看用量" : "演示模式 · 查看用量") : store.quotaRefreshing ? "正在读取额度…" : "额度暂无数据")
             }
         }.fixedSize()
+    }
+    /// D-86：每个额度窗口一条细进度条加剩余百分比；已过重置时间的只写“待更新”，不画条。
+    private func bars(_ quota: QuotaSnapshot, at date: Date) -> some View {
+        HStack(spacing: 10) {
+            ForEach(Array(UsageText.windows(quota).prefix(2)), id: \.minutes) { window in
+                HStack(spacing: 6) {
+                    Text(window.minutes == 10080 ? "本周" : UsageText.window(window.minutes))
+                        .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    if !UsageText.expired(window, at: date) {
+                        Capsule().fill(Palette.primary(store.theme.colorScheme).opacity(0.10))
+                            .frame(width: 48, height: 4)
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(Palette.secondary(store.theme.colorScheme))
+                                    .frame(width: 48 * CGFloat(min(100, max(0, window.remainingPercent))) / 100, height: 4)
+                            }
+                    }
+                    Text(UsageText.remaining(window, at: date)).monospacedDigit()
+                }
+            }
+        }
     }
     private func tooltip(at date: Date) -> String {
         let value = store.quota.map { UsageText.details($0, at: date) }

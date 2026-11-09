@@ -48,18 +48,35 @@ public struct TaskActivity: Equatable, Sendable {
         guard elapsed.isFinite, elapsed >= 0, elapsed < Double(Int.max) else { return nil }
         return Int(elapsed)
     }
-    public func effective(at now: Date, staleAfter: TimeInterval = 900) -> TaskActivity {
+    public func effective(at now: Date, staleAfter: TimeInterval = 900, sourceName: String = "Codex") -> TaskActivity {
         var copy = self
         if phase == .running, let lastEventAt, now.timeIntervalSince(lastEventAt) > staleAfter {
             copy.phase = .unknown
-            copy.detail = "较久未收到新活动，请回到 Codex 查看"
+            copy.detail = "较久未收到新活动，请回到 \(sourceName) 查看"
         }
         return copy
     }
 }
 
+/// 任务来自哪个工具；Claude Code 任务编号以 `cc:` 开头（REQ-003 设计 2.3）。
+public enum TaskOrigin: String, Sendable, Equatable {
+    case codex, claudeCode
+    public var displayName: String { self == .codex ? "Codex" : "Claude Code" }
+    public var mark: String { self == .codex ? "CX" : "CC" }
+}
+
+/// Claude Code 会话从哪里打开；来自运行登记，进程退出后为空。
+public struct ClaudeLaunch: Equatable, Sendable {
+    public var fromDesktopApp: Bool
+    /// 桌面 App 里的会话编号（`local_…`）。
+    public var hostSessionID: String?
+    public init(fromDesktopApp: Bool, hostSessionID: String?) { self.fromDesktopApp = fromDesktopApp; self.hostSessionID = hostSessionID }
+}
+
 public struct CodexTask: Identifiable, Sendable, Equatable {
     public let id: String
+    public var origin: TaskOrigin
+    public var claudeLaunch: ClaudeLaunch?
     public var title: String
     public var project: String
     public var createdAt: Date
@@ -67,14 +84,25 @@ public struct CodexTask: Identifiable, Sendable, Equatable {
     public var parentID: String?
     public var rolloutURL: URL
     public var activity = TaskActivity()
-    public init(id: String, title: String, project: String, createdAt: Date, updatedAt: Date, parentID: String? = nil, rolloutURL: URL) {
-        self.id = id; self.title = title; self.project = project
+    public init(id: String, title: String, project: String, createdAt: Date, updatedAt: Date, parentID: String? = nil, rolloutURL: URL,
+                origin: TaskOrigin = .codex) {
+        self.id = id; self.origin = origin; self.title = title; self.project = project
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.parentID = parentID; self.rolloutURL = rolloutURL
     }
     public var deepLink: URL? {
-        guard UUID(uuidString: id) != nil else { return nil }
-        return URL(string: "codex://threads/\(id)")
+        switch origin {
+        case .codex:
+            guard UUID(uuidString: id) != nil else { return nil }
+            return URL(string: "codex://threads/\(id)")
+        case .claudeCode:
+            // 只有桌面 App 的会话能直达；编号来自运行登记，格式不对就不拼链接。
+            guard let launch = claudeLaunch, launch.fromDesktopApp, let host = launch.hostSessionID,
+                  host.hasPrefix("local_"), UUID(uuidString: String(host.dropFirst(6))) != nil else { return nil }
+            return URL(string: "claude://claude.ai/epitaxy/\(host)")
+        }
     }
+    /// Claude Code 会话编号（不含 `cc:` 前缀），复制给用户用。
+    public var claudeSessionID: String? { origin == .claudeCode ? String(id.dropFirst(3)) : nil }
 }
 
 public struct QuotaWindow: Equatable, Sendable {

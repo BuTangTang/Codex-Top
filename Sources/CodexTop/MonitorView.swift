@@ -104,11 +104,18 @@ struct MonitorView: View {
                         .lineLimit(3).padding(.horizontal, 20).padding(.vertical, 10)
                 }
                 if let notice = store.notice {
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(notice).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    // D-86：提示独立成圆角浅底横幅，和任务行区分开。
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle").font(.system(size: 13)).padding(.top, 1)
+                        Text(notice).font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography))
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
-                        Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 12)).frame(width: 22, height: 22) }.buttonStyle(QuietButtonStyle())
-                    }.padding(.horizontal, 20).padding(.vertical, 10)
+                        Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11)).frame(width: 20, height: 20) }.buttonStyle(QuietButtonStyle())
+                    }
+                    .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    .padding(.leading, 10).padding(.trailing, 6).padding(.vertical, 7)
+                    .background(Palette.primary(store.theme.colorScheme).opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
                 }
                 footer.fixedSize(horizontal: false, vertical: true).layoutPriority(1)
         }
@@ -249,23 +256,36 @@ private struct MonitorTaskRow: View {
             let activity = store.graph.activity(for: task)
             let childCount = store.graph.children[taskID]?.count ?? 0
             Button { store.openTask(task) } label: {
-                HStack(spacing: compact ? 11 : 14) {
+                // D-86：状态和计时统一放右侧一列；待处理整行铺淡琥珀底，是面板里最显眼的一行。
+                HStack(spacing: compact ? 10 : 12) {
                     ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? .regular : .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                        HStack(spacing: 6) {
+                            Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? .regular : .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                            if store.panelShowsSourceMarks { SourceMark(origin: task.origin, scale: store.uiScale) }
+                        }
                         if !activity.phase.isFinished {
-                            HStack(spacing: 8) {
-                                HStack(spacing: 5) {
-                                    Text(activity.detail).lineLimit(1)
-                                    if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                activityStatus(activity)
+                            HStack(spacing: 5) {
+                                Text(activity.detail).lineLimit(1)
+                                if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
                             }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    if activity.phase.isFinished { activityStatus(activity) }
-                }.padding(.horizontal, 16).frame(height: PanelMetrics.rowHeight(for: activity.phase)).contentShape(Rectangle())
-            }.buttonStyle(QuietRowStyle()).help(navigationHelp(for: task, activity: activity))
+                    activityStatus(activity)
+                }
+                .padding(.horizontal, 10).frame(maxHeight: .infinity)
+                .background {
+                    if activity.phase == .waiting {
+                        let tint = TaskPhase.waiting.tint(store.theme.colorScheme)
+                        RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.09))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.22), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+            }.buttonStyle(QuietRowStyle(cornerRadius: 10))
+                .padding(.horizontal, 6).padding(.vertical, activity.phase.isFinished ? 1 : 2)
+                .frame(height: PanelMetrics.rowHeight(for: activity.phase))
+                .help(navigationHelp(for: task, activity: activity))
                 .accessibilityIdentifier("monitor-task-\(taskID)")
                 .contextMenu {
                     Button("打开任务") { store.openTask(task) }
@@ -304,11 +324,12 @@ private struct MonitorTaskRow: View {
     private func navigationHelp(for task: CodexTask, activity: TaskActivity) -> String {
         let children = store.graph.children[task.id]?.count ?? 0
         let childDetail = children > 0 ? "\n\(children) 个子任务" : ""
-        guard activity.phase == .waiting else { return "\(task.title)\n\(activity.detail)\(childDetail)\n点击回到 Codex" }
+        let source = task.origin.displayName
+        guard activity.phase == .waiting else { return "\(task.title)\n\(activity.detail)\(childDetail)\n点击回到 \(source)" }
         let target = store.graph.navigationTarget(for: task)
         let waiting = activity.waitingStartedAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"
         let latest = activity.lastEventAt?.formatted(date: .abbreviated, time: .standard) ?? "时间缺失"
-        return "\(target.title)\n进入待处理：\(waiting)\n最近活动记录：\(latest)\n尚未读到答复记录；已提交的答案可能仍在同步。\n点击打开待处理所在任务。Codex 暂不支持定位单条问题。"
+        return "\(target.title)\n进入待处理：\(waiting)\n最近活动记录：\(latest)\n尚未读到答复记录；已提交的答案可能仍在同步。\n点击打开待处理所在任务。\(source) 暂不支持定位单条问题。"
     }
 }
 

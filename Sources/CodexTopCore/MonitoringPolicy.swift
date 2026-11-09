@@ -43,6 +43,11 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var finishedRetentionDays: Int?
     public var automaticallyRemovedIDs: Set<String>?
     public var retentionProtectedIDs: Set<String>?
+    // REQ-003：Claude Code 来源。全部可选，旧设置文件照常读取；未设置时默认开启。
+    public var claudeEnabled: Bool?
+    public var claudeHome: String?
+    public var claudeBaselineApplied: Bool?
+    public var resolvedClaudeEnabled: Bool { claudeEnabled ?? true }
     public static let finishedRetentionOptions = [0, 3, 7, 14, 30]
     public var resolvedFinishedRetentionDays: Int {
         let days = finishedRetentionDays ?? 7

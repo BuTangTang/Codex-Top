@@ -6,7 +6,7 @@ public actor LocalCodexSource {
     public let root: URL
     private var tails: [String: IncrementalRollout] = [:]
     private var recoveryCursor = 0
-    private let compressed = CompressedRolloutReader()
+    private let compressed: CompressedRolloutReader
     private let replySource: DesktopReplyReceiptSource
     private var receivedReplies: [String: QuestionReplyReceipt] = [:]
     private var labels: [String: TaskLabels] = [:]
@@ -138,9 +138,11 @@ public actor LocalCodexSource {
     }
 
     /// 数据库、历史和桌面接收证据使用同一根目录，切换数据源时不会串用回执。
-    public init(root: URL) {
+    /// `compressedCacheURL` 是压缩记录读取结果的缓存文件，放在 Codex Top 自己的状态目录；为空时不落盘。
+    public init(root: URL, compressedCacheURL: URL? = nil) {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
         replySource = DesktopReplyReceiptSource(root: self.root)
+        compressed = CompressedRolloutReader(cacheURL: compressedCacheURL)
     }
     public static var defaultRoot: URL {
         if let override = ProcessInfo.processInfo.environment["CODEX_HOME"], !override.isEmpty { return URL(fileURLWithPath: override, isDirectory: true) }

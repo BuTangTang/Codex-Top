@@ -352,7 +352,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             return
         }
         let willExpand = requestedExpanded ?? orbState.expanded
-        if orbAnchor.width == 0 { orbAnchor = floating.frame }
+        if orbAnchor.width == 0 { orbAnchor = WindowGeometry.orbAnchor(inCollapsed: floating.frame, growsLeft: orbState.capsuleGrowsLeft) }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
         orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame))
         let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false) * store.uiScale)
@@ -376,7 +376,17 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
                 if orbState.expansionDirection != direction { orbState.expansionDirection = direction }
             }
         }
-        animateOrb(to: willExpand ? expanded : orbAnchor, expanded: willExpand, animated: animated)
+        let collapsed = WindowGeometry.collapsedOrbFrame(anchor: orbAnchor, extension: orbCapsuleExtension, visible: display.screen.visibleFrame)
+        if !willExpand && orbState.capsuleGrowsLeft != collapsed.growsLeft {
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { orbState.capsuleGrowsLeft = collapsed.growsLeft }
+        }
+        animateOrb(to: willExpand ? expanded : collapsed.frame, expanded: willExpand, animated: animated)
+    }
+    /// D-88：经典圆环收起时，有任务等你回答或失败就长成胶囊（两种都有就两段）；暂停、读取中或双弧外观保持圆球。
+    private var orbCapsuleExtension: CGFloat {
+        guard store.orbAppearance == .ring, !store.paused, !store.loading else { return 0 }
+        return WindowGeometry.orbCapsuleExtension(waiting: store.statusSummary.waiting, failed: store.statusSummary.failed)
     }
     private func restoreCollapsedOrb(to anchor: CGRect) {
         stopOrbClickMonitoring()
@@ -732,7 +742,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if let display = displays.first(where: { $0.screen.frame.contains(pointer) }) ??
             displays.first(where: { $0.screen.frame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) }) ?? chosen {
             let frame = WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame)
-            let target = store.placement == .orb && !orbState.expanded ? alignedOrb(frame) : frame
+            let target = store.placement == .orb && !orbState.expanded
+                ? CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: frame.width.rounded(), height: 44) : frame
             moveFloatingFrameForDrag(target)
         }
         dragging = false
@@ -770,7 +781,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             orbAnchor = WindowGeometry.movingOrbAnchor(orbAnchor, from: previous, to: actual, direction: orbExpansionDirection ?? .down)
             orbExpandedFrame = actual
         } else {
-            orbAnchor = actual
+            orbAnchor = WindowGeometry.orbAnchor(inCollapsed: actual, growsLeft: orbState.capsuleGrowsLeft)
         }
         // Keep every screen-space target in sync before a data refresh can lay out.
         orbTarget = actual; orbCanvas = nil

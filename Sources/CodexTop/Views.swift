@@ -130,7 +130,10 @@ struct TaskPickerView: View {
                         Toggle(isOn: Binding(get: { draft.contains(task.id) }, set: { if $0 { draft.insert(task.id) } else { draft.remove(task.id) } })) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).lineLimit(1).truncationMode(.tail)
+                                    HStack(spacing: 6) {
+                                        Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: .medium, compact: compactTypography)).lineLimit(1).truncationMode(.tail)
+                                        if store.pickerShowsSourceMarks { SourceMark(origin: task.origin, scale: store.uiScale) }
+                                    }
                                     Text(task.project).font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                                 }
                                 Spacer()
@@ -425,10 +428,44 @@ struct SettingsView: View {
                 }
                 if let loginError { Text(loginError).font(.caption).foregroundStyle(.orange) }
             }
+            Section("Claude Code") {
+                if store.demo {
+                    Text("演示模式：不读取本机 Claude Code 会话").font(.caption).foregroundStyle(.secondary)
+                } else if !store.claudeInstalled {
+                    Text("未检测到 Claude Code").foregroundStyle(.secondary)
+                    Text(store.claudeRootURL.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Toggle("监控 Claude Code 会话", isOn: Binding(get: { store.preferences.resolvedClaudeEnabled }, set: { store.setClaudeEnabled($0) }))
+                    .disabled(store.demo || !store.claudeInstalled)
+                HStack {
+                    Text("Claude Code 数据目录"); Spacer(); Button("选择…") { store.chooseClaudeRoot() }.disabled(store.demo)
+                }
+                if store.claudeInstalled && !store.demo {
+                    Text(store.claudeRootURL.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Text("只读取会话记录和运行登记，不修改 Claude Code 的任何文件。目前看不出“等待你批准权限”：这时会先显示运行中，较久没有新活动后显示未知。").font(.caption).foregroundStyle(.secondary)
+            }
             Section {
-                Text("状态来自本机日志。长时间没有新活动会显示未知；请在 Codex 中处理输入和批准。").font(.caption).foregroundStyle(.secondary)
+                Text("状态来自本机日志。长时间没有新活动会显示未知；请在 Codex 或 Claude Code 中处理输入和批准。").font(.caption).foregroundStyle(.secondary)
                 if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(.orange) }
                 Button("备份并恢复默认设置") { store.restorePreferences() }
             }
+    }
+}
+
+/// 来源标记：CX 用应用蓝色方块（2026-11-08 用户改定），CC 为橙色圆角。只在列表里两种来源并存时显示。
+struct SourceMark: View {
+    let origin: TaskOrigin
+    let scale: CGFloat
+    var body: some View {
+        // D-86：浅底彩字、同一圆角，不再用饱和色块抢标题。
+        let tint = origin == .codex ? Palette.accent : Color(red: 0.85, green: 0.47, blue: 0.24)
+        Text(origin.mark)
+            .font(.system(size: 10 * max(1, scale), weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+            .fixedSize()
+            .accessibilityLabel(origin.displayName)
     }
 }

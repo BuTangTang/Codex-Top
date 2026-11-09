@@ -377,4 +377,26 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(restored.size, frame.size)
     }
 
+
+    /// D-88：有任务等你时胶囊按数字位数加宽，圆球不动；右边放不下就向左长，并能还原出圆球位置。
+    func testCollapsedOrbCapsuleGrowsAwayFromScreenEdge() {
+        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 0, failed: 0), 0)
+        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 3, failed: 0), 22)
+        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 0, failed: 12), 28)
+        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 120, failed: 0), 36)
+        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 2, failed: 1), 44, "又有等你回答又有失败时两段都长出来")
+        let visible = CGRect(x: -1440, y: 0, width: 1440, height: 900)
+        let middle = CGRect(x: -800, y: 400, width: 44, height: 44)
+        let none = WindowGeometry.collapsedOrbFrame(anchor: middle, extension: 0, visible: visible)
+        XCTAssertEqual(none.frame, middle)
+        let right = WindowGeometry.collapsedOrbFrame(anchor: middle, extension: 22, visible: visible)
+        XCTAssertFalse(right.growsLeft)
+        XCTAssertEqual(right.frame, CGRect(x: -800, y: 400, width: 66, height: 44))
+        XCTAssertEqual(WindowGeometry.orbAnchor(inCollapsed: right.frame, growsLeft: false), middle)
+        let edge = CGRect(x: -70, y: 400, width: 44, height: 44)
+        let left = WindowGeometry.collapsedOrbFrame(anchor: edge, extension: 28, visible: visible)
+        XCTAssertTrue(left.growsLeft)
+        XCTAssertEqual(left.frame, CGRect(x: -98, y: 400, width: 72, height: 44))
+        XCTAssertEqual(WindowGeometry.orbAnchor(inCollapsed: left.frame, growsLeft: true), edge)
+    }
 }

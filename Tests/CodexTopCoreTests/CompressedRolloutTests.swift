@@ -31,13 +31,14 @@ final class CompressedRolloutTests: XCTestCase {
     private func event(_ kind: String) -> Data {
         Data("{\"timestamp\":\"2027-01-15T08:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"\(kind)\",\"turn_id\":\"fixture\"}}\n".utf8)
     }
-    /// 有限次驱动原刷新节拍，不使用真实后台定时器。
+    /// 有限次驱动原刷新节拍；每轮等后台解码结束再取结果，不使用真实定时器。
     private func finish(_ reader: CompressedRolloutReader, url: URL) -> CompressedRolloutReader.Result {
         var result = CompressedRolloutReader.Result(activity: TaskActivity(), category: .reading)
         for _ in 0..<100 {
             reader.beginCycle(ids: ["fixture"])
             result = reader.read(id: "fixture", url: url, now: now)
             if result.category != .reading { break }
+            reader.waitForBackgroundRead()
         }
         return result
     }
@@ -99,7 +100,7 @@ final class CompressedRolloutTests: XCTestCase {
         }
     }
 
-    /// 解码块边界两侧和恰好64KiB的合法行保持完整，超过一字节仍受限。
+    /// 解码块边界两侧和恰好64KiB的合法行保持完整；超过后按行首字段摘要，生命周期事件照常生效。
     func testLineLengthAtOutputBlockBoundary() throws {
         let url = try directory().appendingPathComponent("boundary.zst")
         for length in [65_535, 65_536, 65_537] {
@@ -108,28 +109,44 @@ final class CompressedRolloutTests: XCTestCase {
             line.append(10)
             try frame(Data([10]) + line).write(to: url)
             let result = finish(CompressedRolloutReader(), url: url)
-            XCTAssertEqual(result.category, length <= 65_536 ? .ready : .limited)
-            XCTAssertEqual(result.activity.phase, length <= 65_536 ? .completed : .unknown)
+            XCTAssertEqual(result.category, .ready)
+            XCTAssertEqual(result.activity.phase, .completed)
         }
     }
 
-    /// 全局每轮只推进一个任务，取消关注后释放其占用。
+    /// 同一时间只解一个文件，其余排队；取消关注后停掉它的后台解码，轮到下一个。
     func testSingleDecoderAndCancellation() throws {
         let url = try directory().appendingPathComponent("task.zst")
-        try frame(Data(repeating: 32, count: 400_000)).write(to: url)
+        try frame(Data(repeating: 32, count: 6 * 1_024 * 1_024)).write(to: url)
         let reader = CompressedRolloutReader()
         reader.beginCycle(ids: ["a", "b"])
-        let first = reader.read(id: "a", url: url, now: now)
-        XCTAssertLessThanOrEqual(first.bytes, 256 * 1_024)
-        XCTAssertEqual(reader.read(id: "b", url: url, now: now).bytes, 0)
+        XCTAssertEqual(reader.read(id: "a", url: url, now: now).activity.detail, "正在读取压缩记录")
+        XCTAssertEqual(reader.read(id: "b", url: url, now: now).activity.detail, "等待读取压缩记录")
         reader.beginCycle(ids: ["b"])
-        XCTAssertGreaterThan(reader.read(id: "b", url: url, now: now).bytes, 0)
+        XCTAssertEqual(reader.read(id: "b", url: url, now: now).activity.detail, "正在读取压缩记录")
+        reader.waitForBackgroundRead()
+        reader.beginCycle(ids: ["b"])
+        let done = reader.read(id: "b", url: url, now: now)
+        XCTAssertNotEqual(done.category, .reading)
+        XCTAssertGreaterThan(done.bytes, 0)
+    }
+
+    /// 后台一次读完，不再按每轮 4 MiB／20 ms 切片：6 MiB 的记录启动后下一次刷新就拿到结果。
+    func testLargeFileFinishesInOneBackgroundPass() throws {
+        let url = try directory().appendingPathComponent("task.zst")
+        try frame(event("task_started") + Data(repeating: 10, count: 6 * 1_024 * 1_024) + event("task_complete")).write(to: url)
+        let reader = CompressedRolloutReader()
+        reader.beginCycle(ids: ["fixture"])
+        XCTAssertEqual(reader.read(id: "fixture", url: url, now: now).category, .reading)
+        reader.waitForBackgroundRead()
+        reader.beginCycle(ids: ["fixture"])
+        XCTAssertEqual(reader.read(id: "fixture", url: url, now: now).activity.phase, .completed)
     }
 
     /// 解码中替换文件会取消旧流，不把旧完成事件带入新文件。
     func testReplacementDuringDecode() throws {
         let url = try directory().appendingPathComponent("task.zst")
-        try frame(Data(repeating: 32, count: 400_000)).write(to: url)
+        try frame(Data(repeating: 32, count: 6 * 1_024 * 1_024)).write(to: url)
         let reader = CompressedRolloutReader()
         reader.beginCycle(ids: ["fixture"])
         XCTAssertEqual(reader.read(id: "fixture", url: url, now: now).category, .reading)
@@ -145,11 +162,17 @@ final class CompressedRolloutTests: XCTestCase {
         let ids = Set((0...256).map(String.init))
         for id in 0..<256 {
             reader.beginCycle(ids: ids)
+            XCTAssertEqual(reader.read(id: String(id), url: url, now: now).category, .reading)
+            reader.waitForBackgroundRead()
+            reader.beginCycle(ids: ids)
             XCTAssertEqual(reader.read(id: String(id), url: url, now: now).category, .ready)
         }
         reader.beginCycle(ids: ids)
         XCTAssertEqual(reader.read(id: "256", url: url, now: now).category, .limited)
         XCTAssertEqual(reader.read(id: "0", url: url, now: now).bytes, 0)
+        reader.beginCycle(ids: ["256"])
+        XCTAssertEqual(reader.read(id: "256", url: url, now: now).category, .reading)
+        reader.waitForBackgroundRead()
         reader.beginCycle(ids: ["256"])
         XCTAssertEqual(reader.read(id: "256", url: url, now: now).category, .ready)
     }
@@ -178,6 +201,7 @@ final class CompressedRolloutTests: XCTestCase {
         XCTAssertEqual(none.tasks.first { $0.id == "child" }?.activity.detail, "历史记录已压缩，尚未读取")
         var selected = try await source.snapshot(now: now, monitoredRootIDs: ["root"])
         for _ in 0..<20 where selected.tasks.first(where: { $0.id == "child" })?.activity.phase == .unknown {
+            try await Task.sleep(for: .milliseconds(20))  // 解码在后台队列，给它一点时间
             selected = try await source.snapshot(now: now, monitoredRootIDs: ["root"])
         }
         XCTAssertNil(selected.warning)
@@ -194,5 +218,85 @@ final class CompressedRolloutTests: XCTestCase {
         let blocked = try await source.snapshot(now: now, monitoredRootIDs: ["root"])
         XCTAssertEqual(blocked.tasks.first { $0.id == "child" }?.activity.detail, "记录位于数据目录之外，未读取")
         XCTAssertTrue(blocked.warning?.contains("1 条记录不可用") == true)
+    }
+
+    // MARK: 超长行与落盘缓存（2026-11-08 用户同意的规则）
+
+    /// 构造一条超过 64 KiB 的 Codex 记录行，大字段放在最后。
+    private func longLine(_ kind: String, _ payloadHead: String, filler: String = "output") -> Data {
+        var text = "{\"timestamp\":\"2027-01-15T08:00:00Z\",\"type\":\"\(kind)\",\"payload\":{\(payloadHead),\"\(filler)\":\""
+        text += String(repeating: "x", count: 70_000) + "\"}}\n"
+        return Data(text.utf8)
+    }
+
+    func testIrrelevantAndSummarizableLongLines() throws {
+        let url = try directory().appendingPathComponent("task.zst")
+        // 压缩摘要、普通工具输出、命令输出与长用户消息都不再让整个任务变成未知。
+        let content = event("task_started")
+            + longLine("compacted", "\"message\":\"m\"", filler: "replacement")
+            + longLine("response_item", "\"type\":\"function_call_output\",\"call_id\":\"c1\"")
+            + longLine("event_msg", "\"type\":\"item_completed\",\"turn_id\":\"fixture\",\"item\":{\"type\":\"commandExecution\",\"id\":\"i\"", filler: "aggregatedOutput")
+                .dropLast(4) + Data("\"}}}\n".utf8)
+            + longLine("response_item", "\"type\":\"message\",\"role\":\"user\"", filler: "content")
+            + event("task_complete")
+        try frame(content).write(to: url)
+        let result = finish(CompressedRolloutReader(), url: url)
+        XCTAssertEqual(result.category, .ready)
+        XCTAssertEqual(result.activity.phase, .completed)
+    }
+
+    func testLongLinesThatDecideStateWithoutFieldsStayUnknown() throws {
+        let url = try directory().appendingPathComponent("task.zst")
+        let cases: [Data] = [
+            // 提问调用的参数在长字段里，读不全就不猜。
+            longLine("response_item", "\"type\":\"function_call\",\"name\":\"request_user_input\"", filler: "arguments"),
+            // 工具输出没有调用编号，无法判断是否解除等待。
+            longLine("response_item", "\"type\":\"function_call_output\"", filler: "output"),
+            // 额度记录需要嵌套字段。
+            longLine("event_msg", "\"type\":\"token_count\"", filler: "info"),
+        ]
+        for line in cases {
+            try frame(event("task_started") + line + event("task_complete")).write(to: url)
+            XCTAssertEqual(finish(CompressedRolloutReader(), url: url).category, .limited)
+        }
+    }
+
+    func testLongLineSummaryKeepsOnlyTopLevelFields() {
+        let prefix = Data("{\"timestamp\":\"t\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":".utf8)
+        guard case .line(let data) = CompressedRolloutReader.summarizeLongLine(prefix),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let payload = value["payload"] as? [String: Any] else { return XCTFail("应生成摘要行") }
+        XCTAssertEqual(payload["name"] as? String, "shell")
+        XCTAssertNil(payload["arguments"], "参数正文不进入摘要")
+        XCTAssertEqual(CompressedRolloutReader.summarizeLongLine(Data(String(repeating: " ", count: 100).utf8)), .gap)
+        XCTAssertEqual(CompressedRolloutReader.summarizeLongLine(Data("{\"timestamp\":\"t\",\"type\":\"turn_context\",\"payload\":{\"cwd\":\"x".utf8)), .ignore)
+    }
+
+    func testFinishedResultsPersistAcrossRestartsAndExpireOnChange() throws {
+        let folder = try directory()
+        let url = folder.appendingPathComponent("task.zst"), cache = folder.appendingPathComponent("state/cache.json")
+        try frame(event("task_started") + event("task_complete")).write(to: url)
+        XCTAssertEqual(finish(CompressedRolloutReader(cacheURL: cache), url: url).activity.phase, .completed)
+
+        // 新实例（相当于重启）直接用缓存，不再读文件。
+        let restarted = CompressedRolloutReader(cacheURL: cache)
+        restarted.beginCycle(ids: ["fixture"])
+        let warm = restarted.read(id: "fixture", url: url, now: now)
+        XCTAssertEqual(warm.bytes, 0)
+        XCTAssertEqual(warm.activity.phase, .completed)
+
+        // 文件变了，缓存作废、重新读取。
+        try frame(event("task_started") + event("task_failed")).write(to: url, options: .atomic)
+        XCTAssertEqual(finish(CompressedRolloutReader(cacheURL: cache), url: url).activity.phase, .failed)
+    }
+
+    func testWaitingResultsAreNotPersisted() throws {
+        let folder = try directory()
+        let url = folder.appendingPathComponent("task.zst"), cache = folder.appendingPathComponent("cache.json")
+        try frame(event("task_started") + event("request_user_input")).write(to: url)
+        XCTAssertEqual(finish(CompressedRolloutReader(cacheURL: cache), url: url).activity.phase, .waiting)
+        let restarted = CompressedRolloutReader(cacheURL: cache)
+        restarted.beginCycle(ids: ["fixture"])
+        XCTAssertEqual(restarted.read(id: "fixture", url: url, now: now).category, .reading, "等待中的结果每次重读")
     }
 }

@@ -87,13 +87,13 @@ struct TaskPhaseLabel: View {
     var body: some View {
         Text(phase.label)
             .foregroundStyle(textColor)
-            .fontWeight(phase == .waiting ? .medium : nil)
-            .padding(.horizontal, phase == .waiting ? 5 : 0)
+            .fontWeight(phase == .waiting ? .semibold : nil)
+            .padding(.horizontal, phase == .waiting ? 6 : 0)
             .padding(.vertical, phase == .waiting ? 2 : 0)
             .background {
                 if phase == .waiting {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(phase.tint(scheme).opacity(0.12))
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(phase.tint(scheme).opacity(0.16))
                 }
             }
     }
@@ -162,11 +162,14 @@ struct QuietButtonStyle: ButtonStyle {
 }
 
 struct QuietRowStyle: ButtonStyle {
+    /// 监控面板的任务行用圆角悬停底；其他列表保持直角。
+    var cornerRadius: CGFloat = 0
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Palette.primary(colorScheme).opacity(configuration.isPressed ? 0.12 : hovered ? 0.055 : 0))
+            .background(Palette.primary(colorScheme).opacity(configuration.isPressed ? 0.12 : hovered ? 0.055 : 0),
+                        in: RoundedRectangle(cornerRadius: cornerRadius))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
             .animation(.easeOut(duration: 0.12), value: hovered)
@@ -199,21 +202,22 @@ struct ActivityIndicator: View {
     @State private var visible = false
     var body: some View {
         let tint = phase.tint(colorScheme)
+        // D-86：行首指示缩小变细，运行中不再抢标题；待处理是带光圈的实心点，未知是灰色空心点。
         ZStack {
             if phase == .running {
-                Circle().stroke(tint.opacity(0.25), lineWidth: 3)
-                NativeRunningArc(tint: tint, rotating: animationsActive && visible && !reduceMotion, lineWidth: 3, inset: 1.5,
-                                 trimStart: 0.12, trimEnd: 0.83, startDegrees: -70)
-                    // Keep the original circle radius while containing its 3pt stroke.
-                    .padding(-1.5)
+                Circle().stroke(tint.opacity(0.14), lineWidth: 2).padding(1)
+                NativeRunningArc(tint: tint, rotating: animationsActive && visible && !reduceMotion, lineWidth: 2, inset: 1,
+                                 trimStart: 0, trimEnd: 0.36, startDegrees: -90)
                     .allowsHitTesting(false)
             } else if phase == .waiting {
-                Circle().fill(tint.opacity(0.12))
-                Circle().fill(tint).padding(6)
+                Circle().fill(tint.opacity(0.20))
+                Circle().fill(tint).padding(small ? 3.5 : 4)
+            } else if phase == .unknown {
+                Circle().strokeBorder(Palette.secondary(colorScheme).opacity(0.7), lineWidth: 1.5).frame(width: 9, height: 9)
             } else {
-                Image(systemName: phase.symbol).font(.system(size: small ? 17 : 18, weight: .medium)).foregroundStyle(tint)
+                Image(systemName: phase.symbol).font(.system(size: small ? 15 : 16, weight: .medium)).foregroundStyle(tint)
             }
-        }.frame(width: small ? 22 : 24, height: small ? 22 : 24)
+        }.frame(width: small ? 16 : 18, height: small ? 16 : 18)
             .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
             .onAppear { visible = true }
             .onDisappear { visible = false }

@@ -40,6 +40,13 @@ import CodexTopCore
     var onAppearanceWillChange: (() -> Bool)?
     var onExternalNavigation: (() -> Void)?
     private var source: LocalCodexSource
+    private var claudeSource: ClaudeCodeSource
+    /// 独立状态目录（测试、合成验收）里不读本机真实的 ~/.claude，默认目录改到状态目录下。
+    private let defaultClaudeRoot: URL
+    /// 压缩记录读取结果缓存，跟设置文件放在同一状态目录。
+    private let compressedCacheURL: URL
+    /// 数据目录存在才算装了 Claude Code；每轮刷新更新。
+    @Published private(set) var claudeInstalled = false
     private var usageClient: AccountUsageClient
     private var accountQuota: QuotaSnapshot?
     @Published private(set) var historicalQuota: QuotaSnapshot?
@@ -61,18 +68,34 @@ import CodexTopCore
     init(stateDirectory: URL? = nil) {
         demo = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CodexTopDemo") as? Bool == true
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Codex Top")
-        let stateFolder = stateDirectory ?? ProcessInfo.processInfo.environment["CODEX_TOP_STATE_DIR"].map { URL(fileURLWithPath: $0) } ?? (demo ? base.appendingPathComponent("Demo") : base)
+        let isolatedState = stateDirectory ?? ProcessInfo.processInfo.environment["CODEX_TOP_STATE_DIR"].map { URL(fileURLWithPath: $0) }
+        let stateFolder = isolatedState ?? (demo ? base.appendingPathComponent("Demo") : base)
+        defaultClaudeRoot = isolatedState.map { $0.appendingPathComponent("claude", isDirectory: true) } ?? ClaudeCodeSource.defaultRoot
+        compressedCacheURL = stateFolder.appendingPathComponent("compressed-status-cache.json")
         file = PreferencesFile(url: stateFolder.appendingPathComponent("preferences.json"))
         var loaded = MonitorPreferences(), failure: String?
         do { loaded = try file.load() } catch { failure = "设置文件无法读取。当前使用默认值，原文件已保留。"; persistenceAvailable = false }
         preferences = loaded
         let root = loaded.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot
-        source = LocalCodexSource(root: root)
+        source = LocalCodexSource(root: root, compressedCacheURL: compressedCacheURL)
+        claudeSource = ClaudeCodeSource(root: loaded.claudeHome.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? defaultClaudeRoot)
         usageClient = AccountUsageClient(root: root)
         notice = failure
         systemTheme = Self.resolvedSystemTheme(NSApplication.shared.effectiveAppearance)
     }
     var rootURL: URL { preferences.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot }
+    var claudeRootURL: URL { preferences.claudeHome.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? defaultClaudeRoot }
+    /// 面板只看关注的根任务：两种来源都有时才标 CX／CC（D-06）。
+    var panelShowsSourceMarks: Bool {
+        let selectedIDs = preferences.selectedIDs
+        var origins = Set<TaskOrigin>()
+        for task in graph.roots where selectedIDs.contains(task.id) { origins.insert(task.origin); if origins.count > 1 { return true } }
+        return false
+    }
+    /// 任务选择器按它列出的全部任务判断。
+    var pickerShowsSourceMarks: Bool { Set(graph.roots.map(\.origin)).count > 1 }
+    /// 有 Claude Code 任务时额度前写明是 Codex 的（R-22）。
+    var hasClaudeTasks: Bool { tasks.contains { $0.origin == .claudeCode } }
     var themeChoice: PanelTheme { preferences.theme ?? .dark }
     /// Rendering always receives a concrete theme; the saved choice may follow macOS.
     var theme: PanelTheme { themeChoice == .system ? systemTheme : themeChoice }
@@ -268,7 +291,23 @@ import CodexTopCore
             let previousPhases = Dictionary(uniqueKeysWithValues: graph.roots.filter {
                 preferences.selectedIDs.contains($0.id)
             }.map { ($0.id, graph.activitySource(for: $0).activity.phase) })
-            let snapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs, monitoredRootIDs: preferences.selectedIDs)
+            // 两个来源各自读取；Claude Code 读不到只影响它自己的任务（设计第 6 节）。
+            let claudeTasks = await readClaudeTasks()
+            guard !stopping, generation == sourceGeneration else { return }
+            let codexSnapshot: SourceSnapshot
+            do {
+                codexSnapshot = demo ? DemoTasks.snapshot(phase: demoPhase) : try await source.snapshot(recoverTimingFor: preferences.selectedIDs, monitoredRootIDs: preferences.selectedIDs)
+            } catch {
+                guard !stopping, generation == sourceGeneration else { return }
+                if sourceWarning != error.localizedDescription { sourceWarning = error.localizedDescription; needsLayout = true }
+                // Do not leave the previous snapshot claiming active/completed after source loss.
+                let unavailable = tasks.filter { $0.origin == .codex }.map { task in var copy = task; copy.activity = TaskActivity(detail: "数据源不可用，无法确认当前状态"); return copy } + claudeTasks
+                if tasks != unavailable { tasks = unavailable; graph = TaskGraph(tasks: tasks); needsLayout = true }
+                if needsLayout { onChange?() }
+                return
+            }
+            let snapshot = SourceSnapshot(tasks: codexSnapshot.tasks + claudeTasks, quota: codexSnapshot.quota,
+                                          warning: codexSnapshot.warning, observedAt: codexSnapshot.observedAt)
             guard !stopping, generation == sourceGeneration else { return }
             if tasks != snapshot.tasks {
                 tasks = snapshot.tasks; graph = TaskGraph(tasks: tasks)
@@ -284,6 +323,7 @@ import CodexTopCore
             }
             lastRefresh = snapshot.observedAt
             var nextPreferences = preferences
+            Self.applyClaudeBaseline(&nextPreferences, claudeTasks: claudeTasks)
             MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)
             if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
@@ -291,14 +331,47 @@ import CodexTopCore
                 guard preferences.selectedIDs.contains(task.id), let old = previousPhases[task.id] else { return false }
                 return old != .completed && graph.activitySource(for: task).activity.phase == .completed
             }) { completionSequence += 1 }
-        } catch {
-            guard !stopping, generation == sourceGeneration else { return }
-            if sourceWarning != error.localizedDescription { sourceWarning = error.localizedDescription; needsLayout = true }
-            // Do not leave the previous snapshot claiming active/completed after source loss.
-            let unavailable = tasks.map { task in var copy = task; copy.activity = TaskActivity(detail: "数据源不可用，无法确认当前状态"); return copy }
-            if tasks != unavailable { tasks = unavailable; graph = TaskGraph(tasks: tasks); needsLayout = true }
         }
         if needsLayout { onChange?() }
+    }
+    /// 关闭或未安装时没有 Claude Code 任务；演示模式用合成任务，不读本机数据。
+    private func readClaudeTasks() async -> [CodexTask] {
+        if demo { return DemoTasks.claudeTasks(phase: demoPhase) }
+        let installed = await claudeSource.installed
+        if claudeInstalled != installed { claudeInstalled = installed }
+        guard installed, preferences.resolvedClaudeEnabled else { return [] }
+        return await claudeSource.snapshot(keep: preferences.selectedIDs).tasks
+    }
+    /// 第一次出现 Claude Code 会话时，把已有会话记为基线，避免历史会话一次性涌进关注列表；
+    /// 当时正在运行或等待的会话照首次启动的规则加入关注（设计第 6 节）。
+    nonisolated static func applyClaudeBaseline(_ preferences: inout MonitorPreferences, claudeTasks: [CodexTask]) {
+        guard preferences.claudeBaselineApplied != true, !claudeTasks.isEmpty else { return }
+        preferences.claudeBaselineApplied = true
+        // 尚未初始化时由首次启动的规则统一处理全部任务。
+        guard preferences.initialized else { return }
+        preferences.autoBaselineIDs = (preferences.autoBaselineIDs ?? []).union(claudeTasks.map(\.id))
+        for task in claudeTasks where task.activity.phase.isActive && !preferences.excludedIDs.contains(task.id) {
+            preferences.selectedIDs.insert(task.id)
+        }
+    }
+    func setClaudeEnabled(_ enabled: Bool) {
+        guard preferences.resolvedClaudeEnabled != enabled else { return }
+        // 关闭时关注设置里的 cc: 编号保留，重新开启后恢复（R-19）。
+        preferences.claudeEnabled = enabled; save()
+        requestImmediateRefresh()
+    }
+    func chooseClaudeRoot() {
+        let picker = NSOpenPanel(); picker.canChooseFiles = false; picker.canChooseDirectories = true
+        picker.showsHiddenFiles = true; picker.allowsMultipleSelection = false; picker.directoryURL = claudeRootURL
+        picker.message = "选择 Claude Code 数据目录（通常是用户目录下的 .claude）"
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        preferences.claudeHome = url.path; save()
+        claudeSource = ClaudeCodeSource(root: url)
+        requestImmediateRefresh()
+    }
+    private func requestImmediateRefresh() {
+        onChange?()
+        Task { await refresh() }
     }
     func previewDemoPhase(_ phase: TaskPhase?) {
         guard demo else { return }
@@ -382,15 +455,16 @@ import CodexTopCore
             preferences.codexHome = url.path; preferences.initialized = false
             preferences.selectedIDs.removeAll(); preferences.excludedIDs.removeAll()
             preferences.automaticallyRemovedIDs = []; preferences.retentionProtectedIDs = []
-            source = LocalCodexSource(root: url); tasks = []; graph = TaskGraph(tasks: []); quota = nil
+            source = LocalCodexSource(root: url, compressedCacheURL: compressedCacheURL); tasks = []; graph = TaskGraph(tasks: []); quota = nil
             resetUsageSource()
             sourceWarning = nil; loading = true; save(); onChange?()
             Task { await refresh() }
         }
     }
     func openTask(_ task: CodexTask) {
-        if demo { notice = "这是演示任务。实际任务会在 Codex 中打开。"; return }
+        if demo { notice = "这是演示任务。实际任务会在 \(task.origin.displayName) 中打开。"; return }
         let target = graph.navigationTarget(for: task)
+        if target.origin == .claudeCode { openClaudeTask(target); return }
         guard let link = target.deepLink,
               let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
             taskNavigationFailed(id: target.id); return
@@ -406,6 +480,28 @@ import CodexTopCore
                 else { self.onExternalNavigation?() }
             }
         }
+    }
+    /// 桌面 App 的会话直达；其他入口复制会话编号，桌面 App 打不开时说明，不假装成功（R-17、D-07、D-85）。
+    private func openClaudeTask(_ task: CodexTask) {
+        let sessionID = task.claudeSessionID ?? task.id
+        guard let link = task.deepLink,
+              let app = NSWorkspace.shared.urlForApplication(toOpen: link) else {
+            copyClaudeSession(sessionID, desktop: task.claudeLaunch?.fromDesktopApp == true); return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { @Sendable [weak self] _, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if error != nil { self.copyClaudeSession(sessionID, desktop: true) }
+                else { self.onExternalNavigation?() }
+            }
+        }
+    }
+    private func copyClaudeSession(_ sessionID: String, desktop: Bool) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(sessionID, forType: .string)
+        // D-85：终端或 IDE 里的会话只静默复制编号，不再弹提示；桌面 App 打不开仍说明。
+        if desktop { notice = "无法打开 Claude，会话编号已复制。请确认已安装 Claude 桌面 App。" }
     }
     private func taskNavigationFailed(id: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(id, forType: .string)
@@ -427,7 +523,8 @@ import CodexTopCore
             preferences = MonitorPreferences(); persistenceAvailable = true; notice = nil; save()
             sourceGeneration += 1; tasks = []; graph = TaskGraph(tasks: []); quota = nil; sourceWarning = nil; loading = true
             cancelFastRefresh(); rolloutChanges?.stop()
-            source = LocalCodexSource(root: LocalCodexSource.defaultRoot); onDisplayChange?(); onModeChange?(); onAppearanceChange?()
+            source = LocalCodexSource(root: LocalCodexSource.defaultRoot, compressedCacheURL: compressedCacheURL); claudeSource = ClaudeCodeSource(root: defaultClaudeRoot)
+            onDisplayChange?(); onModeChange?(); onAppearanceChange?()
             resetUsageSource()
             Task { await refresh() }
         } catch { notice = "无法备份原设置，尚未重置。" }
@@ -460,5 +557,19 @@ enum DemoTasks {
             return task
         }
         return SourceSnapshot(tasks: tasks)
+    }
+    /// 两条合成的 Claude Code 任务（一条运行、一条等待），用于验收来源标记；不读本机数据。
+    static func claudeTasks(phase: TaskPhase? = nil) -> [CodexTask] {
+        [("重构登录模块", "web-app", TaskPhase.running, "正在处理任务"), ("补充单元测试", "web-app", .waiting, "等待你的回答")]
+            .enumerated().map { index, spec in
+                var task = CodexTask(id: "cc:00000000-0000-4000-9000-00000000000\(index)", title: spec.0, project: spec.1,
+                                     createdAt: started.addingTimeInterval(-500), updatedAt: started.addingTimeInterval(-Double(index) - 0.5),
+                                     rolloutURL: URL(fileURLWithPath: "/demo/claude.jsonl"), origin: .claudeCode)
+                let resolvedPhase = phase ?? spec.2
+                task.activity = TaskActivity(phase: resolvedPhase, detail: phase?.label ?? spec.3, lastEventAt: .now,
+                                             startedAt: started.addingTimeInterval(-150 + Double(index * 30)),
+                                             waitingStartedAt: resolvedPhase == .waiting ? started : nil)
+                return task
+            }
     }
 }

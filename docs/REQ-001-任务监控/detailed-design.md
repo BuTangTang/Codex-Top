@@ -578,3 +578,23 @@ LocalCodexSource.snapshot 先构造数据库任务元数据和父子图，再确
 路径相对分量用ASCII字节查找，避免本地化字符串搜索；压缩输出按换行分段追加，保留跨解码块拼接、64KiB行上限、缺口与异常终态规则。补充65535／65536／65537字节行跨块回归，既不截短合法事件，也不放宽超长记录限制。
 
 同一条记录的解析结果一并携带当前lstat错误码，普通文件存在性及压缩兄弟文件检测不重复调用lstat；末级符号链接仍先解析后检查目标，打开后身份校验继续保留。
+
+## D-88 转圈刻度 + 胶囊（2026-11-09，取代 D-84）
+
+`TickOrb`（FloatingPanelView）画 44pt 圆球：深色主题下 #15181D 圆底；`TickSpinner` 是原生视图，12 根 `CAShapeLayer` 刻度（内半径 13.4、外半径 19.2、线宽 3pt），编号从 12 点起顺时针递增。运行时每根刻度挂一个透明度动画（1 → 0.22，周期 1 秒），第 n 根的开始时间比 0 号晚 n/12 秒，于是最亮处顺时针前进、逆时针一侧是渐暗的尾巴；开始时间取共享时间基准，刷新只改颜色和开关，不打乱相位。不运行、减少动态效果或展开时移除动画，在跑但不能转时显示静止梯度。中间数字只取运行数；全部完成显示绿勾、刻度变绿；暂停、读取中、无法判断显示“?”。
+
+`CapsuleOrb` 在圆球旁画胶囊段：等你回答（琥珀）一段、失败（红）一段，按 `WindowGeometry.orbCapsuleSegment` 留宽（一位数 22、两位数 28、99+ 36），从圆球那头往外排；第一段底色从圆心铺起，两段之间 1.5pt 深色缝。段落颜色固定用深色主题的亮琥珀／亮红配深色字。
+
+窗口：`WindowController.updateOrbLayout` 收起时的目标改为 `WindowGeometry.collapsedOrbFrame(anchor:extension:visible:)`，`orbAnchor` 始终是 44pt 圆球；右侧放不下时向左长，并写入 `OrbMorphState.capsuleGrowsLeft`。拖动同步用 `orbAnchor(inCollapsed:growsLeft:)` 从窗口还原圆球；拖动结束只取整位置、保留胶囊宽度。OrbPanelView 收起层按长出方向贴边对齐，展开时居中淡出；原经典圆环的琥珀底色、整球呼吸和外挂角标移除。暂停、读取中和双弧外观不长胶囊。测试：`GeometryTests` 覆盖段宽、两段相加、向左长与还原；`TickSpinnerTests` 固定顺时针编号、梯度方向和逐根延迟。
+
+## D-86 面板视觉（2026-11-09）
+
+`ActivityIndicator`：运行 18pt 内 2pt 细环（`NativeRunningArc` 0–0.36 段），待处理 20% 光圈加实心点，未知 9pt 灰色空心圈。`MonitorTaskRow`：状态与计时移到行右侧一列；行外留 6pt、内 10pt，圆角 10 的悬停底（`QuietRowStyle(cornerRadius:)`）；待处理行铺 9% 琥珀底加 22% 细边。`TaskPhaseLabel` 待处理胶囊圆角 5、16% 底、半粗体。`SourceMark` 改为 16% 底色加同色字。提示条加 `info.circle`、5% 底、圆角 9。`UsageSummaryButton` 全宽时每个额度窗口画 48pt 细进度条，放不下时退回原文字摘要。
+
+## 压缩记录后台全速读取（2026-11-09）
+
+`CompressedRolloutReader` 不再每轮推进 4 MiB／20 ms：没有缓存结果时创建 `Stream` 后交给一个 `.utility` 串行队列的 `Job` 一次读到文件末尾；`Job` 用锁保存取消标记、已读字节和结果。actor 每轮只看 `Job` 是否完成：完成即发布结果、按原规则落盘；文件身份变化或取消关注时取消并丢弃。同一时间只有一个 `Job`，其余任务显示“等待读取压缩记录”。读完后的校验（帧完整、末尾换行、证据缺口、文件身份复核）与原切片逻辑一致。测试改为启动后等待后台结束再取结果，另加 6 MiB 文件一次读完的用例。
+
+## Claude 桌面 App 收尾提问（D-87，REQ-003）
+
+`ClaudeTranscriptReducer` 记一个布尔值：本轮出现 `mcp__ccd_turn__wrap_up` 且 `input.ask` 非空。本轮 `end_turn` 时若有提问则为“等待你确认”（`.waiting`，记等待开始时间），否则照旧为已结束；新的用户输入、中断或结束都会清掉这个标记。只读字段是否存在，不保留文字。
