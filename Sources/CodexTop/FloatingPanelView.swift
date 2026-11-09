@@ -8,7 +8,7 @@ import CodexTopCore
     @Published var expansionDirection: OrbExpansionDirection = .down
     @Published var surfaceFrame = CGRect(x: 0, y: 0, width: 44, height: 44)
     @Published var expandedSize = CGSize(width: 410, height: 340)
-    /// D-88：收起成胶囊时琥珀段在圆球左边（靠近屏幕右边缘时）。
+    /// 收起后的面板比 44 宽时，靠近屏幕右边缘就向左长。
     @Published var capsuleGrowsLeft = false
 }
 
@@ -59,6 +59,8 @@ private struct OrbPanelView: View {
         if usesTwinArc && store.orbPhase == .unknown { return statusLabel }
         return "\(statusLabel) · \(store.runningCount) 个运行中 · \(store.attentionCount) 个需要处理"
     }
+    /// LED 面板收起时是圆角 12 的方块；展开和双弧外观仍用 22（44pt 时就是正圆）。
+    private var surfaceRadius: CGFloat { usesTwinArc || state.expanded ? 22 : 12 }
     private var contentAlignment: Alignment { state.expansionDirection == .up ? .bottom : .top }
     /// 圆环与面板共享外壳，收起后卸载任务列表以减少隐藏计算。
     var body: some View {
@@ -81,12 +83,14 @@ private struct OrbPanelView: View {
                                visible: !state.expanded, hovered: state.hovered)
                         .frame(width: 44, height: 44)
                 } else {
-                    CapsuleOrb(store: store, growsLeft: state.capsuleGrowsLeft, hovered: state.hovered, visible: !state.expanded)
+                    LEDOrbContent(store: store, hovered: state.hovered, visible: !state.expanded)
                 }
             }
-                // 收起时贴着圆球那一侧，胶囊随外壳变宽从圆球旁长出；展开时居中淡出。
+                // 收起时贴着起点那一侧，面板随外壳变宽展开；展开时居中淡出。
                 .frame(width: state.expanded ? nil : state.surfaceFrame.width, height: 44,
                        alignment: state.capsuleGrowsLeft ? .trailing : .leading)
+                // LED 面板变窄的过渡里，外壳比点阵宽的那一截也铺面板底色。
+                .background { if !usesTwinArc { LEDOrbView.panelColor(dark: store.theme.colorScheme == .dark) } }
                 .overlay {
                     WindowDragHandle(started: dragStarted, moved: dragMoved, ended: dragEnded, enabled: !state.expanded)
                 }
@@ -101,9 +105,9 @@ private struct OrbPanelView: View {
         }
         .frame(width: state.surfaceFrame.width, height: state.surfaceFrame.height,
                alignment: contentAlignment)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .circular))
+        .clipShape(RoundedRectangle(cornerRadius: surfaceRadius, style: .circular))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .circular)
+            RoundedRectangle(cornerRadius: surfaceRadius, style: .circular)
                 .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
                 .opacity(store.theme == .light && (!usesTwinArc || state.expanded) ? 1 : 0)
                 .allowsHitTesting(false)
@@ -138,109 +142,45 @@ private struct OrbRevealOpacity: AnimatableModifier {
     }
 }
 
-/// D-88 经典圆环收起后的样子：一颗圆球（转圈刻度 + 在跑的个数），有任务等你时旁边长出胶囊段。
-/// 一种东西只表达一件事：刻度在转 = 有任务在跑；白色数字 = 在跑的个数；
-/// 琥珀段 = 等你回答的个数，红段 = 失败的个数，两种都有就两段都弹出来（琥珀挨着圆球，红在最外头）。
-private struct CapsuleOrb: View {
-    @ObservedObject var store: TaskStore
-    let growsLeft: Bool
-    var hovered: Bool
-    var visible: Bool
-    private struct Segment { let count: Int; let color: Color; let fillStart: CGFloat; let labelStart: CGFloat; let end: CGFloat }
-    /// 从圆球那头往外排：第一段的底色从圆心铺起，免得圆球边上露出底板；数字放在圆球外面那一截里。
-    private var segments: [Segment] {
-        guard !store.paused, !store.loading else { return [] }
-        var x: CGFloat = 44, result: [Segment] = []
-        // 段落颜色固定用深色主题的亮琥珀／亮红，配深色字，浅色主题下也清楚。
-        for (count, phase) in [(store.statusSummary.waiting, TaskPhase.waiting), (store.statusSummary.failed, .failed)] where count > 0 {
-            let width = WindowGeometry.orbCapsuleSegment(count: count)
-            let first = result.isEmpty
-            result.append(Segment(count: count, color: phase.tint(.dark), fillStart: first ? 22 : x, labelStart: first ? 38 : x, end: x + width))
-            x += width
-        }
-        return result
-    }
-    var body: some View {
-        let segments = self.segments
-        let width = segments.last?.end ?? 44
-        // 向左长时整体镜像位置（文字不镜像）。
-        let place = { (start: CGFloat, end: CGFloat) -> CGFloat in growsLeft ? width - end : start }
-        ZStack(alignment: .leading) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                segment.color.frame(width: segment.end - segment.fillStart).offset(x: place(segment.fillStart, segment.end))
-            }
-            if segments.count > 1 {
-                // 两段之间一道深色细缝，琥珀和红不糊在一起。
-                Color(.sRGB, red: 0x15 / 255, green: 0x18 / 255, blue: 0x1D / 255)
-                    .frame(width: 1.5).offset(x: place(segments[1].fillStart - 0.75, segments[1].fillStart + 0.75))
-            }
-            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                Text(segment.count > 99 ? "99+" : String(segment.count))
-                    .font(.system(size: 18, weight: .heavy)).monospacedDigit()
-                    .foregroundStyle(Color(.sRGB, red: 0x1B / 255, green: 0x1E / 255, blue: 0x24 / 255))
-                    .frame(width: segment.end - segment.labelStart)
-                    .offset(x: place(segment.labelStart, segment.end))
-            }
-            TickOrb(store: store, hovered: hovered, visible: visible)
-                .frame(width: 44, height: 44)
-                .offset(x: place(0, 44))
-        }
-        .frame(width: width, height: 44, alignment: .leading)
-    }
-}
-
-/// 圆球本体：12 根刻度顺时针转圈表示有任务在跑，中间只写在跑的个数。
-private struct TickOrb: View {
+/// D-89 经典圆环收起后的样子：LED 点阵。白色是在跑的个数、琥珀等你回答、红失败；四周一圈暗灯，有任务在跑时 5 颗蓝灯顺时针绕圈。
+private struct LEDOrbContent: View {
     @ObservedObject var store: TaskStore
     var hovered: Bool
     var visible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var completionFlashing = false
     @State private var handledCompletionSequence = 0
-    private var scheme: ColorScheme { store.theme.colorScheme }
     private var currentPhase: TaskPhase { store.statusSummary.phase }
-    private var unknown: Bool { store.paused || store.loading || currentPhase == .unknown }
-    private var allDone: Bool { !unknown && currentPhase == .completed && store.runningCount == 0 }
-    private var running: Int { unknown ? 0 : store.runningCount }
     private var animationTrigger: String { "\(currentPhase.rawValue)-\(store.completionSequence)" }
-    var body: some View {
-        ZStack {
-            if scheme == .dark {
-                Circle().fill(Color(.sRGB, red: hovered ? 0x1E / 255 : 0x15 / 255, green: hovered ? 0x22 / 255 : 0x18 / 255,
-                                    blue: hovered ? 0x29 / 255 : 0x1D / 255))
-            }
-            TickSpinner(color: tickColor, spinning: running > 0 && !allDone && !completionFlashing && visible && !reduceMotion,
-                        gradient: running > 0 && !completionFlashing, opacity: allDone || completionFlashing ? 0.9 : running > 0 ? 1 : 0.16)
-            Group {
-                if allDone {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(TaskPhase.completed.tint(scheme))
-                } else {
-                    Text(unknown ? "?" : running > 99 ? "99+" : String(running))
-                        .font(.system(size: 17, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(running > 0 ? Palette.primary(scheme) : Palette.secondary(scheme))
-                        .contentTransition(.numericText())
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: running)
-                        .lineLimit(1).minimumScaleFactor(0.65)
-                }
-            }
-            .frame(width: 26, height: 24)
-            .accessibilityHidden(true)
-        }
-        .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
-        .onAppear { handledCompletionSequence = store.completionSequence }
-        .task(id: animationTrigger) {
-            // 有任务刚做完而其他任务还在跑时，刻度短暂变绿再接着转。
-            let flash = store.completionSequence > handledCompletionSequence && currentPhase == .running && !reduceMotion
-            handledCompletionSequence = store.completionSequence
-            completionFlashing = flash
-            guard flash else { return }
-            try? await Task.sleep(for: .seconds(1.1))
-            guard !Task.isCancelled else { return }
-            completionFlashing = false
-        }
+    private var ring: LEDOrbView.RingMode {
+        let groups = store.ledGroups
+        if groups.first?.tone == .done || completionFlashing { return .done }
+        return groups.first?.tone == .running ? .running : .idle
     }
-    private var tickColor: Color {
-        if allDone || completionFlashing { return TaskPhase.completed.tint(scheme) }
-        return running > 0 ? TaskPhase.running.tint(scheme) : Palette.primary(scheme)
+    var body: some View {
+        let groups = store.ledGroups
+        LEDOrb(groups: groups, ring: ring, dark: store.theme.colorScheme == .dark, hovered: hovered,
+               animating: visible && !reduceMotion)
+            .frame(width: LEDOrbLayout.layout(groups).width, height: LEDOrbLayout.height)
+            .onAppear { handledCompletionSequence = store.completionSequence }
+            .task(id: animationTrigger) {
+                // 有任务刚做完而其他任务还在跑时，外圈短暂变绿约 1 秒再接着转。
+                let flash = store.completionSequence > handledCompletionSequence && currentPhase == .running && !reduceMotion
+                handledCompletionSequence = store.completionSequence
+                completionFlashing = flash
+                guard flash else { return }
+                try? await Task.sleep(for: .seconds(1.1))
+                guard !Task.isCancelled else { return }
+                completionFlashing = false
+            }
+    }
+}
+
+extension TaskStore {
+    /// 圆球和窗口宽度共用同一份分组，保证画出来的宽度和窗口一致。
+    var ledGroups: [LEDOrbLayout.Group] {
+        LEDOrbLayout.groups(running: runningCount, waiting: statusSummary.waiting, failed: statusSummary.failed,
+                            allDone: statusSummary.phase == .completed && runningCount == 0,
+                            unknown: paused || loading || statusSummary.phase == .unknown)
     }
 }

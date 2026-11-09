@@ -378,13 +378,8 @@ final class GeometryTests: XCTestCase {
     }
 
 
-    /// D-88：有任务等你时胶囊按数字位数加宽，圆球不动；右边放不下就向左长，并能还原出圆球位置。
+    /// 收起后的面板比 44 宽时起点不动；右边放不下就向左长，并能还原出起点位置。
     func testCollapsedOrbCapsuleGrowsAwayFromScreenEdge() {
-        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 0, failed: 0), 0)
-        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 3, failed: 0), 22)
-        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 0, failed: 12), 28)
-        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 120, failed: 0), 36)
-        XCTAssertEqual(WindowGeometry.orbCapsuleExtension(waiting: 2, failed: 1), 44, "又有等你回答又有失败时两段都长出来")
         let visible = CGRect(x: -1440, y: 0, width: 1440, height: 900)
         let middle = CGRect(x: -800, y: 400, width: 44, height: 44)
         let none = WindowGeometry.collapsedOrbFrame(anchor: middle, extension: 0, visible: visible)

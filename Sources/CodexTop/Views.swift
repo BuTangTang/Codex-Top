@@ -457,14 +457,17 @@ struct SettingsView: View {
 struct SourceMark: View {
     let origin: TaskOrigin
     let scale: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
-        // D-86：浅底彩字、同一圆角，不再用饱和色块抢标题。
+        // D-86：浅底彩字、同一圆角。2026-11-09 用户觉得不够明显：底色加深、深色模式字更亮、加粗。
         let tint = origin == .codex ? Palette.accent : Color(red: 0.85, green: 0.47, blue: 0.24)
+        let text = colorScheme == .dark
+            ? (origin == .codex ? Color(red: 0.49, green: 0.72, blue: 1) : Color(red: 0.97, green: 0.64, blue: 0.42)) : tint
         Text(origin.mark)
-            .font(.system(size: 10 * max(1, scale), weight: .semibold))
-            .foregroundStyle(tint)
+            .font(.system(size: 10 * max(1, scale), weight: .bold))
+            .foregroundStyle(text)
             .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
+            .background(tint.opacity(colorScheme == .dark ? 0.30 : 0.20), in: RoundedRectangle(cornerRadius: 4))
             .fixedSize()
             .accessibilityLabel(origin.displayName)
     }

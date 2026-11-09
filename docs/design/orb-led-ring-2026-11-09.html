@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>LED 点阵：底部扫描 vs 四周循环</title>
+<style>
+  body { margin: 0; padding: 28px 36px 48px; background: #ECEDEF; font: 13px -apple-system, "PingFang SC", sans-serif; color: #1d1f23; }
+  h1 { font-size: 19px; margin: 0 0 6px; } p.hint { margin: 0 0 18px; color: #5b616b; line-height: 1.6; }
+  .grid { display: flex; flex-direction: column; gap: 18px; max-width: 1240px; }
+  .card { background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h3 { margin: 0; font-size: 16px; } .card p { margin: 4px 0 14px; color: #6b717b; line-height: 1.5; }
+  .states { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .st { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .st span.cap { font-size: 12px; color: #6b717b; }
+  .bg { display: flex; justify-content: center; align-items: center; padding: 12px 16px; border-radius: 10px; min-width: 150px; min-height: 108px; box-sizing: border-box; }
+  .dark { background: #2b2d31; } .light { background: #dfe2e6; }
+  .real { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; color: #8a9099; font-size: 12px; }
+  .real .bg { min-width: 0; min-height: 0; padding: 6px; }
+  canvas { image-rendering: pixelated; }
+  @keyframes tick { 0% { opacity: 1; } 100% { opacity: .22; } }
+  @keyframes eq1 { 0%,100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+  .eq { transform-box: fill-box; transform-origin: 50% 100%; }
+  @keyframes scanx { 0% { transform: translateX(0); } 100% { transform: translateX(var(--d)); } }
+  @keyframes ringdot { 0% { opacity: 1; } 3% { opacity: .65; } 6% { opacity: .35; } 9% { opacity: .12; } 12%, 100% { opacity: 0; } }
+</style></head>
+<body>
+<h1>LED 点阵：底部扫描 vs 四周循环</h1>
+<p class="hint">三种放在一起对比，数字部分完全一样，只有“在跑”的表现不同。规则一样：有动效 = 有任务在跑；白色数字 = 在跑的个数；琥珀 = 等你回答；红 = 失败；绿 = 全部完成。每个状态上面是深色款（黑底），下面是浅色款（白底），都是放大 2 倍会动的样子；最下面一行是 1 倍外接屏上的实际大小。</p>
+<div class="grid" id="grid"></div>
+<script>
+const THEMES = {
+  dark:  { blue:'#4E9BFF', amber:'#F5AE3D', red:'#F2675F', green:'#3FCB86', base:'#15181D', panel:'#0B0D10', ink:'#1B1E24', fg:'#FFFFFF', dim:'#7E858F', faint:'#FFFFFF', label:'#AEB4BD', edge:'none', tintA:'rgba(245,174,61,.16)', tintR:'rgba(242,103,95,.16)' },
+  light: { blue:'#1F7AE0', amber:'#E09A22', red:'#E0554D', green:'#1FA866', base:'#FFFFFF', panel:'#F3F4F6', ink:'#1B1E24', fg:'#1B1E24', dim:'#A0A6AE', faint:'#000000', label:'#6B717B', edge:'rgba(0,0,0,.12)', tintA:'rgba(224,154,34,.16)', tintR:'rgba(224,85,77,.14)' },
+};
+let C = THEMES.dark, uid = 0;
+const font = `font-family="-apple-system, 'PingFang SC', SF Pro Display" style="font-variant-numeric: tabular-nums"`;
+const text = (x, y, t, color, size, weight = 800, anchor = 'middle') => `<text x="${x}" y="${y + size * 0.36}" text-anchor="${anchor}" font-size="${size}" font-weight="${weight}" fill="${color}" ${font}>${t}</text>`;
+const count = n => n > 99 ? '99+' : String(n);
+const segs = s => s.done ? [] : [[s.waiting, 'amber', '等你'], [s.failed, 'red', '失败']].filter(x => x[0] > 0);
+const headColor = s => s.done ? C.green : s.running ? C.fg : C.dim;
+
+// ---------- L LED 点阵 ----------
+const F3 = { '0':'111101101101111','1':'010110010010111','2':'111001111100111','3':'111001111001111','4':'101101111001001','5':'111100111001111','6':'111100111101111','7':'111001001001001','8':'111101111101111','9':'111101111001111','+':'000010111010000','v':'000001001101010' };
+const F5 = { '0':'01110100011001110101110011000101110','1':'00100011000010000100001000010001110','2':'01110100010000100010001000100011111','3':'11111000100010000010000011000101110','4':'00010001100101010010111110001000010','5':'11111100001111000001000011000101110','6':'00110010001000011110100011000101110','7':'11111000010001000100010000100001000','8':'01110100011000101110100011000101110','9':'01110100011000101111000010001001100','+':'00000001000010011111001000010000000','v':'00000000010001110110111000100000000' };
+function ledGroups(s) {
+  return [{ t: s.done ? 'v' : count(s.running).replace('99+', '99'), c: headColor(s) }].concat(segs(s).map(([n, k]) => ({ t: count(n).replace('99+', '99'), c: C[k] })));
+}
+// 画一组点阵字。square=true 用方点并对齐整像素，1 倍屏更利落
+function ledText(t, x, y, font, cols, rows, pitch, dot, color, square) {
+  let o = '';
+  [...t].forEach((ch, ci) => {
+    const bits = font[ch] || font['0'];
+    for (let i = 0; i < cols * rows; i++) {
+      const on = bits[i] === '1';
+      const cx = x + ci * (cols + 1) * pitch + (i % cols) * pitch, cy = y + Math.floor(i / cols) * pitch;
+      o += square ? `<rect x="${cx}" y="${cy}" width="${dot}" height="${dot}" rx="${dot * .25}" fill="${on ? color : C.faint}" opacity="${on ? 1 : .07}"/>`
+                  : `<circle cx="${cx + dot / 2}" cy="${cy + dot / 2}" r="${dot / 2}" fill="${on ? color : C.faint}" opacity="${on ? 1 : .07}"/>`;
+    }
+  });
+  return o;
+}
+function ledPanel(s, live, opt) {
+  const groups = ledGroups(s), { font, cols, rows, pitch, dot, square, top } = opt;
+  const gw = g => g.t.length * (cols + 1) * pitch - pitch;
+  const inner = groups.reduce((a, g) => a + gw(g), 0) + (groups.length - 1) * 2 * pitch;
+  const w = Math.max(44, Math.round(inner + 16));
+  let o = `<rect width="${w}" height="44" rx="9" fill="${C.panel}" stroke="${C.edge}" stroke-width=".8"/>`;
+  let x = Math.round((w - inner) / 2);
+  groups.forEach((g, i) => {
+    if (i) o += `<rect x="${x - pitch - .5}" y="${top}" width="1" height="${rows * pitch - (pitch - dot)}" fill="${C.faint}" opacity=".12"/>`;
+    o += ledText(g.t, x, top, font, cols, rows, pitch, dot, g.c, square);
+    x += gw(g) + 2 * pitch;
+  });
+  // 底下一排扫描灯：在跑时一颗亮灯带两颗渐暗的尾巴来回扫
+  const n = Math.floor((w - 12) / 4), y = 36;
+  for (let i = 0; i < n; i++) o += `<rect x="${6 + i * 4}" y="${y}" width="3" height="3" rx=".8" fill="${C.faint}" opacity=".07"/>`;
+  if (s.running && !s.done) {
+    const head = [.35, .65, 1].map((op, k) => `<rect x="${6 + k * 4}" y="${y}" width="3" height="3" rx=".8" fill="${C.blue}" opacity="${op}"/>`).join('');
+    o += `<g ${live ? `style="--d:${(n - 3) * 4}px; animation: scanx 1.3s ease-in-out infinite alternate"` : ''}>${head}</g>`;
+  } else if (s.done) o += `<rect x="${w / 2 - 1.5}" y="${y}" width="3" height="3" rx=".8" fill="${C.green}"/>`;
+  return { w, h: 44, svg: o };
+}
+const L1 = (s, live) => ledPanel(s, live, { font: F3, cols: 3, rows: 5, pitch: 4, dot: 3, square: true, top: 7 });
+const L2 = (s, live) => ledPanel(s, live, { font: F5, cols: 5, rows: 7, pitch: 3, dot: 2.3, square: false, top: 6 });
+// L3 整块点阵屏：一整块 14×9 的点阵，数字点亮在中间；在跑时一颗亮点沿着屏幕最外一圈顺时针跑
+function L3(s, live) {
+  const groups = ledGroups(s), pitch = 4, dot = 3, cols = 3, rows = 5;
+  const gw = g => g.t.length * (cols + 1) * pitch - pitch;
+  const inner = groups.reduce((a, g) => a + gw(g), 0) + (groups.length - 1) * 2 * pitch;
+  const gridC = Math.max(9, Math.ceil((inner + 2 * 2 * pitch) / pitch)), gridR = 9;
+  const w = gridC * pitch + 8;
+  let o = `<rect width="${w}" height="44" rx="9" fill="${C.panel}" stroke="${C.edge}" stroke-width=".8"/>`;
+  const lit = new Set();
+  let x0 = 4 + Math.round((gridC * pitch - inner) / pitch / 2) * pitch;
+  let x = x0;
+  groups.forEach(g => {
+    [...g.t].forEach((ch, ci) => {
+      const bits = F3[ch] || F3['0'];
+      for (let i = 0; i < 15; i++) if (bits[i] === '1') lit.add(`${(x - 4) / pitch + ci * 4 + (i % 3)},${2 + Math.floor(i / 3)}`);
+    });
+    groups.color = groups.color || {};
+    for (let ci = 0; ci < g.t.length * 4; ci++) for (let r = 2; r < 7; r++) groups.color[`${(x - 4) / pitch + ci},${r}`] = g.c;
+    x += gw(g) + 2 * pitch;
+  });
+  for (let r = 0; r < gridR; r++) for (let c = 0; c < gridC; c++) {
+    const on = lit.has(`${c},${r}`);
+    o += `<rect x="${4 + c * pitch}" y="${4 + r * pitch}" width="${dot}" height="${dot}" rx=".8" fill="${on ? groups.color[`${c},${r}`] : C.faint}" opacity="${on ? 1 : .07}"/>`;
+  }
+  if (s.running && !s.done) {
+    const ring = [];
+    for (let c = 0; c < gridC; c++) ring.push([c, 0]);
+    for (let r = 1; r < gridR; r++) ring.push([gridC - 1, r]);
+    for (let c = gridC - 2; c >= 0; c--) ring.push([c, gridR - 1]);
+    for (let r = gridR - 2; r > 0; r--) ring.push([0, r]);
+    const per = ring.length, dur = per * 0.045;
+    ring.forEach(([c, r], i) => {
+      o += `<rect x="${4 + c * pitch}" y="${4 + r * pitch}" width="${dot}" height="${dot}" rx=".8" fill="${C.blue}" opacity="${live ? 0 : (i < 4 ? [.3, .55, .8, 1][i] : 0)}" ${live ? `style="animation: ringdot ${dur.toFixed(2)}s linear ${(i * 0.045 - dur).toFixed(3)}s infinite"` : ''}/>`;
+    });
+  }
+  return { w, h: 44, svg: o };
+}
+
+// ---------- G 跑马灯胶囊 ----------
+// 彗星：几段越往前越亮的短线，一起沿边框顺时针跑，看起来是带尾巴的一道光
+function comet(x, y, w, h, color, live) {
+  const r = h / 2, per = 2 * (w - h) + Math.PI * h;
+  let o = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="${color}" stroke-opacity=".18" stroke-width="1.6"/>`;
+  [[.2, 0], [.45, 6], [.75, 12], [1, 18]].forEach(([op, lag]) => {
+    const dash = lag === 18 ? 8 : 7;
+    o += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="${color}" stroke-opacity="${op}" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="${dash} ${per}" stroke-dashoffset="${-lag}">${live ? `<animate attributeName="stroke-dashoffset" from="${-lag}" to="${-lag - per}" dur="2s" repeatCount="indefinite"/>` : ''}</rect>`;
+  });
+  return o;
+}
+function pill(s, live, style) {
+  const head = s.done ? { t: '✓ 完成', c: C.green } : { t: `${s.running ? count(s.running) : 0} 在跑`, c: headColor(s) };
+  const parts = [head].concat(segs(s).map(([n, k, label]) => ({ t: style === 'short' ? count(n) : `${count(n)} ${label}`, c: C[k], k })));
+  if (style === 'short') parts[0].t = s.done ? '✓' : (s.running ? count(s.running) : '0');
+  const wOf = p => style === 'short' ? 14 + p.t.length * 9.5 + (p.k ? 10 : 0) : 18 + [...p.t].reduce((a, ch) => a + (/[0-9✓ ]/.test(ch) ? 8.5 : 13), 0);
+  const ws = parts.map(wOf), w = ws.reduce((a, b) => a + b, 0) + 12, h = 36, y0 = 4;
+  let o = `<rect x="1" y="${y0}" width="${w - 2}" height="${h}" rx="${h / 2}" fill="${C.base}" stroke="${C.edge}" stroke-width=".8"/>`;
+  let x = 7;
+  parts.forEach((p, i) => {
+    if (style === 'blocks' && p.k) {
+      o += `<rect x="${x + 1}" y="${y0 + 5}" width="${ws[i] - 4}" height="${h - 10}" rx="${(h - 10) / 2}" fill="${C[p.k]}"/>` + text(x + ws[i] / 2 - 1, y0 + h / 2, p.t, C.ink, 13);
+    } else if (style === 'short' && p.k) {
+      o += `<circle cx="${x + 6}" cy="${y0 + h / 2}" r="3.2" fill="${p.c}"/>` + text(x + 12 + p.t.length * 4.75, y0 + h / 2, p.t, p.c, 16);
+    } else {
+      if (i) o += `<rect x="${x - 1}" y="${y0 + 11}" width="1" height="14" fill="${C.faint}" opacity=".14"/>`;
+      o += text(x + ws[i] / 2, y0 + h / 2, p.t, p.c, style === 'short' ? 16 : 13);
+    }
+    x += ws[i];
+  });
+  if (s.running && !s.done) o += comet(1, y0, w - 2, h, C.blue, live);
+  return { w, h: 44, svg: o };
+}
+const G1 = (s, live) => pill(s, live, 'text');
+const G2 = (s, live) => pill(s, live, 'blocks');
+const G3 = (s, live) => pill(s, live, 'short');
+
+// ---------- H 跳动音柱 ----------
+function bars(x, baseY, n, maxH, bw, gap, color, running, live, done) {
+  let o = '';
+  const rest = [.45, .8, .6, .95, .5];
+  for (let i = 0; i < n; i++) {
+    const bx = x + i * (bw + gap);
+    if (running) {
+      const anim = live ? `class="eq" style="animation: eq1 ${(0.62 + (i % 3) * 0.17).toFixed(2)}s ease-in-out ${(i * 0.13).toFixed(2)}s infinite"` : '';
+      o += `<rect x="${bx}" y="${baseY - maxH * rest[i % 5]}" width="${bw}" height="${maxH * rest[i % 5]}" rx="${bw / 2}" fill="${color}" ${anim}/>`;
+    } else {
+      const hh = done ? maxH * rest[i % 5] : bw;
+      o += `<rect x="${bx}" y="${baseY - hh}" width="${bw}" height="${hh}" rx="${bw / 2}" fill="${done ? C.green : C.faint}" opacity="${done ? .9 : .18}"/>`;
+    }
+  }
+  return o;
+}
+function tags(s, x, h = 44, y = 0, r = 12) {
+  let o = '';
+  segs(s).forEach(([n, k]) => {
+    const w = 20 + count(n).length * 10;
+    o += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${C[k]}"/>` + text(x + w / 2, y + h / 2, count(n), C.ink, 18);
+    x += w + 3;
+  });
+  return { o, x };
+}
+// H1 细化：4 根更粗的音柱（顶部略亮），数字更大；等你、失败是同高的圆角块
+function H1(s, live) {
+  const mainW = 62;
+  let o = `<rect width="${mainW}" height="44" rx="12" fill="${C.base}" stroke="${C.edge}" stroke-width=".8"/>`;
+  o += bars(9, 32, 4, 20, 3.6, 2.6, C.blue, s.running > 0 && !s.done, live, s.done);
+  o += s.done ? text(46, 22, '✓', C.green, 18) : text(46, 22, s.running ? count(s.running) : '0', headColor(s), 19);
+  const t = tags(s, mainW + 3);
+  return { w: segs(s).length ? t.x - 3 : mainW, h: 44, svg: o + t.o };
+}
+// H2 波形底座：数字居中放大，底下一排 7 根细音柱当“声波”在跳
+function H2(s, live) {
+  const mainW = 48;
+  let o = `<rect width="${mainW}" height="44" rx="12" fill="${C.base}" stroke="${C.edge}" stroke-width=".8"/>`;
+  o += s.done ? text(24, 18, '✓', C.green, 17) : text(24, 18, s.running ? count(s.running) : '0', headColor(s), 19);
+  o += bars(7.5, 38, 7, 8, 2.4, 2.6, C.blue, s.running > 0 && !s.done, live, s.done);
+  const t = tags(s, mainW + 3);
+  return { w: segs(s).length ? t.x - 3 : mainW, h: 44, svg: o + t.o };
+}
+// H3 一体条：整条一个圆角块，左边音柱 + 在跑个数，右边等你、失败用浅底色块写在同一条里
+function H3(s, live) {
+  const list = segs(s);
+  const ws = list.map(([n]) => 22 + count(n).length * 10);
+  const mainW = 58, w = mainW + ws.reduce((a, b) => a + b, 0) + (list.length ? 4 : 0);
+  let o = `<rect width="${w}" height="44" rx="14" fill="${C.base}" stroke="${C.edge}" stroke-width=".8"/>`;
+  o += bars(9, 31, 3, 18, 4, 3, C.blue, s.running > 0 && !s.done, live, s.done);
+  o += s.done ? text(41, 22, '✓', C.green, 18) : text(41, 22, s.running ? count(s.running) : '0', headColor(s), 19);
+  let x = mainW;
+  list.forEach(([n, k], i) => {
+    o += `<rect x="${x}" y="5" width="${ws[i] - 3}" height="34" rx="10" fill="${k === 'amber' ? C.tintA : C.tintR}"/>` + text(x + (ws[i] - 3) / 2, 22, count(n), C[k], 18);
+    x += ws[i];
+  });
+  return { w, h: 44, svg: o };
+}
+
+// ---------- M 堆叠卡片 ----------
+// 最前面一张卡：圆角方卡 + 转圈刻度 + 在跑个数
+function frontCard(s, live, x, y, size) {
+  const c = x + size / 2, m = y + size / 2, k = size / 44;
+  let o = `<rect x="${x + .75}" y="${y + .75}" width="${size - 1.5}" height="${size - 1.5}" rx="${11 * k}" fill="${C.base}" stroke="${C.panel}" stroke-width="1.5"/>`;
+  if (C.edge !== 'none') o += `<rect x="${x + .75}" y="${y + .75}" width="${size - 1.5}" height="${size - 1.5}" rx="${11 * k}" fill="none" stroke="${C.edge}" stroke-width=".8"/>`;
+  const n = 12, r0 = 12.4 * k, r1 = 17 * k, run = s.running > 0 && !s.done;
+  for (let i = 0; i < n; i++) {
+    const a = (i * 30 - 90) * Math.PI / 180, still = run ? Math.max(.22, 1 - ((n - i) % n) * (.78 / (n - 1))) : (s.done ? .9 : .16);
+    const anim = live && run ? `style="animation: tick 1s linear ${(-1 + i / n).toFixed(3)}s infinite"` : `opacity="${still}"`;
+    o += `<line x1="${c + r0 * Math.cos(a)}" y1="${m + r0 * Math.sin(a)}" x2="${c + r1 * Math.cos(a)}" y2="${m + r1 * Math.sin(a)}" stroke="${s.done ? C.green : run ? C.blue : C.faint}" stroke-width="${2.6 * k}" stroke-linecap="round" ${anim}/>`;
+  }
+  return o + (s.done ? text(c, m, '✓', C.green, 16 * k) : text(c, m, s.running ? count(s.running) : '0', headColor(s), 17 * k));
+}
+const backW = n => count(n).length > 1 ? 26 : 20;
+// M1 平铺错开：后面的琥珀卡、红卡往右错开露出一截，写各自的数
+function M1(s, live) {
+  const list = segs(s), w = 44 + list.reduce((a, [n]) => a + backW(n), 0);
+  let o = '', left = 0;
+  const lefts = list.map(([n]) => { left += backW(n); return left; });
+  list.slice().reverse().forEach(([n, k], ri) => {
+    const i = list.length - 1 - ri, x = lefts[i], inset = (i + 1) * 2;
+    o += `<rect x="${x + .75}" y="${inset + .75}" width="42.5" height="${42.5 - 2 * inset}" rx="10" fill="${C[k]}" stroke="${C.panel}" stroke-width="1.5"/>`;
+    o += text(x + 44 - backW(n) / 2 - 1, 22, count(n), C.ink, 16);
+  });
+  return { w, h: 44, svg: o + frontCard(s, live, 0, 0, 44) };
+}
+// M2 错层叠放：后面的卡往右上一层层错开，有一点立体感
+function M2(s, live) {
+  const list = segs(s), step = list.map(([n]) => backW(n) - 4);
+  const w = 40 + step.reduce((a, b) => a + b, 0) + (list.length ? 4 : 0);
+  let o = '', x = 0;
+  const xs = step.map(st => (x += st));
+  list.slice().reverse().forEach(([n, k], ri) => {
+    const i = list.length - 1 - ri, y = 4 - (i + 1) * 3;
+    o += `<rect x="${xs[i] + .75}" y="${y + .75}" width="38.5" height="38.5" rx="10" fill="${C[k]}" stroke="${C.panel}" stroke-width="1.5"/>`;
+    o += text(xs[i] + 40 - step[i] / 2 - 2, y + 20, count(n), C.ink, 15);
+  });
+  return { w, h: 44, svg: o + frontCard(s, live, 0, 4, 40) };
+}
+// M3 竖向叠放：后面的卡往下露出一截，横向永远 44，适合贴在屏幕边上
+function M3(s, live) {
+  const list = segs(s), peek = 20, h = 44 + list.length * peek;
+  let o = '';
+  list.slice().reverse().forEach(([n, k], ri) => {
+    const i = list.length - 1 - ri, y = (i + 1) * peek, inset = (i + 1) * 2;
+    o += `<rect x="${inset + .75}" y="${y + .75}" width="${42.5 - 2 * inset}" height="42.5" rx="10" fill="${C[k]}" stroke="${C.panel}" stroke-width="1.5"/>`;
+    o += text(22, y + 44 - peek / 2 - 1, count(n), C.ink, 14);
+  });
+  return { w: 44, h, svg: o + frontCard(s, live, 0, 0, 44) };
+}
+
+
+// L4 四周循环：数字用同样的方点大字，四周一圈小灯；在跑时一颗带尾巴的亮点顺时针绕圈
+function ledRing(s, live, alwaysRing, corner = 'pixel') {
+  const groups = ledGroups(s), pitch = 4, dot = 3, cols = 3, rows = 5;
+  const gw = g => g.t.length * (cols + 1) * pitch - pitch;
+  const inner = groups.reduce((a, g) => a + gw(g), 0) + (groups.length - 1) * 2 * pitch;
+  const k = Math.max(9, Math.ceil((inner + 20 - 9) / 4)), w = 9 + 4 * k;   // 让一圈灯正好落在整像素格上
+  let o = `<rect width="${w}" height="44" rx="12" fill="${C.panel}" stroke="${C.edge}" stroke-width=".8"/>`;
+  let x = Math.round((w - inner) / 2);
+  groups.forEach((g, i) => {
+    if (i) o += `<rect x="${x - pitch - .5}" y="13" width="1" height="19" fill="${C.faint}" opacity=".12"/>`;
+    o += ledText(g.t, x, 13, F3, cols, rows, pitch, dot, g.c, true);
+    x += gw(g) + 2 * pitch;
+  });
+  // 外圈按顺时针排。corner：'arc' 四角各 3 颗沿圆弧；'pixel' 四角各 1 颗往里收 1 像素（全部整像素）；'square' 直角
+  const x0 = 4.5, x1 = w - 4.5, y0 = 4.5, y1 = 40.5, ring = [];
+  if (corner !== 'arc') {
+    const cut = corner === 'pixel' ? 4 : 0;
+    const cornerDot = (x, y) => { if (corner === 'pixel') ring.push([x - dot / 2, y - dot / 2]); };
+    for (let x = x0 + cut; x <= x1 - cut + .01; x += 4) ring.push([x - dot / 2, y0 - dot / 2]);
+    cornerDot(x1 - 1, y0 + 1);
+    for (let y = y0 + (cut || 4); y <= y1 - cut + .01; y += 4) ring.push([x1 - dot / 2, y - dot / 2]);
+    cornerDot(x1 - 1, y1 - 1);
+    for (let x = x1 - (cut || 4); x >= x0 + cut - .01; x -= 4) ring.push([x - dot / 2, y1 - dot / 2]);
+    cornerDot(x0 + 1, y1 - 1);
+    for (let y = y1 - (cut || 4); y >= y0 + (cut || 4) - .01; y -= 4) ring.push([x0 - dot / 2, y - dot / 2]);
+    cornerDot(x0 + 1, y0 + 1);
+  }
+  const R = 8;
+  if (corner === 'arc') {
+  const arc = (cx, cy, u, v) => { for (const deg of [22.5, 45, 67.5]) { const f = deg * Math.PI / 180; ring.push([cx + R * (u[0] * Math.cos(f) + v[0] * Math.sin(f)) - dot / 2, cy + R * (u[1] * Math.cos(f) + v[1] * Math.sin(f)) - dot / 2]); } };
+  for (let x = x0 + R; x <= x1 - R + .01; x += 4) ring.push([x - dot / 2, y0 - dot / 2]);
+  arc(x1 - R, y0 + R, [0, -1], [1, 0]);
+  for (let y = y0 + R; y <= y1 - R + .01; y += 4) ring.push([x1 - dot / 2, y - dot / 2]);
+  arc(x1 - R, y1 - R, [1, 0], [0, 1]);
+  for (let x = x1 - R; x >= x0 + R - .01; x -= 4) ring.push([x - dot / 2, y1 - dot / 2]);
+  arc(x0 + R, y1 - R, [0, 1], [-1, 0]);
+  for (let y = y1 - R; y >= y0 + R - .01; y -= 4) ring.push([x0 - dot / 2, y - dot / 2]);
+  arc(x0 + R, y0 + R, [-1, 0], [0, -1]);
+  }
+  const run = s.running > 0 && !s.done, N = ring.length;
+  if (run || alwaysRing || s.done) ring.forEach(([rx, ry]) => { o += `<rect x="${rx}" y="${ry}" width="${dot}" height="${dot}" rx=".8" fill="${s.done ? C.green : C.faint}" opacity="${s.done ? .45 : .07}"/>`; });
+  if (run) {
+    const step = 0.05, dur = (N * step).toFixed(2), p = 100 / N, id = 'rd' + N;
+    // 5 颗：最前面 1 颗全亮，后面 4 颗依次变暗
+    o += `<style>@keyframes ${id} { 0% { opacity: 1; } ${p.toFixed(2)}% { opacity: .7; } ${(2 * p).toFixed(2)}% { opacity: .45; } ${(3 * p).toFixed(2)}% { opacity: .25; } ${(4 * p).toFixed(2)}% { opacity: .12; } ${(5 * p).toFixed(2)}%, 100% { opacity: 0; } }</style>`;
+    ring.forEach(([rx, ry], i) => {
+      const op = live ? 0 : (i >= 4 && i < 9 ? [.12, .25, .45, .7, 1][i - 4] : 0);
+      o += `<rect x="${rx}" y="${ry}" width="${dot}" height="${dot}" rx=".8" fill="${C.blue}" opacity="${op}" ${live ? `style="animation: ${id} ${dur}s linear ${(i * step - dur).toFixed(3)}s infinite"` : ''}/>`;
+    });
+  }
+  return { w, h: 44, svg: o };
+}
+const L4a = (s, live) => ledRing(s, live, true);
+const L4b = (s, live) => ledRing(s, live, false);
+
+const states = [
+  ['只有 3 个在跑', { running: 3, waiting: 0, failed: 0 }],
+  ['2 在跑 + 1 等你 + 1 失败', { running: 2, waiting: 1, failed: 1 }],
+  ['没在跑 + 2 等你', { running: 0, waiting: 2, failed: 0 }],
+  ['全部完成', { running: 0, waiting: 0, failed: 0, done: true }],
+];
+const picks = [
+  ['现在：底下一排扫描', '数字下面一排小灯，一颗带尾巴的亮灯左右来回扫 = 在跑。', L1],
+  ['四周循环（暗灯常在）', '四周一圈暗灯一直在，像屏幕的边框，四个角是整像素圆角（每角 1 颗灯往里收 1 像素）；在跑时 5 颗蓝灯（最前面全亮、后面 4 颗渐暗）沿着这一圈顺时针跑。全部完成时这一圈变成淡绿。', L4a],
+  ['四周循环（只在跑时亮边）', '平时没有边框灯，干净；有任务在跑时才出现这一圈，5 颗蓝灯顺时针跑。“有没有边框”本身就说明有没有在跑。', L4b],
+];
+const svgOf = (shape, scale) => `<svg width="${shape.w * scale}" height="${shape.h * scale}" viewBox="0 0 ${shape.w} ${shape.h}">${shape.svg}</svg>`;
+(async () => {
+  const grid = document.getElementById('grid');
+  for (const [name, desc, fn] of picks) {
+    const card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = `<h3>${name}</h3><p>${desc}</p>`;
+    const sts = document.createElement('div'); sts.className = 'states';
+    for (const [cap, s] of states) {
+      const st = document.createElement('div'); st.className = 'st';
+      st.insertAdjacentHTML('beforeend', `<span class="cap">${cap}</span>`);
+      for (const theme of ['dark', 'light']) {
+        C = THEMES[theme];
+        st.insertAdjacentHTML('beforeend', `<div class="bg ${theme}">${svgOf(fn(s, true), 2)}</div>`);
+      }
+      sts.appendChild(st);
+    }
+    card.appendChild(sts);
+    // 1 倍实际大小：拿中间那个状态，深色款放深色桌面、浅色款放浅色桌面
+    const real = document.createElement('div'); real.className = 'real'; real.textContent = '1 倍实际大小：';
+    for (const theme of ['dark', 'light']) {
+      C = THEMES[theme];
+      for (const [, s] of states) {
+        const still = fn(s, false);
+        const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${still.w}" height="${still.h}" viewBox="0 0 ${still.w} ${still.h}">${still.svg}</svg>`); await img.decode();
+        const c = document.createElement('canvas'); c.width = Math.ceil(still.w); c.height = still.h; c.style.width = Math.ceil(still.w) + 'px'; c.style.height = still.h + 'px'; c.getContext('2d').drawImage(img, 0, 0);
+        const b = document.createElement('span'); b.className = 'bg ' + theme; b.appendChild(c); real.appendChild(b);
+      }
+    }
+    card.appendChild(real);
+    grid.appendChild(card);
+  }
+})();
+</script>
+</body></html>

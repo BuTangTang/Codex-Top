@@ -383,10 +383,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
         animateOrb(to: willExpand ? expanded : collapsed.frame, expanded: willExpand, animated: animated)
     }
-    /// D-88：经典圆环收起时，有任务等你回答或失败就长成胶囊（两种都有就两段）；暂停、读取中或双弧外观保持圆球。
+    /// D-89：经典圆环收起时是 LED 面板，宽度按点阵排版算（最窄 45）；双弧外观保持 44pt 圆球。
     private var orbCapsuleExtension: CGFloat {
-        guard store.orbAppearance == .ring, !store.paused, !store.loading else { return 0 }
-        return WindowGeometry.orbCapsuleExtension(waiting: store.statusSummary.waiting, failed: store.statusSummary.failed)
+        guard store.orbAppearance == .ring else { return 0 }
+        return LEDOrbLayout.layout(store.ledGroups).width - 44
     }
     private func restoreCollapsedOrb(to anchor: CGRect) {
         stopOrbClickMonitoring()

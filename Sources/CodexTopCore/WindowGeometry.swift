@@ -121,18 +121,7 @@ public enum WindowGeometry {
                       height: ceil(frame.maxY - epsilon) - y)
     }
 
-    /// D-88 胶囊的一段：一位数、两位数、99+ 各留够数字的宽度；0 个就没有这一段。
-    public static func orbCapsuleSegment(count: Int) -> CGFloat {
-        guard count > 0 else { return 0 }
-        return count > 99 ? 36 : count > 9 ? 28 : 22
-    }
-
-    /// 收起时圆球旁长出的总宽度：等你回答一段（琥珀）、失败一段（红），两种都有就两段都长出来；都没有就是 44pt 圆球。
-    public static func orbCapsuleExtension(waiting: Int, failed: Int) -> CGFloat {
-        orbCapsuleSegment(count: waiting) + orbCapsuleSegment(count: failed)
-    }
-
-    /// 圆球位置不变，胶囊默认向右长；右边放不下时向左长（琥珀段在左）。
+    /// 起点 44pt 不变，收起后的面板默认向右长；右边放不下时向左长。
     public static func collapsedOrbFrame(anchor: CGRect, extension extra: CGFloat, visible: CGRect) -> (frame: CGRect, growsLeft: Bool) {
         guard extra > 0 else { return (anchor, false) }
         let growsLeft = anchor.maxX + extra > visible.insetBy(dx: 8, dy: 8).maxX
