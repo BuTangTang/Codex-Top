@@ -152,13 +152,10 @@ private struct LEDOrbContent: View {
     /// 全部完成 5 分钟还没有新任务，就从 OK 换成休眠 Zz（D-91）。
     @State private var sleeping = false
     static let sleepAfter: Duration = .seconds(300)
-    private var allDone: Bool { store.ledGroups().first?.tone == .done && store.ledGroups().count == 1 }
-    private var ring: LEDOrbView.RingMode {
-        if allDone { return .done }
-        return store.ledGroups().first?.tone == .running ? .running : .idle
-    }
     var body: some View {
         let groups = store.ledGroups(sleeping: sleeping)
+        let allDone = groups.count == 1 && groups.first?.tone == .done
+        let ring: LEDOrbView.RingMode = allDone ? .done : groups.first?.tone == .running ? .running : .idle
         LEDOrb(groups: groups, ring: ring, completions: store.completionSequence, dark: store.theme.colorScheme == .dark, hovered: hovered,
                animating: visible && !reduceMotion)
             .frame(width: LEDOrbLayout.layout(groups).width, height: LEDOrbLayout.height)
@@ -176,9 +173,10 @@ extension TaskStore {
     /// 圆球和窗口宽度共用同一份分组，保证画出来的宽度和窗口一致（OK 和 Zz 一样宽）。
     /// 绿色个数是“刚完成”一段还剩几个，悬浮球和面板标题栏一致。
     func ledGroups(sleeping: Bool = false) -> [LEDOrbLayout.Group] {
-        LEDOrbLayout.groups(running: runningCount, waiting: statusSummary.waiting, failed: statusSummary.failed,
+        let summary = statusSummary
+        return LEDOrbLayout.groups(running: summary.running, waiting: summary.waiting, failed: summary.failed,
                             fresh: freshFinished.count,
-                            allDone: statusSummary.phase == .completed && runningCount == 0, sleeping: sleeping,
-                            unknown: paused || loading || statusSummary.phase == .unknown)
+                            allDone: summary.phase == .completed && summary.running == 0, sleeping: sleeping,
+                            unknown: paused || loading || summary.phase == .unknown)
     }
 }

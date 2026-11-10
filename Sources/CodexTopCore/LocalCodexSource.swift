@@ -13,6 +13,9 @@ public actor LocalCodexSource {
     private var labelUTF8Bytes = 0
     // URL值对象与缺失叶证据分别有界保存；存在文件仍每轮核实类型和元数据。
     private var recordURLValues: [String: URL] = [:]
+    /// 只缓存原始路径的文本拆分；最多4096项、单个原路径1024字节，保留字符串UTF8总量不超过1MiB。
+    private var recordPathTexts: [String: RecordPathText] = [:]
+    private var recordPathTextBytes = 0
 
     private var missingRecordParents: [String: ParentFingerprint] = [:]
     private var missingRecordPathBytes = 0
@@ -41,16 +44,42 @@ public actor LocalCodexSource {
         let fingerprint: ParentFingerprint
     }
 
-    /// 同轮记录共用已解析父目录；末级链接仍完整解析，缓存不跨快照保留。
-    private func resolvedRecordURL(_ path: String, parents: inout [String: ResolvedParent]) -> (url: URL, path: String, error: Int32) {
-        // 不拆分全部路径分量，也不为每条记录构造中间 NSURL。
+    /// 此结构不含文件存在性、权限或链接目标，跨轮复用不代替任何文件系统检查。
+    private struct RecordPathText {
+        let parent: String
+        let leaf: String
+        let compressedSibling: String
+    }
+
+    /// 复用绝对路径的纯文本拆分；含相对分量或结尾目录标记的路径仍交给原解析器。
+    private func recordPathText(_ path: String) -> RecordPathText? {
+        if let cached = recordPathTexts[path] { return cached }
         guard path.hasPrefix("/"), !path.hasSuffix("/"),
               path.withCString({ strstr($0, "/../") == nil && strstr($0, "/./") == nil }),
               !path.hasSuffix("/.."), !path.hasSuffix("/."),
-              let slash = path.utf8.lastIndex(of: 47) else {
+              let slash = path.utf8.lastIndex(of: 47) else { return nil }
+        let value = RecordPathText(parent: slash == path.startIndex ? "/" : String(path[..<slash]),
+                                   leaf: String(path[path.index(after: slash)...]), compressedSibling: path + ".zst")
+        let rawBytes = path.utf8.count
+        let retainedBytes = rawBytes + value.parent.utf8.count + value.leaf.utf8.count + value.compressedSibling.utf8.count
+        if rawBytes <= 1024, recordPathTexts.count < 4096, retainedBytes <= 1_048_576 - recordPathTextBytes {
+            recordPathTexts[path] = value
+            recordPathTextBytes += retainedBytes
+        }
+        return value
+    }
+
+    /// 压缩副本沿用原始路径后加后缀的规则，不从已解析的普通文件目标推断位置。
+    private func compressedRecordPath(_ path: String) -> String {
+        recordPathText(path)?.compressedSibling ?? path + ".zst"
+    }
+
+    /// 同轮记录共用已解析父目录；跨轮只复用纯文本，父目录与末级链接仍重新核实。
+    private func resolvedRecordURL(_ path: String, parents: inout [String: ResolvedParent]) -> (url: URL, path: String, error: Int32) {
+        guard let text = recordPathText(path) else {
             return inspectRecordURL(URL(fileURLWithPath: path, isDirectory: false).resolvingSymlinksInPath())
         }
-        let parentPath = slash == path.startIndex ? "/" : String(path[..<slash])
+        let parentPath = text.parent
         let resolved: ResolvedParent
         if let cached = parents[parentPath] {
             resolved = cached
@@ -64,8 +93,9 @@ public actor LocalCodexSource {
             resolved = ResolvedParent(path: resolvedPath, fingerprint: ParentFingerprint(parentInfo))
             parents[parentPath] = resolved
         }
-        let leaf = String(path[path.index(after: slash)...])
-        let candidatePath = (resolved.path == "/" ? "/" : resolved.path + "/") + leaf
+        // 父目录本轮解析后未变时，原路径已是候选路径，不再逐条复制叶名并重拼整条字符串。
+        // 根目录仍拼成单斜杠，保持“//file”与原解析器相同的规范路径。
+        let candidatePath = resolved.path == parentPath && parentPath != "/" ? path : (resolved.path == "/" ? "/" : resolved.path + "/") + text.leaf
         let candidate: URL
         if let cached = recordURLValues[candidatePath] { candidate = cached }
         else {
@@ -195,7 +225,7 @@ public actor LocalCodexSource {
             } else {
                 let missing = location.error == ENOENT
                 if missing {
-                    let siblingLocation = resolvedRecordURL(path + ".zst", parents: &resolvedParents)
+                    let siblingLocation = resolvedRecordURL(compressedRecordPath(path), parents: &resolvedParents)
                     let sibling = siblingLocation.url
                     guard siblingLocation.path.hasPrefix(rootPrefix) else {
                         task.activity = TaskActivity(detail: "记录位于数据目录之外，未读取")

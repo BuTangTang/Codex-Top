@@ -133,6 +133,21 @@ final class LocalCodexSourcePathTests: XCTestCase {
         XCTAssertEqual(snapshot.tasks.first?.rolloutURL.path, originalDestination.path)
     }
 
+    /// 根目录双斜杠保持原路径规范化规则；只登记不存在的合成路径，不在根目录写文件。
+    func testRootDoubleSlashKeepsCanonicalPathAcrossWarmSnapshots() async throws {
+        let fixture = try makeFixture()
+        let leaf = "codex-top-missing-\(UUID().uuidString).jsonl"
+        let path = "//" + leaf
+        try addTask(path: path, in: fixture)
+        let source = LocalCodexSource(root: fixture.root)
+        for _ in 0..<2 {
+            let snapshot = try await source.snapshot(now: now)
+            assertBlocked(snapshot)
+            assertResolvedPath(snapshot, input: path)
+            XCTAssertEqual(snapshot.tasks.first?.rolloutURL.path, "/" + leaf)
+        }
+    }
+
     /// 相同前缀的兄弟目录仍被拒绝，不能把简单字符串前缀当成目录包含关系。
     func testSiblingPrefixIsOutsideWithoutReadingItsEvent() async throws {
         let fixture = try makeFixture()

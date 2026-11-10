@@ -145,6 +145,8 @@ final class TaskStorePublicationTests: XCTestCase {
         try append("task_complete")
         await store.refresh()
         XCTAssertEqual(store.completionSequence, 1)
+        XCTAssertEqual(store.runningCount, 0)
+        XCTAssertEqual(store.statusSummary.phase, .completed, "已读取的运行汇总必须跟随子项完成失效")
         // D-91：刚完成的进“刚完成”一段和悬浮球的绿色个数，不在“已结束”里。
         XCTAssertEqual(store.freshTasks.map(\.id), ["synthetic"])
         XCTAssertFalse(store.finished.contains { $0.id == "synthetic" })

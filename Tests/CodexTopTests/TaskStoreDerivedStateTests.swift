@@ -40,14 +40,53 @@ final class TaskStoreDerivedStateTests: XCTestCase {
         store.applySelection([], original: ["completed"])
         XCTAssertTrue(store.selected.isEmpty)
         XCTAssertEqual(store.statusSummary, MonitorStatusSummary(phases: []))
+        XCTAssertTrue(store.active.isEmpty)
+        XCTAssertTrue(store.finished.isEmpty)
         store.applySelection(originalSelection, original: [])
         XCTAssertEqual(store.lastRefresh, refreshedAt)
         XCTAssertEqual(store.selected.map(\.id), originalOrder)
         XCTAssertEqual(store.statusSummary, originalSummary)
+        XCTAssertEqual(store.runningCount, 3)
+        XCTAssertEqual(store.attentionCount, 2)
 
         await store.refresh()
         XCTAssertEqual(store.selected.map(\.id), originalOrder)
         XCTAssertEqual(store.statusSummary, originalSummary)
+    }
+
+    /// 先读取派生结果，再只改子任务；父任务本身没变也必须重新排序并更新汇总。
+    @MainActor func testChildChangesInvalidatePreviouslyReadSelectionAndSummary() async throws {
+        let directory = try fixture()
+        let store = TaskStore(stateDirectory: directory)
+        await store.refresh()
+        let originalRoot = try XCTUnwrap(store.graph.roots.first { $0.id == "waiting-root" })
+        XCTAssertEqual(store.selected.first?.id, "waiting-root")
+        XCTAssertEqual(store.statusSummary.waiting, 1)
+
+        func appendChildEvent(_ type: String) throws {
+            let event: [String: Any] = ["type": "event_msg", "timestamp": ISO8601DateFormatter().string(from: Date()),
+                                       "payload": ["type": type, "turn_id": "synthetic-turn"]]
+            let handle = try FileHandle(forWritingTo: directory.appendingPathComponent("waiting-child.jsonl"))
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: JSONSerialization.data(withJSONObject: event) + Data([10]))
+        }
+
+        try appendChildEvent("task_complete")
+        await store.refresh()
+        XCTAssertEqual(store.graph.roots.first { $0.id == "waiting-root" }, originalRoot)
+        XCTAssertEqual(store.selected.last?.id, "waiting-root", "子项完成后，父项按其原始时间排入终态末尾")
+        XCTAssertFalse(store.active.contains { $0.id == "waiting-root" })
+        XCTAssertEqual(store.statusSummary.waiting, 0)
+        XCTAssertEqual(store.statusSummary.running, 3)
+
+        try appendChildEvent("task_started")
+        await store.refresh()
+        XCTAssertEqual(store.graph.roots.first { $0.id == "waiting-root" }, originalRoot)
+        XCTAssertTrue(store.active.contains { $0.id == "waiting-root" })
+        XCTAssertNotEqual(store.selected.last?.id, "waiting-root")
+        XCTAssertEqual(store.statusSummary.waiting, 0)
+        XCTAssertEqual(store.statusSummary.running, 4)
     }
 
     /// 用合成数据库覆盖父子等待、失败、运行并列、未知和终态，不连接真实桌面或账号。

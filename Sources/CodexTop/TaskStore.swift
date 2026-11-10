@@ -9,9 +9,17 @@ import CodexTopCore
 }
 
 @MainActor final class TaskStore: ObservableObject {
-    @Published private(set) var preferences: MonitorPreferences
+    @Published private(set) var preferences: MonitorPreferences {
+        didSet {
+            if preferences.selectedIDs != oldValue.selectedIDs { invalidateDerivedState() }
+        }
+    }
     @Published private(set) var tasks: [CodexTask] = []
-    @Published private(set) var graph = TaskGraph(tasks: [])
+    @Published private(set) var graph = TaskGraph(tasks: []) {
+        didSet { invalidateDerivedState() }
+    }
+    private var selectedCache: [CodexTask]?
+    private var statusSummaryCache: MonitorStatusSummary?
     @Published private(set) var quota: QuotaSnapshot?
     @Published private(set) var quotaRefreshing = false
     @Published private(set) var quotaWarning: String?
@@ -127,8 +135,9 @@ import CodexTopCore
         return sourceWarning
     }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
-    /// 本次计算只取一次图和选择集合，预先计算排序键，保持状态、时间及并列输入顺序。
+    /// 当前图和关注集合不变时复用排序；首次读取保持状态、时间及并列输入顺序。
     var selected: [CodexTask] {
+        if let selectedCache { return selectedCache }
         let graph = self.graph, selectedIDs = preferences.selectedIDs
         var ranked = graph.roots.compactMap { task -> (task: CodexTask, priority: Int)? in
             guard selectedIDs.contains(task.id) else { return nil }
@@ -138,7 +147,9 @@ import CodexTopCore
             if $0.priority != $1.priority { return $0.priority < $1.priority }
             return $0.task.updatedAt > $1.task.updatedAt
         }
-        return ranked.map { $0.task }
+        let selected = ranked.map { $0.task }
+        selectedCache = selected
+        return selected
     }
     var active: [CodexTask] { selected.filter { !graph.activity(for: $0).phase.isFinished } }
     /// “刚完成”一段，最近完成的在前；它们不再出现在“已结束”里。
@@ -154,17 +165,25 @@ import CodexTopCore
         guard !freshFinished.isEmpty else { return }
         freshFinished = [:]; onChange?()
     }
-    /// 汇总只需已选根任务的阶段，不进行列表排序，也不生成子任务展示文案。
+    /// 单独缓存已选根任务的阶段汇总；只看圆球时不排序，也不生成子任务展示文案。
     var statusSummary: MonitorStatusSummary {
+        if let statusSummaryCache { return statusSummaryCache }
         let graph = self.graph, selectedIDs = preferences.selectedIDs
         let phases = graph.roots.compactMap { task -> TaskPhase? in
             guard selectedIDs.contains(task.id) else { return nil }
             return graph.activitySource(for: task).activity.phase
         }
-        return MonitorStatusSummary(phases: phases)
+        let summary = MonitorStatusSummary(phases: phases)
+        statusSummaryCache = summary
+        return summary
     }
     var runningCount: Int { statusSummary.running }
     var attentionCount: Int { statusSummary.attention }
+    /// 图或关注集合改变时同步清空派生缓存；不额外发布，也不缓存时间相关的刚完成分组。
+    private func invalidateDerivedState() {
+        selectedCache = nil
+        statusSummaryCache = nil
+    }
     func start() {
         guard refreshLoop == nil else { return }
         stopping = false
@@ -263,8 +282,9 @@ import CodexTopCore
         guard !demo, !paused, !stopping else { rolloutChanges?.stop(); return }
         // Watch the waiting activity itself, including a child represented by a
         // selected root. No conversation text is read by the filesystem watcher.
+        let selectedIDs = preferences.selectedIDs, graph = self.graph
         let urls = Set(tasks.filter {
-            $0.activity.phase == .waiting && preferences.selectedIDs.contains(graph.rootIDs[$0.id] ?? $0.id)
+            $0.activity.phase == .waiting && selectedIDs.contains(graph.rootIDs[$0.id] ?? $0.id)
         }.map(\.rolloutURL))
         rolloutChanges?.update(urls: urls)
     }
@@ -310,9 +330,10 @@ import CodexTopCore
         do {
             // 完成提示只比较阶段；无需为了布尔判断排序或复制带详情的展示活动。
             let previousRefresh = lastRefresh
-            let previousPhases = Dictionary(uniqueKeysWithValues: graph.roots.filter {
-                preferences.selectedIDs.contains($0.id)
-            }.map { ($0.id, graph.activitySource(for: $0).activity.phase) })
+            let previousGraph = graph, selectedBeforeRead = preferences.selectedIDs
+            let previousPhases = Dictionary(uniqueKeysWithValues: previousGraph.roots.filter {
+                selectedBeforeRead.contains($0.id)
+            }.map { ($0.id, previousGraph.activitySource(for: $0).activity.phase) })
             // 两个来源各自读取；Claude Code 读不到只影响它自己的任务（设计第 6 节）。
             let claudeTasks = await readClaudeTasks()
             guard !stopping, generation == sourceGeneration else { return }
