@@ -106,7 +106,8 @@ struct MonitorView: View {
                             .transaction { $0.animation = nil }
                         }
                         // 鼠标滚轮会让 macOS 用占宽度的旧式滚动条，出现时整列内容往左挪；列表不显示滚动条，宽度始终不变。
-                        .scrollIndicators(.never).frame(maxHeight: .infinity)
+                        // 内容没超出时不回弹：放得下还滚一下，整列会被拉动再弹回（2026-11-09 用户：“滚轮动一下还是会界面动一下”）。
+                        .scrollIndicators(.never).scrollBounceBehavior(.basedOnSize).frame(maxHeight: .infinity)
                     }
                 }
                 if let warning = store.panelWarning {

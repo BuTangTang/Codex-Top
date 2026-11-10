@@ -314,6 +314,7 @@ import CodexTopCore
         }
         do {
             // 完成提示只比较阶段；无需为了布尔判断排序或复制带详情的展示活动。
+            let previousRefresh = lastRefresh
             let previousPhases = Dictionary(uniqueKeysWithValues: graph.roots.filter {
                 preferences.selectedIDs.contains($0.id)
             }.map { ($0.id, graph.activitySource(for: $0).activity.phase) })
@@ -353,9 +354,13 @@ import CodexTopCore
             MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)
             if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
+            // 完成时间要在上一轮刷新之后（留 2 分钟余量）才算“刚完成”：启动后压缩记录读完、状态从未知变成
+            // 早就完成的，不算（2026-11-09 用户：“连续跳出来两次 14 个任务完成”）。
+            let completedAfter = previousRefresh.map { $0.addingTimeInterval(-120) } ?? .distantFuture
             let justCompleted = graph.roots.filter { task in
                 guard preferences.selectedIDs.contains(task.id), let old = previousPhases[task.id] else { return false }
-                return old != .completed && graph.activitySource(for: task).activity.phase == .completed
+                let activity = graph.activitySource(for: task).activity
+                return old != .completed && activity.phase == .completed && (activity.lastEventAt ?? .distantPast) >= completedAfter
             }.map(\.id)
             if !justCompleted.isEmpty { completionSequence += 1 }
             var fresh = freshFinished
