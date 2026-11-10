@@ -70,7 +70,7 @@ public struct RolloutReducer: Sendable {
                 active(at, detail: "收到输入，正在继续"); waitingCallIDs.removeAll(); asynchronousQuestion = false
                 clearReplyQuestions()
             case "agent_message", "agent_reasoning":
-                if activity.phase != .waiting && !activity.phase.isFinished { active(at, detail: "正在处理任务") }
+                if activity.phase != .waiting && !activity.phase.isFinished { active(at, detail: type == "agent_reasoning" ? "正在思考" : "正在处理任务") }
             case "token_count":
                 if let limits = payload["rate_limits"] as? [String: Any], let at { updateQuota(limits, at: at) }
             case "item_completed":
@@ -104,7 +104,7 @@ public struct RolloutReducer: Sendable {
                     }
                     else if let id = payload["call_id"] as? String { waitingCallIDs.insert(id) }
                     else { untrackedWait = true }
-                } else if activity.phase != .waiting { active(at, detail: "正在执行任务") }
+                } else if activity.phase != .waiting { active(at, detail: ToolActivityText.detail(forTool: name)) }
                 if let at { activity.lastEventAt = at }
             } else if type == "function_call_output" || type == "custom_tool_call_output" {
                 if let id = payload["call_id"] as? String, waitingCallIDs.remove(id) != nil, waitingCallIDs.isEmpty, !asynchronousQuestion {

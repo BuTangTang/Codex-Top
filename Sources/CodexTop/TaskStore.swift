@@ -30,6 +30,11 @@ import CodexTopCore
     var refreshing: Bool { refreshState.isRefreshing }
     @Published private(set) var loading = true
     @Published private(set) var completionSequence = 0
+    /// D-91 刚完成、还没看过的任务：编号 → 完成时间。点开、标为已看或 10 分钟后收进“已结束”。
+    @Published private(set) var freshFinished: [String: Date] = [:]
+    /// 悬浮球上的绿色个数；打开面板就算看过并清零，面板里的“刚完成”一段不受影响。
+    @Published private(set) var unseenFinished: Set<String> = []
+    static let freshWindow: TimeInterval = 600
     @Published private(set) var demoPhase: TaskPhase?
     @Published private(set) var systemTheme: PanelTheme = .light
     let demo: Bool
@@ -47,6 +52,8 @@ import CodexTopCore
     private let compressedCacheURL: URL
     /// 数据目录存在才算装了 Claude Code；每轮刷新更新。
     @Published private(set) var claudeInstalled = false
+    /// 层 C：Claude Code 设置里有没有 Codex Top 的通知钩子；settings.json 读不懂时为 nil。
+    @Published private(set) var claudeHookInstalled: Bool? = false
     private var usageClient: AccountUsageClient
     private var accountQuota: QuotaSnapshot?
     @Published private(set) var historicalQuota: QuotaSnapshot?
@@ -64,12 +71,14 @@ import CodexTopCore
     private var fastRefreshID: UUID?
     private var fastRefreshNeeded = false
     private var appearanceObservation: NSKeyValueObservation?
+    private let stateFolder: URL
 
     init(stateDirectory: URL? = nil) {
         demo = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CodexTopDemo") as? Bool == true
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Codex Top")
         let isolatedState = stateDirectory ?? ProcessInfo.processInfo.environment["CODEX_TOP_STATE_DIR"].map { URL(fileURLWithPath: $0) }
         let stateFolder = isolatedState ?? (demo ? base.appendingPathComponent("Demo") : base)
+        self.stateFolder = stateFolder
         defaultClaudeRoot = isolatedState.map { $0.appendingPathComponent("claude", isDirectory: true) } ?? ClaudeCodeSource.defaultRoot
         compressedCacheURL = stateFolder.appendingPathComponent("compressed-status-cache.json")
         file = PreferencesFile(url: stateFolder.appendingPathComponent("preferences.json"))
@@ -78,7 +87,8 @@ import CodexTopCore
         preferences = loaded
         let root = loaded.codexHome.map { URL(fileURLWithPath: $0) } ?? LocalCodexSource.defaultRoot
         source = LocalCodexSource(root: root, compressedCacheURL: compressedCacheURL)
-        claudeSource = ClaudeCodeSource(root: loaded.claudeHome.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? defaultClaudeRoot)
+        claudeSource = ClaudeCodeSource(root: loaded.claudeHome.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? defaultClaudeRoot,
+                                        hookEvents: stateFolder.appendingPathComponent("claude-events", isDirectory: true))
         usageClient = AccountUsageClient(root: root)
         notice = failure
         systemTheme = Self.resolvedSystemTheme(NSApplication.shared.effectiveAppearance)
@@ -132,7 +142,23 @@ import CodexTopCore
         return ranked.map { $0.task }
     }
     var active: [CodexTask] { selected.filter { !graph.activity(for: $0).phase.isFinished } }
-    var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished } }
+    /// “刚完成”一段，最近完成的在前；它们不再出现在“已结束”里。
+    var freshTasks: [CodexTask] {
+        selected.filter { freshFinished[$0.id] != nil }.sorted { (freshFinished[$0.id] ?? .distantPast) > (freshFinished[$1.id] ?? .distantPast) }
+    }
+    var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished && freshFinished[$0.id] == nil } }
+    func markFinishedSeen(_ id: String) {
+        guard freshFinished[id] != nil else { return }
+        freshFinished[id] = nil; unseenFinished.remove(id); onChange?()
+    }
+    func markAllFinishedSeen() {
+        guard !freshFinished.isEmpty else { return }
+        freshFinished = [:]; unseenFinished = []; onChange?()
+    }
+    /// 打开面板时调用：悬浮球上的绿色个数清零。
+    func acknowledgeFinishedOnOrb() {
+        if !unseenFinished.isEmpty { unseenFinished = [] }
+    }
     /// 汇总只需已选根任务的阶段，不进行列表排序，也不生成子任务展示文案。
     var statusSummary: MonitorStatusSummary {
         let graph = self.graph, selectedIDs = preferences.selectedIDs
@@ -327,10 +353,21 @@ import CodexTopCore
             MonitoringPolicy.reconcile(&nextPreferences, tasks: tasks, graph: graph, now: snapshot.observedAt)
             if demo && !preferences.initialized { nextPreferences.selectedIDs = Set(graph.roots.prefix(4).map(\.id)) }
             if preferences != nextPreferences { preferences = nextPreferences; save(); needsLayout = true }
-            if graph.roots.contains(where: { task in
+            let justCompleted = graph.roots.filter { task in
                 guard preferences.selectedIDs.contains(task.id), let old = previousPhases[task.id] else { return false }
                 return old != .completed && graph.activitySource(for: task).activity.phase == .completed
-            }) { completionSequence += 1 }
+            }.map(\.id)
+            if !justCompleted.isEmpty { completionSequence += 1 }
+            var fresh = freshFinished
+            for id in justCompleted { fresh[id] = snapshot.observedAt }
+            // 取消关注、又开始跑、或完成超过 10 分钟的不再算“刚完成”。
+            fresh = fresh.filter { id, at in
+                preferences.selectedIDs.contains(id) && snapshot.observedAt.timeIntervalSince(at) < Self.freshWindow &&
+                    graph.roots.first(where: { $0.id == id }).map { graph.activitySource(for: $0).activity.phase == .completed } == true
+            }
+            if fresh != freshFinished { freshFinished = fresh; needsLayout = true }
+            let unseen = unseenFinished.union(justCompleted).intersection(fresh.keys)
+            if unseen != unseenFinished { unseenFinished = unseen }
         }
         if needsLayout { onChange?() }
     }
@@ -366,9 +403,53 @@ import CodexTopCore
         picker.message = "选择 Claude Code 数据目录（通常是用户目录下的 .claude）"
         guard picker.runModal() == .OK, let url = picker.url else { return }
         preferences.claudeHome = url.path; save()
-        claudeSource = ClaudeCodeSource(root: url)
+        claudeSource = ClaudeCodeSource(root: url, hookEvents: claudeEventsURL)
+        refreshClaudeHookStatus()
         requestImmediateRefresh()
     }
+    private var claudeEventsURL: URL { stateFolder.appendingPathComponent("claude-events", isDirectory: true) }
+    private var claudeHookHelper: URL { stateFolder.appendingPathComponent("bin/codex-top-claude-hook") }
+    private var bundledClaudeHook: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/codex-top-claude-hook") }
+    private var claudeSettingsURL: URL { claudeRootURL.appendingPathComponent("settings.json") }
+
+    /// 状态只从 settings.json 读回来，不另存开关。装着的话顺手把小程序换成这一版自带的。
+    func refreshClaudeHookStatus() {
+        claudeHookInstalled = ClaudeHookInstaller.isInstalled(settings: claudeSettingsURL, helper: claudeHookHelper)
+        if claudeHookInstalled == true, let bundled = try? Data(contentsOf: bundledClaudeHook),
+           (try? Data(contentsOf: claudeHookHelper)) != bundled { try? copyClaudeHook() }
+    }
+
+    /// 打开：复制小程序、在 Claude Code 设置里加自己那一条；关闭：删掉那一条、小程序和记下的事件。
+    func setClaudeHook(_ enabled: Bool) {
+        let backups = stateFolder.appendingPathComponent("claude-settings-backups", isDirectory: true)
+        do {
+            if enabled {
+                try copyClaudeHook()
+                try ClaudeHookInstaller.install(settings: claudeSettingsURL, helper: claudeHookHelper, backups: backups)
+            } else {
+                try ClaudeHookInstaller.remove(settings: claudeSettingsURL, helper: claudeHookHelper, backups: backups)
+                try? FileManager.default.removeItem(at: claudeHookHelper)
+                try? FileManager.default.removeItem(at: claudeEventsURL)
+            }
+            notice = nil
+        } catch ClaudeHookInstaller.Failure.invalidJSON {
+            notice = "Claude Code 的 settings.json 不是标准 JSON，没有改动。"
+        } catch ClaudeHookInstaller.Failure.changedWhileEditing {
+            notice = "settings.json 刚被别的程序改过，没有改动，请再试一次。"
+        } catch {
+            notice = enabled ? "没能加上 Claude Code 钩子，设置文件没有改动。" : "没能移除 Claude Code 钩子。"
+        }
+        refreshClaudeHookStatus()
+        requestImmediateRefresh()
+    }
+
+    private func copyClaudeHook() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: claudeHookHelper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fm.removeItem(at: claudeHookHelper)
+        try fm.copyItem(at: bundledClaudeHook, to: claudeHookHelper)
+    }
+
     private func requestImmediateRefresh() {
         onChange?()
         Task { await refresh() }
@@ -462,6 +543,7 @@ import CodexTopCore
         }
     }
     func openTask(_ task: CodexTask) {
+        markFinishedSeen(task.id)
         if demo { notice = "这是演示任务。实际任务会在 \(task.origin.displayName) 中打开。"; return }
         let target = graph.navigationTarget(for: task)
         if target.origin == .claudeCode { openClaudeTask(target); return }
@@ -523,7 +605,8 @@ import CodexTopCore
             preferences = MonitorPreferences(); persistenceAvailable = true; notice = nil; save()
             sourceGeneration += 1; tasks = []; graph = TaskGraph(tasks: []); quota = nil; sourceWarning = nil; loading = true
             cancelFastRefresh(); rolloutChanges?.stop()
-            source = LocalCodexSource(root: LocalCodexSource.defaultRoot, compressedCacheURL: compressedCacheURL); claudeSource = ClaudeCodeSource(root: defaultClaudeRoot)
+            source = LocalCodexSource(root: LocalCodexSource.defaultRoot, compressedCacheURL: compressedCacheURL); claudeSource = ClaudeCodeSource(root: defaultClaudeRoot, hookEvents: claudeEventsURL)
+            refreshClaudeHookStatus()
             onDisplayChange?(); onModeChange?(); onAppearanceChange?()
             resetUsageSource()
             Task { await refresh() }

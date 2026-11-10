@@ -39,13 +39,6 @@ struct MonitorView: View {
     @State private var retainsClosingContent = false
     private var compactTypography: Bool { compact || windowCompactTypography }
 
-    private var runningBoundaryID: String? {
-        let tasks = store.active + (showFinished ? store.finished : [])
-        guard let index = tasks.lastIndex(where: { store.graph.activity(for: $0).phase == .running }),
-              index < tasks.count - 1 else { return nil }
-        return tasks[index].id
-    }
-
     /// 收起动画结束后卸载列表内容，避免隐藏列表继续排序和生成行视图。
     var body: some View {
         Group {
@@ -53,6 +46,10 @@ struct MonitorView: View {
                 if drawsSurface { PanelSurface { panelContent } }
                 else { panelContent }
             }
+        }
+        // D-91：面板打开就算看过“刚完成”，悬浮球上的绿色个数清零；面板里那一段还在。
+        .onChange(of: contentVisible && !store.unseenFinished.isEmpty, initial: true) { _, needsAcknowledge in
+            if needsAcknowledge { store.acknowledgeFinishedOnOrb() }
         }
         .task(id: contentVisible) {
             // 展开立即生成内容；关闭保留短暂过渡，重新展开会取消释放任务。
@@ -84,19 +81,32 @@ struct MonitorView: View {
                 } else {
                     VStack(spacing: 0) {
                         ScrollView {
-                            let boundaryID = runningBoundaryID
                             // Each section has uniform rows and an exact total height. Keep
                             // offscreen controls lazy without estimating a mixed-height list.
                             VStack(spacing: 0) {
-                                taskSection(store.active, rowHeight: PanelMetrics.expandedRow, boundaryID: boundaryID)
+                                let fresh = store.freshTasks
+                                if fresh.isEmpty {
+                                    taskSection(store.active, rowHeight: PanelMetrics.expandedRow, separated: true)
+                                } else {
+                                    // D-91：需要你处理 → 刚完成 → 进行中。
+                                    let active = store.active
+                                    let attention = active.filter { [.waiting, .failed].contains(store.graph.activity(for: $0).phase) }
+                                    taskSection(attention, rowHeight: PanelMetrics.expandedRow, separated: true)
+                                    freshHeader(count: fresh.count)
+                                    taskSection(fresh, rowHeight: PanelMetrics.expandedRow, separated: true, fresh: true)
+                                    taskSection(active.filter { task in !attention.contains { $0.id == task.id } },
+                                                rowHeight: PanelMetrics.expandedRow, separated: true)
+                                }
                                 if showFinished {
-                                    taskSection(store.finished, rowHeight: PanelMetrics.finishedRow, boundaryID: nil)
+                                    taskSection(store.finished, rowHeight: PanelMetrics.finishedRow, separated: false)
                                 }
                             }
                             // The panel owns disclosure/morph animation. Do not animate the
                             // insertion or removal of every offscreen history row as well.
                             .transaction { $0.animation = nil }
-                        }.scrollIndicators(.automatic).frame(maxHeight: .infinity)
+                        }
+                        // 鼠标滚轮会让 macOS 用占宽度的旧式滚动条，出现时整列内容往左挪；列表不显示滚动条，宽度始终不变。
+                        .scrollIndicators(.never).frame(maxHeight: .infinity)
                     }
                 }
                 if let warning = store.panelWarning {
@@ -125,13 +135,29 @@ struct MonitorView: View {
         .animation(nil, value: animationsActive)
     }
 
-    private func taskSection(_ tasks: [CodexTask], rowHeight: CGFloat, boundaryID: String?) -> some View {
+    /// “刚完成”一段的段头：绿点 + 个数，右边“全部已看”。
+    private func freshHeader(count: Int) -> some View {
+        let green = Color(nsColor: LEDOrbView.toneColor(.done, dark: store.theme.colorScheme == .dark))
+        return HStack(spacing: 6) {
+            Circle().fill(green).frame(width: 6, height: 6)
+            Text("刚完成 \(count)")
+            Spacer(minLength: 4)
+            Button("全部已看") { store.markAllFinishedSeen() }.buttonStyle(.plain).foregroundStyle(green)
+                .help("这些任务收进“已结束”")
+        }
+        .font(PanelFonts.readable(12, scale: store.uiScale, weight: .semibold, compact: compactTypography))
+        .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+        .padding(.horizontal, 16).frame(height: PanelMetrics.freshHeader)
+    }
+
+    private func taskSection(_ tasks: [CodexTask], rowHeight: CGFloat, separated: Bool, fresh: Bool = false) -> some View {
         LazyVStack(spacing: 0) {
             ForEach(tasks.map(\.id), id: \.self) { taskID in
-                MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive)
+                MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive, fresh: fresh)
                     .frame(height: rowHeight)
                     .overlay(alignment: .bottom) {
-                        if taskID == boundaryID {
+                        // D-90：进行中的每行之间一道 1 像素细线（两块屏上都是整像素）。
+                        if separated && taskID != tasks.last?.id {
                             Rectangle().fill(Palette.hairline(store.theme.colorScheme))
                                 .frame(height: 1 / (displayScale * store.uiScale))
                                 .padding(.horizontal, 16)
@@ -145,10 +171,11 @@ struct MonitorView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text("监控任务").font(PanelFonts.readable(17, minimum: 15, scale: store.uiScale, weight: .semibold, compact: compactTypography)).lineLimit(1)
-            Text("\(store.selected.count)").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                .contentTransition(.numericText()).animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: store.selected.count)
             if compact && store.demo { Text("演示").font(.system(size: 12)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             Spacer(minLength: 4)
+            // D-90：原来的关注总数换成小点阵屏，和悬浮球一样显示 在跑｜等你｜失败。
+            LEDMiniSummary(groups: store.ledGroups(fresh: store.freshFinished.count), dark: store.theme.colorScheme == .dark)
+                .help("\(store.runningCount) 个在跑 · \(store.statusSummary.waiting) 个等你回答 · \(store.statusSummary.failed) 个失败 · 共关注 \(store.selected.count) 个")
             HStack(spacing: 4) {
                 Button(action: pickTasks) {
                     headerIcon("plus")
@@ -188,11 +215,13 @@ struct MonitorView: View {
         .help("显示方式、主题与设置。当前：\(store.placement.shortcutTitle)")
     }
 
-    private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: PanelMetrics.separator).padding(.horizontal, 16) }
+    /// 细线固定 1 个物理像素：0.5 点在 1 倍屏上会变成发虚的灰线。
+    private var hairline: CGFloat { 1 / (displayScale * store.uiScale) }
+    private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline).padding(.horizontal, 16) }
 
     private var footer: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: PanelMetrics.separator)
+            Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline)
             HStack(spacing: 8) {
                 if !store.finished.isEmpty {
                     Button {
@@ -248,77 +277,108 @@ private struct MonitorTaskRow: View {
     let taskID: String
     let compact: Bool
     let animationsActive: Bool
+    /// D-91：在“刚完成”一段里：绿色小灯、副标题写多久之前完成、右侧“完成”标签，行高和进行中一样。
+    var fresh = false
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var compactTypography: Bool { compact || windowCompactTypography }
+    /// 1 倍屏上小字加重一档：macOS 不再做次像素抗锯齿，常规字重在 1 倍屏上发虚。
+    private var crisp: Bool { displayScale < 2 }
+    private var dark: Bool { store.theme.colorScheme == .dark }
 
     var body: some View {
         if let task = store.graph.roots.first(where: { $0.id == taskID }) {
             let activity = store.graph.activity(for: task)
             let childCount = store.graph.children[taskID]?.count ?? 0
             Button { store.openTask(task) } label: {
-                // D-86：状态和计时统一放右侧一列；待处理整行铺淡琥珀底，是面板里最显眼的一行。
+                // D-90：行首小 LED（和悬浮球同一套语言）；右侧等宽计时，等你／失败在计时下面加小标签。
                 HStack(spacing: compact ? 10 : 12) {
-                    ActivityIndicator(phase: activity.phase, small: compact, animationsActive: animationsActive)
+                    LEDPip(phase: activity.phase, dark: dark, animating: animationsActive && !reduceMotion)
+                        .frame(width: LEDPipView.size, height: LEDPipView.size)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? .regular : .medium, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                            Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? (crisp ? .medium : .regular) : .semibold, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                             if store.panelShowsSourceMarks { SourceMark(origin: task.origin, scale: store.uiScale) }
                         }
-                        if !activity.phase.isFinished {
+                        if fresh, let finishedAt = store.freshFinished[taskID] {
+                            TimelineView(.periodic(from: .now, by: 30)) { context in
+                                let minutes = Int(context.date.timeIntervalSince(finishedAt)) / 60
+                                Text("本轮执行已结束 · \(minutes < 1 ? "刚刚" : "\(minutes) 分钟前")").lineLimit(1)
+                            }
+                            .font(PanelFonts.readable(14, scale: store.uiScale, weight: crisp ? .medium : .regular, compact: compactTypography))
+                            .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        } else if !activity.phase.isFinished {
                             HStack(spacing: 5) {
                                 Text(activity.detail).lineLimit(1)
                                 if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
-                            }.font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                                if activity.phase == .waiting, let since = activity.waitingStartedAt {
+                                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                                        Text("· 已等 \(max(1, Int(context.date.timeIntervalSince(since)) / 60)) 分钟").lineLimit(1)
+                                    }
+                                }
+                            }.font(PanelFonts.readable(14, scale: store.uiScale, weight: crisp ? .medium : .regular, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                    activityStatus(activity)
+                    if fresh { tag("完成", .done).fixedSize() } else { activityStatus(activity) }
                 }
                 .padding(.horizontal, 10).frame(maxHeight: .infinity)
-                .background {
-                    if activity.phase == .waiting {
-                        let tint = TaskPhase.waiting.tint(store.theme.colorScheme)
-                        RoundedRectangle(cornerRadius: 10).fill(tint.opacity(0.09))
-                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.22), lineWidth: 0.5))
-                    }
-                }
                 .contentShape(Rectangle())
             }.buttonStyle(QuietRowStyle(cornerRadius: 10))
-                .padding(.horizontal, 6).padding(.vertical, activity.phase.isFinished ? 1 : 2)
-                .frame(height: PanelMetrics.rowHeight(for: activity.phase))
+                .padding(.horizontal, 6).padding(.vertical, activity.phase.isFinished && !fresh ? 1 : 2)
+                .frame(height: fresh ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: activity.phase))
                 .help(navigationHelp(for: task, activity: activity))
                 .accessibilityIdentifier("monitor-task-\(taskID)")
                 .contextMenu {
                     Button("打开任务") { store.openTask(task) }
+                    if fresh { Button("标为已看") { store.markFinishedSeen(task.id) } }
                     Divider()
                     Button("移出监控") { store.removeFromMonitoring(task.id) }
                 }
         }
     }
 
-    /// 保留运行与待处理的原有时间含义，只在列表显示时持续推进运行秒表。
+    /// 计时用等宽数字，开头的 0 调暗；运行与待处理的时间含义保持不变，只在列表显示时推进运行秒表。
+    private func clock(_ seconds: Int) -> Text {
+        let value = String(format: "%02d:%02d", seconds / 60, seconds % 60)
+        let dim = Palette.secondary(store.theme.colorScheme).opacity(0.55), main = Palette.primary(store.theme.colorScheme)
+        guard value.hasPrefix("0") else { return Text(value).foregroundColor(main) }
+        return Text("0").foregroundColor(dim) + Text(String(value.dropFirst())).foregroundColor(main)
+    }
+
+    private func tag(_ text: String, _ tone: LEDOrbLayout.Tone) -> some View {
+        let tint = Color(nsColor: LEDOrbView.toneColor(tone, dark: dark))
+        return Text(text).font(.system(size: 10 * max(1, store.uiScale), weight: .bold, design: .monospaced))
+            .foregroundStyle(tint).padding(.horizontal, 5).padding(.vertical, 1)
+            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+    }
+
     private func activityStatus(_ activity: TaskActivity) -> some View {
-        HStack(spacing: 8) {
-            if activity.phase == .running {
+        VStack(alignment: .trailing, spacing: 3) {
+            switch activity.phase {
+            case .running:
                 if let started = activity.startedAt {
                     TimelineView(MonitorElapsedTimelineSchedule(active: animationsActive)) { context in
-                        let elapsed = max(0, Int(context.date.timeIntervalSince(started)))
-                        Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60)).monospacedDigit()
-                    }.foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                        clock(max(0, Int(context.date.timeIntervalSince(started))))
+                    }
                 } else {
-                    Text("--:--").monospacedDigit()
-                        .foregroundStyle(Palette.secondary(store.theme.colorScheme))
+                    Text("--:--").foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         .accessibilityLabel("运行计时待同步")
                         .help("计时待同步：缺少本轮开始记录，暂时无法计算运行时间")
                 }
-            } else {
-                TaskPhaseLabel(phase: activity.phase)
+            case .waiting:
                 if let elapsed = activity.waitingElapsedSeconds {
-                    Text(String(format: "%02d:%02d", elapsed / 60, elapsed % 60))
-                        .monospacedDigit().foregroundStyle(Palette.secondary(store.theme.colorScheme))
-                        .help("本轮开始到进入待处理的时长，等待回答时暂停计时")
+                    clock(elapsed).help("本轮开始到进入待处理的时长，等待回答时暂停计时")
                 }
+                tag("等你", .waiting)
+            case .failed:
+                tag("失败", .failed)
+            default:
+                TaskPhaseLabel(phase: activity.phase)
             }
-        }.font(PanelFonts.readable(13, scale: store.uiScale, compact: compactTypography)).fixedSize()
+        }
+        .font(PanelFonts.readable(13, scale: store.uiScale, weight: .semibold, compact: compactTypography)).monospaced()
+        .fixedSize()
     }
 
     private func navigationHelp(for task: CodexTask, activity: TaskActivity) -> String {

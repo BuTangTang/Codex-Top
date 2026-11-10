@@ -11,7 +11,10 @@ final class LEDOrbLayoutTests: XCTestCase {
         XCTAssertEqual(LEDOrbLayout.groups(running: 3, waiting: 0, failed: 0, allDone: false, unknown: false).map(\.text), ["3"])
         XCTAssertEqual(LEDOrbLayout.groups(running: 2, waiting: 1, failed: 4, allDone: false, unknown: false).map(\.tone), [.running, .waiting, .failed])
         XCTAssertEqual(LEDOrbLayout.groups(running: 0, waiting: 2, failed: 0, allDone: false, unknown: false).map(\.tone), [.idle, .waiting])
-        XCTAssertEqual(LEDOrbLayout.groups(running: 0, waiting: 0, failed: 0, allDone: true, unknown: false).map(\.text), ["✓"])
+        XCTAssertEqual(LEDOrbLayout.groups(running: 0, waiting: 0, failed: 0, allDone: true, unknown: false).map(\.text), ["OK"])
+        XCTAssertEqual(LEDOrbLayout.groups(running: 0, waiting: 0, failed: 0, allDone: true, sleeping: true, unknown: false).map(\.text), ["Zz"])
+        XCTAssertEqual(LEDOrbLayout.groups(running: 3, waiting: 0, failed: 1, fresh: 2, allDone: false, unknown: false).map(\.tone), [.running, .failed, .done],
+                       "刚完成没看过的个数排在最后、绿色")
         XCTAssertEqual(LEDOrbLayout.groups(running: 5, waiting: 1, failed: 0, allDone: false, unknown: true).map(\.text), ["?"], "暂停或无法判断不伪装成运行")
         XCTAssertEqual(LEDOrbLayout.groups(running: 120, waiting: 0, failed: 0, allDone: false, unknown: false).map(\.text), ["99+"])
     }
@@ -30,25 +33,27 @@ final class LEDOrbLayoutTests: XCTestCase {
 
     func testWidthGrowsWithGroupsAndStartsAt45() {
         XCTAssertEqual(layout(running: 3).width, 45)
-        XCTAssertEqual(layout(done: true).width, 45)
+        XCTAssertEqual(layout(done: true).width, 49, "OK 两个字")
         XCTAssertGreaterThan(layout(running: 2, waiting: 1, failed: 1).width, layout(running: 2, waiting: 1).width)
         XCTAssertEqual(Int(layout(running: 12, waiting: 10).width - 9) % 4, 0, "两条直边上的灯正好 4 点一格")
     }
 
-    func testRingRunsClockwiseWithRoundedPixelCorners() throws {
+    func testRingRunsClockwiseWithEmptyCorners() throws {
         let ring = layout(running: 3).ring
-        XCTAssertEqual(ring.count, 36)
+        XCTAssertEqual(ring.count, 32)
         let centers = ring.map { CGPoint(x: $0.midX, y: $0.midY) }
         // 从左上直边起：先向右，再向下，再向左，再向上
         XCTAssertGreaterThan(centers[1].x, centers[0].x)
-        let topRight = try XCTUnwrap(centers.firstIndex { $0.y == 5.5 && $0.x > 22 })
-        XCTAssertEqual(centers[topRight].x, 45 - 5.5, "右上角那颗往里收 1 点")
-        XCTAssertGreaterThan(centers[topRight + 1].y, centers[topRight].y, "过了右上角往下走")
+        let firstRight = try XCTUnwrap(centers.firstIndex { $0.x == 45 - 4.5 })
+        XCTAssertGreaterThan(centers[firstRight + 1].y, centers[firstRight].y, "过了右上角往下走")
+        for corner in [CGPoint(x: 4.5, y: 4.5), CGPoint(x: 40.5, y: 4.5), CGPoint(x: 40.5, y: 40.5), CGPoint(x: 4.5, y: 40.5)] {
+            XCTAssertFalse(centers.contains(corner), "四个角不放灯")
+        }
         for index in centers.indices {
             let next = centers[(index + 1) % centers.count]
             let distance = hypot(next.x - centers[index].x, next.y - centers[index].y)
-            XCTAssertGreaterThanOrEqual(distance, 3, "相邻两颗不重叠")
-            XCTAssertLessThanOrEqual(distance, 4.001, "过角时不跳格")
+            XCTAssertGreaterThanOrEqual(distance, 4, "相邻两颗不挤")
+            XCTAssertLessThanOrEqual(distance, 5.66, "过角只多跨一格")
         }
     }
 

@@ -7,6 +7,8 @@ enum PanelMetrics {
     static let floatingWidth: CGFloat = 360
     static let expandedRow: CGFloat = 54
     static let finishedRow: CGFloat = 36
+    /// D-91 “刚完成”一段的段头。
+    static let freshHeader: CGFloat = 28
     static let expandedHeader: CGFloat = 48
     static let floatingHeader: CGFloat = 44
     static let footer: CGFloat = 42
@@ -107,7 +109,8 @@ struct GlassFill: View {
             if colorScheme == .light {
                 Color(white: Palette.lightSurfaceWhite)
             } else {
-                Color.black
+                // D-90：深色底和 LED 悬浮球同一种近黑（#0B0D10），展开收起是一块。
+                LEDOrbView.panelColor(dark: true)
             }
         }
         .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
@@ -193,34 +196,3 @@ struct ScaledPanel<Content: View>: View {
     }
 }
 
-struct ActivityIndicator: View {
-    let phase: TaskPhase
-    var small = false
-    var animationsActive = true
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var visible = false
-    var body: some View {
-        let tint = phase.tint(colorScheme)
-        // D-86：行首指示缩小变细，运行中不再抢标题；待处理是带光圈的实心点，未知是灰色空心点。
-        ZStack {
-            if phase == .running {
-                Circle().stroke(tint.opacity(0.14), lineWidth: 2).padding(1)
-                NativeRunningArc(tint: tint, rotating: animationsActive && visible && !reduceMotion, lineWidth: 2, inset: 1,
-                                 trimStart: 0, trimEnd: 0.36, startDegrees: -90)
-                    .allowsHitTesting(false)
-            } else if phase == .waiting {
-                Circle().fill(tint.opacity(0.20))
-                Circle().fill(tint).padding(small ? 3.5 : 4)
-            } else if phase == .unknown {
-                Circle().strokeBorder(Palette.secondary(colorScheme).opacity(0.7), lineWidth: 1.5).frame(width: 9, height: 9)
-            } else {
-                Image(systemName: phase.symbol).font(.system(size: small ? 15 : 16, weight: .medium)).foregroundStyle(tint)
-            }
-        }.frame(width: small ? 16 : 18, height: small ? 16 : 18)
-            .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: colorScheme)
-            .onAppear { visible = true }
-            .onDisappear { visible = false }
-            .accessibilityHidden(true)
-    }
-}

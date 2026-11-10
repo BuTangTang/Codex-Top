@@ -80,22 +80,25 @@ struct UsageSummaryButton: View {
             }
         }.fixedSize()
     }
-    /// D-86：每个额度窗口一条细进度条加剩余百分比；已过重置时间的只写“待更新”，不画条。
+    /// D-90：每个额度窗口一条 10 格点阵条（亮几格 = 剩余几成）加等宽百分比；已过重置时间的只写“待更新”。
     private func bars(_ quota: QuotaSnapshot, at date: Date) -> some View {
-        HStack(spacing: 10) {
+        let dark = store.theme.colorScheme == .dark
+        return HStack(spacing: 10) {
             ForEach(Array(UsageText.windows(quota).prefix(2)), id: \.minutes) { window in
                 HStack(spacing: 6) {
                     Text(window.minutes == 10080 ? "本周" : UsageText.window(window.minutes))
                         .foregroundStyle(Palette.secondary(store.theme.colorScheme))
                     if !UsageText.expired(window, at: date) {
-                        Capsule().fill(Palette.primary(store.theme.colorScheme).opacity(0.10))
-                            .frame(width: 48, height: 4)
-                            .overlay(alignment: .leading) {
-                                Capsule().fill(Palette.secondary(store.theme.colorScheme))
-                                    .frame(width: 48 * CGFloat(min(100, max(0, window.remainingPercent))) / 100, height: 4)
+                        let lit = Int((Double(min(100, max(0, window.remainingPercent))) / 10).rounded())
+                        HStack(spacing: 2) {
+                            ForEach(0..<10, id: \.self) { index in
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(index < lit ? Palette.secondary(store.theme.colorScheme) : Color(dark ? .white : .black).opacity(0.08))
+                                    .frame(width: 4, height: 8)
                             }
+                        }
                     }
-                    Text(UsageText.remaining(window, at: date)).monospacedDigit()
+                    Text(UsageText.remaining(window, at: date)).monospaced()
                 }
             }
         }

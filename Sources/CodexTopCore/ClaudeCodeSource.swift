@@ -23,11 +23,13 @@ public actor ClaudeCodeSource {
 
     private let root: URL
     private let readRegistry: @Sendable (URL) -> ClaudeSessionRegistry
+    /// 层 C：Codex Top 钩子写的事件目录；没装钩子时目录里没有文件，状态只看记录和登记。
+    private let hookEvents: URL?
     private var tails: [String: Tail] = [:]
 
-    public init(root: URL = ClaudeCodeSource.defaultRoot,
+    public init(root: URL = ClaudeCodeSource.defaultRoot, hookEvents: URL? = nil,
                 readRegistry: @escaping @Sendable (URL) -> ClaudeSessionRegistry = { ClaudeSessionRegistry.read(root: $0) }) {
-        self.root = root.standardizedFileURL; self.readRegistry = readRegistry
+        self.root = root.standardizedFileURL; self.hookEvents = hookEvents; self.readRegistry = readRegistry
     }
 
     /// 数据目录存在才算装了 Claude Code（R-20）。
@@ -85,6 +87,9 @@ public actor ClaudeCodeSource {
                                  createdAt: created, updatedAt: updated, rolloutURL: file.url, origin: .claudeCode)
             task.claudeLaunch = entry.map { ClaudeLaunch(fromDesktopApp: $0.fromDesktopApp, hostSessionID: $0.hostSessionID) }
             var activity = reducer.activity
+            if let hookEvents, activity.phase == .running {
+                activity = ClaudeHookEvents.apply(ClaudeHookEvents.latest(directory: hookEvents, session: String(file.id.dropFirst(3))), to: activity)
+            }
             // 记录显示还在运行或等待，但登记里进程已经没了：会话已退出，不再显示运行（设计 3.4）。
             // 登记目录读不到时无法判断，保持记录得出的状态。
             if registry.entries != nil, activity.phase == .running || activity.phase == .waiting, entry?.alive != true {

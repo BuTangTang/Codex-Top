@@ -41,7 +41,7 @@ private struct NativeTwinArcOrb: NSViewRepresentable {
     }
 }
 
-/// Kept separate from NativeRunningArc so the original ring retains its geometry
+/// Kept separate from the classic LED orb so the twin arcs retain their geometry
 /// and timing. A native layer tree also avoids a SwiftUI timer or per-frame layout.
 final class TwinArcOrbView: NSView {
     static let rotationDuration: CFTimeInterval = 3.2

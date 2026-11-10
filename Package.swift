@@ -7,7 +7,8 @@ let package = Package(
     products: [
         .executable(name: "CodexTop", targets: ["CodexTop"]),
         .library(name: "CodexTopCore", targets: ["CodexTopCore"]),
-        .executable(name: "codex-top-inspect", targets: ["CodexTopInspect"])
+        .executable(name: "codex-top-inspect", targets: ["CodexTopInspect"]),
+        .executable(name: "codex-top-claude-hook", targets: ["CodexTopClaudeHook"])
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
@@ -15,6 +16,7 @@ let package = Package(
         .target(name: "CodexTopCore", dependencies: ["CSQLite", "CZstd"]),
         .executableTarget(name: "CodexTop", dependencies: ["CodexTopCore"]),
         .executableTarget(name: "CodexTopInspect", dependencies: ["CodexTopCore"]),
+        .executableTarget(name: "CodexTopClaudeHook", dependencies: ["CodexTopCore"]),
         .testTarget(name: "CodexTopCoreTests", dependencies: ["CodexTopCore", "CSQLite"]),
         .testTarget(name: "CodexTopTests", dependencies: ["CodexTop", "CodexTopCore", "CSQLite"])
     ]

@@ -46,6 +46,9 @@ bin_path="$(swift build "${build_args[@]}" --show-bin-path)"
 app_path="$repo_root/dist/$app_name.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 install -m 755 "$bin_path/CodexTop" "$app_path/Contents/MacOS/CodexTop"
+# Claude Code 通知钩子小程序：用户在设置里打开时才复制到应用支持目录（REQ-003 层 C）。
+mkdir -p "$app_path/Contents/Helpers"
+install -m 755 "$bin_path/codex-top-claude-hook" "$app_path/Contents/Helpers/codex-top-claude-hook"
 install -m 644 LICENSE "$app_path/Contents/Resources/LICENSE"
 # 随原生解码器分发上游许可证，正式包不依赖本机 Homebrew。
 install -m 644 Sources/CZstd/vendor/LICENSE "$app_path/Contents/Resources/Zstandard-LICENSE"
@@ -112,6 +115,8 @@ if [[ "$configuration" == release ]]; then
     printf 'Release executable UUIDs changed while stripping local symbols.\n' >&2; exit 1
   fi
 fi
+if [[ "$configuration" == release ]]; then /usr/bin/xcrun strip -x "$app_path/Contents/Helpers/codex-top-claude-hook"; fi
+codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none "$app_path/Contents/Helpers/codex-top-claude-hook"
 codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none "$app_path"
 codesign --verify --strict "$app_path"
 # 签名验收成功后再替换稳定的外置 dSYM；只保留本脚本拥有的最新发布符号目录。

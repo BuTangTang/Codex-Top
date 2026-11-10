@@ -601,9 +601,25 @@ LocalCodexSource.snapshot 先构造数据库任务元数据和父子图，再确
 
 ## D-89 LED 点阵悬浮球（2026-11-09，取代 D-88）
 
-`LEDOrbLayout`（CodexTopCore）是纯计算：`groups` 按“在跑（或 ✓／?）、等你、失败”生成分组；`layout` 用 3×5 字形排点，每格 4 点、灯 3 点，组间 8 点并在中间放 1 点宽的分隔线；宽度取 9 + 4k（k ≥ 9，最窄 45），保证外圈直边的灯落在 4 点一格的整数位置。外圈从左上直边起顺时针排，直边每 4 点一颗，四个角各 1 颗往里收 1 点（整像素圆角），相邻间距 3.16～4。所有矩形原点都是整数，测试固定这些约束。
+`LEDOrbLayout`（CodexTopCore）是纯计算：`groups` 按“在跑（或 ✓／?）、等你、失败”生成分组；`layout` 用 3×5 字形排点，每格 4 点、灯 3 点，组间 8 点并在中间放 1 点宽的分隔线；宽度取 9 + 4k（k ≥ 9，最窄 45），保证外圈直边的灯落在 4 点一格的整数位置。外圈从左上直边起顺时针排，直边每 4 点一颗，四个角不放灯（最窄时一圈 32 颗），相邻间距 4，过角约 5.66。所有矩形原点都是整数，测试固定这些约束。
 
 `LEDOrbView`（原生）：每种颜色一块 `CAShapeLayer` 画亮点，暗点和外圈一块、分隔线一块、完成时的绿圈一块；1 倍屏不加圆角，2 倍屏圆角 0.75；`viewDidChangeBackingProperties` 触发重画以适配换屏。绕圈的 5 颗灯是外圈每个位置一个小 `CALayer`，透明度关键帧 1、0.7、0.45、0.25、0.12 依次落在前 5/N 段，第 n 颗晚 n×0.05 秒开始，共享时间基准。组变化时（可见且未减少动态效果）：同色组用 `transform.translation.x` 从旧位置滑到新位置，新组用从左往右变宽的遮罩逐列露出，消失的组留一层旧图形 0.18 秒淡出，分隔线淡入，时长 0.3 秒与窗口弹簧同步。
 
 窗口：`WindowController` 的收起宽度改为 `LEDOrbLayout.layout(store.ledGroups).width`，沿用 D-88 的 `collapsedOrbFrame`／`orbAnchor(inCollapsed:)`；外壳收起时圆角 12、展开和双弧仍为 22；收起层在外壳比点阵宽的过渡里铺面板底色。`TaskStore.ledGroups` 供视图和窗口共用。`TickSpinner`、`CapsuleOrb`、`TickOrb` 及胶囊段宽函数移除。
 
+## D-90 面板 LED 呼应（2026-11-09）
+
+`ToolActivityText`（Core）把工具名对到一句副标题，Codex `RolloutReducer` 的 function_call／custom_tool_call 与 Claude `ClaudeTranscriptReducer` 的 tool_use 共用；Codex `agent_reasoning`、Claude thinking 块写“正在思考”。`LEDOrbLayout.glyph` 公开字形，`LEDOrbView.toneColor`／`blue` 公开颜色，供 `LEDMiniSummary`（标题栏 SwiftUI Canvas，点 2、间距 1）和 `LEDPipView`（行首 18 点原生视图：在跑 8 个 CALayer、透明度关键帧 0.8 秒一圈逐颗晚 0.1 秒；等你整块透明度往返；1 倍屏不加圆角）共用。`MonitorTaskRow` 用等宽 `clock` 文本和 `tag`，等你的行用 30 秒一次的 TimelineView 写“已等 N 分钟”；`taskSection(separated:)` 给进行中的行之间画 1/(displayScale×uiScale) 的细线；`GlassFill` 深色改 #0B0D10；`ActivityIndicator`、`NativeRunningArc` 不再使用并移除。`GlassFillTests` 的深色期望改为 #0B0D10（容差 0.02，位图会经过一次色彩空间换算）；新增 `ToolActivityTextTests`。
+
+## D-91 刚完成与全部完成（2026-11-09）
+
+`TaskStore.refresh` 在原来累加 `completionSequence` 的地方取出本轮刚完成的根任务编号，写入 `freshFinished`（编号 → 完成时间）并加入 `unseenFinished`；每轮按“仍关注、仍是已完成、未满 600 秒”过滤，`unseenFinished` 只保留仍在 `freshFinished` 里的。`freshTasks` 按完成时间倒序，`finished` 去掉这些任务；`openTask` 先 `markFinishedSeen`，另有 `markAllFinishedSeen`、`acknowledgeFinishedOnOrb`（MonitorView 在内容可见且有未看时调用）。窗口高度把刚完成的行按 `expandedRow` 计并加 28 点段头。
+
+`LEDOrbLayout.groups` 增加 `fresh`（绿色、排最后）与 `sleeping`；全部完成显示 “OK”（新增 O、K 字形，宽 49），休眠显示 “Zz”（Z、z 字形，同宽）。`LEDOrbView.RingMode` 增加 `.flash`；进入 `.done` 且在过渡中时 `sweep(full: true)`：每个外圈位置一个临时 `CALayer`，3 秒透明度关键帧（充满 0～1 秒、闪两下 1.0～1.4 秒、按序退回 1.45～3 秒，时间相撞的点跳过以保证严格递增），播完移除；同时 OK 的逐列显露延后 1.3 秒、用 0.5 秒。`.flash` 用 1.2 秒的简短版。Zz 时绿色字形层透明度往返呼吸。`LEDOrbContent` 用 `.task(id: allDone)` 等 300 秒置 `sleeping`。
+
+
+## D-92 外圈过渡（2026-11-09）
+
+`LEDOrbView.RingMode` 去掉 `.flash`；`LEDOrbContent` 去掉 1.2 秒的 `completionFlashing`，改为把 `store.completionSequence` 传给 `LEDOrb`。绕圈的灯放进 `cometHost`，外面再套一层 `cometFader` 只管淡入淡出。每颗灯的透明度关键帧以 `cometOrigin`（`cometHost` 自己的时间）为起点；灯数变化时先按旧灯数算出跑到一圈的比例，再换算新的起点，所以变宽不跳。减速、起步靠改 `cometHost.speed`，每次改速度都把当前本地时间写进 `timeOffset`、`beginTime` 设为父层当前时间，位置连续；速度按 0.15～0.2 秒一档地换（停：0.7→0.45→0.25→0.1→0，0.8 秒同时淡出；起：0.3→0.55→0.8→1，0.4 秒淡入），状态一变旧的档位作废。
+
+事件由 `update` 比较新旧分组得出（失败个数增 → 红、等你个数增 → 琥珀、`completionSequence` 增 → 绿），只在分组有变化、可动画且不是全部完成时触发。`startLap` 把每颗灯的底色 0.15 秒换成事件色，关键帧换成 12 颗的长尾巴（同一起点，位置不变），`2 × 灯数 × 0.05` 秒后：`mode == .running` 就 0.5 秒变回蓝色、恢复 5 颗；否则减速淡掉，停稳后再换回蓝色和短尾巴。看不见或减少动态效果时停掉所有动画，在跑就静止显示左上角 5 颗。

@@ -145,15 +145,24 @@ final class TaskStorePublicationTests: XCTestCase {
         try append("task_complete")
         await store.refresh()
         XCTAssertEqual(store.completionSequence, 1)
+        // D-91：刚完成的进“刚完成”一段和悬浮球的绿色个数，不在“已结束”里。
+        XCTAssertEqual(store.freshTasks.map(\.id), ["synthetic"])
+        XCTAssertEqual(store.unseenFinished, ["synthetic"])
+        XCTAssertFalse(store.finished.contains { $0.id == "synthetic" })
+        store.acknowledgeFinishedOnOrb()
+        XCTAssertTrue(store.unseenFinished.isEmpty, "打开面板后悬浮球绿色个数清零")
+        XCTAssertEqual(store.freshTasks.map(\.id), ["synthetic"], "面板里的“刚完成”还在")
         await store.refresh()
         XCTAssertEqual(store.completionSequence, 1, "同一完成状态不重复提示")
         try append("task_started")
         await store.refresh()
         XCTAssertEqual(store.runningCount, 1)
+        XCTAssertTrue(store.freshTasks.isEmpty, "又开始跑就不算刚完成")
         store.removeFromMonitoring("synthetic")
         try append("task_complete")
         await store.refresh()
         XCTAssertEqual(store.completionSequence, 1, "不提示已经取消关注的任务")
+        XCTAssertTrue(store.freshTasks.isEmpty)
     }
 
     /// 使用独立临时数据库与合成事件，不接触真实任务或账号。

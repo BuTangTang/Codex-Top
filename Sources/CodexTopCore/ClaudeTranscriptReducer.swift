@@ -77,7 +77,9 @@ public struct ClaudeTranscriptReducer: Sendable {
         if value["isApiErrorMessage"] as? Bool == true {
             finish(.failed, detail: "执行遇到问题，请回到 Claude Code 查看", at: at); return
         }
-        var question: String?
+        var question: String?, tool: String?
+        // 副标题只看工具名和有没有思考块，不读参数和正文（R-23）。
+        let thinking = Self.items(content).contains { ["thinking", "redacted_thinking"].contains($0["type"] as? String ?? "") }
         for item in Self.items(content) where item["type"] as? String == "tool_use" {
             guard let id = item["id"] as? String else { continue }
             openToolCalls.insert(id)
@@ -87,6 +89,7 @@ public struct ClaudeTranscriptReducer: Sendable {
             case "mcp__ccd_turn__wrap_up":
                 if let ask = (item["input"] as? [String: Any])?["ask"] as? String,
                    !ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { endsWithQuestion = true }
+            case let name?: tool = name
             default: break
             }
         }
@@ -106,7 +109,9 @@ public struct ClaudeTranscriptReducer: Sendable {
             }
             return
         }
-        if waitingCalls.isEmpty, !activity.phase.isFinished, activity.phase != .failed { running(at, detail: "正在处理任务") }
+        if waitingCalls.isEmpty, !activity.phase.isFinished, activity.phase != .failed {
+            running(at, detail: tool.map(ToolActivityText.detail(forTool:)) ?? (thinking ? "正在思考" : "正在处理任务"))
+        }
     }
 
     private mutating func running(_ at: Date?, detail: String) {

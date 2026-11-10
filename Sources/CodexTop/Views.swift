@@ -212,6 +212,7 @@ struct SettingsView: View {
     @State private var selectedCategory: Category = .appearance
     @State private var loginStatus: SMAppService.Status = .notRegistered
     @State private var loginError: String?
+    @State private var confirmClaudeHook = false
 
     /// 演示环境保留原有边界，不展示真实账号连接入口。
     private var categories: [Category] {
@@ -443,7 +444,23 @@ struct SettingsView: View {
                 if store.claudeInstalled && !store.demo {
                     Text(store.claudeRootURL.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-                Text("只读取会话记录和运行登记，不修改 Claude Code 的任何文件。目前看不出“等待你批准权限”：这时会先显示运行中，较久没有新活动后显示未知。").font(.caption).foregroundStyle(.secondary)
+                Toggle("显示“等待你批准”", isOn: Binding(get: { store.claudeHookInstalled == true }, set: { enabled in
+                    if enabled { confirmClaudeHook = true } else { store.setClaudeHook(false) }
+                }))
+                .disabled(store.demo || !store.claudeInstalled || store.claudeHookInstalled == nil)
+                .onAppear { store.refreshClaudeHookStatus() }
+                .alert("在 Claude Code 设置里加一个通知钩子？", isPresented: $confirmClaudeHook) {
+                    Button("加上") { store.setClaudeHook(true) }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("会在 settings.json 的 hooks 里加一条，只在 Claude Code 弹出“需要你批准”或“需要你填写”时运行，只记下会话编号和时间，不记内容。改之前会备份，关掉开关就删掉这一条。")
+                }
+                if store.claudeHookInstalled == nil {
+                    Text("Claude Code 的 settings.json 不是标准 JSON，无法添加钩子。").font(.caption).foregroundStyle(.orange)
+                }
+                Text(store.claudeHookInstalled == true
+                     ? "会话记录和运行登记只读；“等待你批准”来自 Codex Top 加在 Claude Code 设置里的通知钩子。"
+                     : "只读取会话记录和运行登记，不修改 Claude Code 的任何文件。不开上面的开关时看不出“等待你批准”：会先显示运行中，较久没有新活动后显示未知。").font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Text("状态来自本机日志。长时间没有新活动会显示未知；请在 Codex 或 Claude Code 中处理输入和批准。").font(.caption).foregroundStyle(.secondary)

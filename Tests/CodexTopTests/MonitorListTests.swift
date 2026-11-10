@@ -124,8 +124,8 @@ final class MonitorListTests: XCTestCase {
 
     @MainActor private func runningFrame(in host: NSView) throws -> CGRect {
         let scroll = try XCTUnwrap(findScroll(in: host))
-        func findArc(_ view: NSView) -> RunningArcView? {
-            if let arc = view as? RunningArcView { return arc }
+        func findArc(_ view: NSView) -> LEDPipView? {
+            if let arc = view as? LEDPipView { return arc }
             return view.subviews.compactMap { findArc($0) }.first
         }
         let arc = try XCTUnwrap(findArc(scroll))

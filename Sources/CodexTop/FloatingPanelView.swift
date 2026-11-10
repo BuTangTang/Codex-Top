@@ -53,6 +53,7 @@ private struct OrbPanelView: View {
     var dragStarted: (CGPoint) -> Void
     var dragMoved: (CGPoint) -> Void
     var dragEnded: (CGPoint) -> Void
+    @Environment(\.displayScale) private var displayScale
     private var usesTwinArc: Bool { store.orbAppearance == .twinArc }
     private var statusLabel: String { usesTwinArc ? store.orbStatusLabel : store.statusSummary.phase.label }
     private var statusDetail: String {
@@ -108,7 +109,7 @@ private struct OrbPanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: surfaceRadius, style: .circular))
         .overlay {
             RoundedRectangle(cornerRadius: surfaceRadius, style: .circular)
-                .strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5)
+                .strokeBorder(Color.black.opacity(0.10), lineWidth: 1 / displayScale)
                 .opacity(store.theme == .light && (!usesTwinArc || state.expanded) ? 1 : 0)
                 .allowsHitTesting(false)
         }
@@ -148,39 +149,36 @@ private struct LEDOrbContent: View {
     var hovered: Bool
     var visible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var completionFlashing = false
-    @State private var handledCompletionSequence = 0
-    private var currentPhase: TaskPhase { store.statusSummary.phase }
-    private var animationTrigger: String { "\(currentPhase.rawValue)-\(store.completionSequence)" }
+    /// 全部完成 5 分钟还没有新任务，就从 OK 换成休眠 Zz（D-91）。
+    @State private var sleeping = false
+    static let sleepAfter: Duration = .seconds(300)
+    private var allDone: Bool { store.ledGroups().first?.tone == .done && store.ledGroups().count == 1 }
     private var ring: LEDOrbView.RingMode {
-        let groups = store.ledGroups
-        if groups.first?.tone == .done || completionFlashing { return .done }
-        return groups.first?.tone == .running ? .running : .idle
+        if allDone { return .done }
+        return store.ledGroups().first?.tone == .running ? .running : .idle
     }
     var body: some View {
-        let groups = store.ledGroups
-        LEDOrb(groups: groups, ring: ring, dark: store.theme.colorScheme == .dark, hovered: hovered,
+        let groups = store.ledGroups(sleeping: sleeping)
+        LEDOrb(groups: groups, ring: ring, completions: store.completionSequence, dark: store.theme.colorScheme == .dark, hovered: hovered,
                animating: visible && !reduceMotion)
             .frame(width: LEDOrbLayout.layout(groups).width, height: LEDOrbLayout.height)
-            .onAppear { handledCompletionSequence = store.completionSequence }
-            .task(id: animationTrigger) {
-                // 有任务刚做完而其他任务还在跑时，外圈短暂变绿约 1 秒再接着转。
-                let flash = store.completionSequence > handledCompletionSequence && currentPhase == .running && !reduceMotion
-                handledCompletionSequence = store.completionSequence
-                completionFlashing = flash
-                guard flash else { return }
-                try? await Task.sleep(for: .seconds(1.1))
+            .task(id: allDone) {
+                sleeping = false
+                guard allDone else { return }
+                try? await Task.sleep(for: Self.sleepAfter)
                 guard !Task.isCancelled else { return }
-                completionFlashing = false
+                sleeping = true
             }
     }
 }
 
 extension TaskStore {
-    /// 圆球和窗口宽度共用同一份分组，保证画出来的宽度和窗口一致。
-    var ledGroups: [LEDOrbLayout.Group] {
+    /// 圆球和窗口宽度共用同一份分组，保证画出来的宽度和窗口一致（OK 和 Zz 一样宽）。
+    /// fresh 默认是悬浮球上“没看过”的个数；面板标题栏传“刚完成”一段的个数。
+    func ledGroups(sleeping: Bool = false, fresh: Int? = nil) -> [LEDOrbLayout.Group] {
         LEDOrbLayout.groups(running: runningCount, waiting: statusSummary.waiting, failed: statusSummary.failed,
-                            allDone: statusSummary.phase == .completed && runningCount == 0,
+                            fresh: fresh ?? unseenFinished.count,
+                            allDone: statusSummary.phase == .completed && runningCount == 0, sleeping: sleeping,
                             unknown: paused || loading || statusSummary.phase == .unknown)
     }
 }

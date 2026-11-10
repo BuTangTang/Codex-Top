@@ -234,10 +234,13 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     }
     private func panelHeight(compact: Bool) -> CGFloat {
         let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
-        let visibleTasks = (store.active + (includesFinished ? store.finished : [])).prefix(store.preferences.resolvedVisibleTaskCount)
+        let fresh = Set(store.freshFinished.keys)
+        let visibleTasks = (store.active + store.freshTasks + (includesFinished ? store.finished : [])).prefix(store.preferences.resolvedVisibleTaskCount)
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
-        let body = store.selected.isEmpty ? 195 : visibleTasks.reduce(CGFloat.zero) { height, task in
-            height + PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase)
+        // D-91：“刚完成”的行和进行中一样高，另加一个段头。
+        let freshHeader = visibleTasks.contains { fresh.contains($0.id) } ? PanelMetrics.freshHeader : 0
+        let body = store.selected.isEmpty ? 195 : freshHeader + visibleTasks.reduce(CGFloat.zero) { height, task in
+            height + (fresh.contains(task.id) ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase))
         }
         let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separator
         let messageScale = max(0.8, store.uiScale) / store.uiScale
@@ -386,7 +389,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     /// D-89：经典圆环收起时是 LED 面板，宽度按点阵排版算（最窄 45）；双弧外观保持 44pt 圆球。
     private var orbCapsuleExtension: CGFloat {
         guard store.orbAppearance == .ring else { return 0 }
-        return LEDOrbLayout.layout(store.ledGroups).width - 44
+        return LEDOrbLayout.layout(store.ledGroups()).width - 44
     }
     private func restoreCollapsedOrb(to anchor: CGRect) {
         stopOrbClickMonitoring()
