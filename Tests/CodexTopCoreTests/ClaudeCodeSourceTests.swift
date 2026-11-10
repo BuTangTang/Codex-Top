@@ -298,7 +298,37 @@ final class ClaudeCodeSourceTests: XCTestCase {
         let eastern = TimeZone(identifier: "America/New_York")!
         XCTAssertTrue(ClaudeSessionRegistry.startMatches(started, "Mon Nov  9 01:31:06 2026", localZone: eastern), "桌面 App 写 UTC")
         XCTAssertTrue(ClaudeSessionRegistry.startMatches(started, "Sun Nov  8 20:31:06 2026", localZone: eastern), "本地时区写法")
+        XCTAssertTrue(ClaudeSessionRegistry.startMatches(started, "  Sun   Nov   8  20:31:06   2026  ", localZone: eastern), "只归一化连续空格")
         XCTAssertFalse(ClaudeSessionRegistry.startMatches(started, "Mon Nov  9 01:31:07 2026", localZone: eastern), "差一秒即为进程号被复用")
+        for invalid in ["", "not a date", "Xxx Nov 9 01:31:06 2026", "Mon\tNov\t9\t01:31:06\t2026"] {
+            XCTAssertFalse(ClaudeSessionRegistry.startMatches(started, invalid, localZone: eastern), "非法登记不能匹配：\(invalid)")
+        }
+    }
+
+    /// 固定预期文本覆盖午夜、闰日、夏令时及非整小时偏移；交替时区不得复用上次的时区。
+    func testProcessStartFormattingKeepsLayoutAndCurrentTimeZone() throws {
+        let samples: [(stamp: String, zone: String, expected: String)] = [
+            ("1970-01-01T00:00:00Z", "UTC", "Thu Jan 1 00:00:00 1970"),
+            ("2000-02-29T12:03:04Z", "UTC", "Tue Feb 29 12:03:04 2000"),
+            ("2026-03-08T06:59:59Z", "America/New_York", "Sun Mar 8 01:59:59 2026"),
+            ("2026-03-08T07:00:00Z", "America/New_York", "Sun Mar 8 03:00:00 2026"),
+            ("2026-11-01T05:59:59Z", "America/New_York", "Sun Nov 1 01:59:59 2026"),
+            ("2026-11-01T06:00:00Z", "America/New_York", "Sun Nov 1 01:00:00 2026"),
+            ("2026-03-29T00:59:59Z", "Europe/Berlin", "Sun Mar 29 01:59:59 2026"),
+            ("2026-03-29T01:00:00Z", "Europe/Berlin", "Sun Mar 29 03:00:00 2026"),
+            ("2026-11-09T01:31:06Z", "Asia/Shanghai", "Mon Nov 9 09:31:06 2026"),
+            ("2026-11-09T01:31:06Z", "Asia/Kathmandu", "Mon Nov 9 07:16:06 2026"),
+            ("2026-11-09T01:31:06Z", "Australia/Lord_Howe", "Mon Nov 9 12:31:06 2026"),
+            ("2026-11-09T01:31:06Z", "America/New_York", "Sun Nov 8 20:31:06 2026"),
+            ("2026-11-09T01:31:06Z", "UTC", "Mon Nov 9 01:31:06 2026"),
+            ("2038-01-19T03:14:08Z", "UTC", "Tue Jan 19 03:14:08 2038"),
+        ]
+        for sample in samples {
+            let started = try Date.ISO8601FormatStyle().parse(sample.stamp)
+            let zone = try XCTUnwrap(TimeZone(identifier: sample.zone))
+            XCTAssertEqual(ClaudeSessionRegistry.processStartText(started, zone: zone), sample.expected, sample.zone)
+            XCTAssertTrue(ClaudeSessionRegistry.startMatches(started, sample.expected, localZone: zone), sample.zone)
+        }
     }
 
     func testColdReadReachesPastLargeTrailingLines() async throws {

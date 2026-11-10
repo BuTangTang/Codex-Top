@@ -124,6 +124,11 @@ public enum MonitoringPolicy {
                     preferences.selectedIDs.insert(root)
                 }
             }
+            // 开启自动监控前就有的任务，重新开始跑或在等你时也加入关注；手动移出过的不加（2026-11-09 用户：“自动加入”）。
+            for t in tasks where t.activity.phase.isActive {
+                let root = graph.rootIDs[t.id] ?? t.id
+                if !preferences.excludedIDs.contains(root) { preferences.selectedIDs.insert(root) }
+            }
         }
         applyRetention(&preferences, graph: graph, now: now)
     }

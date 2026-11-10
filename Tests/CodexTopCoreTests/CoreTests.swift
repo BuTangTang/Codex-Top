@@ -183,7 +183,8 @@ final class CoreTests: XCTestCase {
         MonitoringPolicy.setAutoMonitor(true, preferences: &p, tasks: [old, fresh, whileOff], now: time.addingTimeInterval(2.25))
         let afterEnable = task("after-enable", phase: .waiting, createdAt: time.addingTimeInterval(2))
         MonitoringPolicy.reconcile(&p, tasks: [old, fresh, whileOff, afterEnable], now: time.addingTimeInterval(3))
-        XCTAssertEqual(p.selectedIDs, ["after-enable"])
+        // 2026-11-09 用户选“自动加入”：重新打开自动监控时还在跑的旧任务也加入；手动移出过的 fresh 仍不加。
+        XCTAssertEqual(p.selectedIDs, ["after-enable", "while-off"])
     }
     func testFirstScanBoundaryAndRestartKeepHistoricalTasksOut() throws {
         var p = MonitorPreferences()

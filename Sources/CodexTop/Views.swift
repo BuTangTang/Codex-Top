@@ -453,13 +453,13 @@ struct SettingsView: View {
                     Button("加上") { store.setClaudeHook(true) }
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text("会在 settings.json 的 hooks 里加一条，只在 Claude Code 弹出“需要你批准”或“需要你填写”时运行，只记下会话编号和时间，不记内容。改之前会备份，关掉开关就删掉这一条。")
+                    Text("会在 settings.json 的 hooks 里加一条，只在 Claude Code 弹出“需要你批准”或“需要你填写”时运行，只记下会话编号和时间，不记内容。改之前会备份，关掉开关就删掉这一条。之后新启动的会话才生效。")
                 }
                 if store.claudeHookInstalled == nil {
                     Text("Claude Code 的 settings.json 不是标准 JSON，无法添加钩子。").font(.caption).foregroundStyle(.orange)
                 }
                 Text(store.claudeHookInstalled == true
-                     ? "会话记录和运行登记只读；“等待你批准”来自 Codex Top 加在 Claude Code 设置里的通知钩子。"
+                     ? "会话记录和运行登记只读；“等待你批准”来自 Codex Top 加在 Claude Code 设置里的通知钩子。Claude Code 只在会话启动时读取钩子，打开开关前就在运行的会话要重启 Claude 后才生效。"
                      : "只读取会话记录和运行登记，不修改 Claude Code 的任何文件。不开上面的开关时看不出“等待你批准”：会先显示运行中，较久没有新活动后显示未知。").font(.caption).foregroundStyle(.secondary)
             }
             Section {

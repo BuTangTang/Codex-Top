@@ -297,8 +297,10 @@ private struct MonitorTaskRow: View {
             Button { store.openTask(task) } label: {
                 // D-90：行首小 LED（和悬浮球同一套语言）；右侧等宽计时，等你／失败在计时下面加小标签。
                 HStack(spacing: compact ? 10 : 12) {
-                    LEDPip(phase: activity.phase, dark: dark, animating: animationsActive && !reduceMotion)
-                        .frame(width: LEDPipView.size, height: LEDPipView.size)
+                    // 进行中、刚完成的高行用和两行字一样高的竖条，已结束的矮行用半高。
+                    let pipRows = fresh || !activity.phase.isFinished ? 8 : 4
+                    LEDPip(phase: activity.phase, rows: pipRows, dark: dark, animating: animationsActive && !reduceMotion)
+                        .frame(width: LEDPipView.width, height: LEDPipView.height(rows: pipRows))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? (crisp ? .medium : .regular) : .semibold, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)

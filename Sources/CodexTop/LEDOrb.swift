@@ -510,39 +510,44 @@ struct LEDMiniSummary: View {
 /// D-90 行首小灯：在跑是 8 颗点一圈、亮点顺时针转；等你是琥珀 3×3 点阵轻闪；失败是红色 3×3；其余按状态色静止。
 struct LEDPip: NSViewRepresentable {
     var phase: TaskPhase
+    /// 进行中、刚完成的行用 8 行高的竖条（和两行字一样高），已结束的矮行用 4 行。
+    var rows: Int = 8
     var dark: Bool
     var animating: Bool
     func makeNSView(context: Context) -> LEDPipView { LEDPipView() }
-    func updateNSView(_ view: LEDPipView, context: Context) { view.update(phase: phase, dark: dark, animating: animating) }
+    func updateNSView(_ view: LEDPipView, context: Context) { view.update(phase: phase, rows: rows, dark: dark, animating: animating) }
     static func dismantleNSView(_ view: LEDPipView, coordinator: ()) { view.stopAnimations() }
 }
 
+/// 面板行首的竖条小灯（2026-11-10 用户选 E1b）：2 列 × 8 行方点，和标题加副标题一样高。
+/// 在跑时一道亮光带着 7 格渐暗的尾巴沿外圈顺时针绕，和悬浮球外圈是同一种动画；其他状态整条一个颜色。
 final class LEDPipView: NSView {
-    static let size: CGFloat = 18
-    /// 外圈 8 颗，从 12 点起顺时针；全部是整数点。
-    static let ring: [CGPoint] = [CGPoint(x: 7, y: 1), CGPoint(x: 12, y: 3), CGPoint(x: 14, y: 7), CGPoint(x: 12, y: 12),
-                                  CGPoint(x: 7, y: 14), CGPoint(x: 2, y: 12), CGPoint(x: 0, y: 7), CGPoint(x: 2, y: 3)]
-    static let grid: [CGPoint] = (0..<9).map { CGPoint(x: 3 + CGFloat($0 % 3) * 4, y: 3 + CGFloat($0 / 3) * 4) }
+    static let width: CGFloat = 11
+    static func height(rows: Int) -> CGFloat { CGFloat(rows - 1) * 4 + 3 }
+    /// 一圈 16 格里亮 8 格：头最亮，后面 7 格依次变暗。
+    static let tail: [Float] = [1, 0.85, 0.7, 0.56, 0.43, 0.31, 0.2, 0.1]
+    static let period: CFTimeInterval = 1.1
     private static let epoch = CACurrentMediaTime()
     private static let spinKey = "codexTop.pipSpin", pulseKey = "codexTop.pipPulse"
-    private var dots: [CALayer] = []
+    private var faint: [CALayer] = [], dots: [CALayer] = []
     private var phase: TaskPhase?
+    private var rows = 8
     private var dark = true
     private var animating = false
 
     override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: Self.size, height: Self.size) }
+    override var intrinsicContentSize: NSSize { NSSize(width: Self.width, height: Self.height(rows: rows)) }
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.height(rows: 8)))
         wantsLayer = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func update(phase: TaskPhase, dark: Bool, animating: Bool) {
-        let changed = phase != self.phase || dark != self.dark
-        self.phase = phase; self.dark = dark; self.animating = animating
+    func update(phase: TaskPhase, rows: Int, dark: Bool, animating: Bool) {
+        let changed = phase != self.phase || dark != self.dark || rows != self.rows
+        self.phase = phase; self.rows = rows; self.dark = dark; self.animating = animating
         if changed { rebuild() }
         updateAnimations()
     }
@@ -552,12 +557,20 @@ final class LEDPipView: NSView {
     override func viewDidHide() { super.viewDidHide(); stopAnimations() }
     override func viewDidUnhide() { super.viewDidUnhide(); updateAnimations() }
 
+    /// 外圈顺时针：上边从左到右、右列往下、下边从右到左、左列往上。
+    private var loop: [CGPoint] {
+        var cells: [(Int, Int)] = [(0, 0), (1, 0)]
+        for row in 1..<rows { cells.append((1, row)) }
+        cells.append((0, rows - 1))
+        for row in stride(from: rows - 2, to: 0, by: -1) { cells.append((0, row)) }
+        return cells.map { CGPoint(x: 2 + CGFloat($0.0) * 4, y: CGFloat($0.1) * 4) }
+    }
+
     private func rebuild() {
         guard let host = layer, let phase else { return }
         stopAnimations()
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        dots.forEach { $0.removeFromSuperlayer() }
-        let points = phase == .running ? Self.ring : Self.grid
+        (faint + dots).forEach { $0.removeFromSuperlayer() }
         let color: NSColor
         switch phase {
         case .running: color = LEDOrbView.blue(dark: dark)
@@ -567,16 +580,19 @@ final class LEDPipView: NSView {
         default: color = LEDOrbView.toneColor(.idle, dark: dark)
         }
         let scale = window?.backingScaleFactor ?? 2
-        dots = points.map { point in
-            let dot = CALayer()
-            dot.frame = CGRect(origin: point, size: CGSize(width: 3, height: 3))
-            dot.backgroundColor = color.cgColor
-            dot.cornerRadius = scale >= 2 ? 0.6 : 0   // 1 倍屏 3 像素的点不做圆角
-            dot.contentsScale = scale
-            dot.opacity = phase == .unknown || phase == .stopped || phase == .idle ? 0.55 : 1
-            host.addSublayer(dot)
-            return dot
+        let radius: CGFloat = scale >= 2 ? 0.6 : 0   // 1 倍屏 3 像素的点不做圆角
+        func dot(_ point: CGPoint, _ fill: NSColor) -> CALayer {
+            let layer = CALayer()
+            layer.frame = CGRect(origin: point, size: CGSize(width: 3, height: 3))
+            layer.backgroundColor = fill.cgColor; layer.cornerRadius = radius; layer.contentsScale = scale
+            host.addSublayer(layer)
+            return layer
         }
+        let points = loop
+        // 在跑时整条先铺一层暗格子，亮光在上面绕；其他状态整条就是一个颜色。
+        faint = phase == .running ? points.map { dot($0, (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.08)) } : []
+        dots = points.map { dot($0, color) }
+        for layer in dots { layer.opacity = phase == .unknown || phase == .stopped || phase == .idle ? 0.55 : (phase == .running ? 0 : 1) }
         CATransaction.commit()
     }
 
@@ -584,23 +600,29 @@ final class LEDPipView: NSView {
         guard let phase, animating, window != nil, !isHiddenOrHasHiddenAncestor, phase == .running || phase == .waiting else {
             stopAnimations()
             if phase == .running {
-                // 不能动时停在 12 点方向：头最亮，逆时针一侧依次变暗。
+                // 不能动时停在左上角：头最亮，尾巴沿左列往下变暗。
                 CATransaction.begin(); CATransaction.setDisableActions(true)
-                for (index, dot) in dots.enumerated() { dot.opacity = [1, 0.15, 0.15, 0.15, 0.15, 0.15, 0.3, 0.55][index % 8] }
+                let count = dots.count
+                for (index, dot) in dots.enumerated() {
+                    let behind = (count - index) % count
+                    dot.opacity = behind < Self.tail.count ? Self.tail[behind] : 0
+                }
                 CATransaction.commit()
             }
             return
         }
         if phase == .running {
+            let count = Double(dots.count), step = Self.period / 16
+            let tail = Array(Self.tail.prefix(max(1, dots.count / 2)))
             for (index, dot) in dots.enumerated() where dot.animation(forKey: Self.spinKey) == nil {
-                dot.opacity = 0.15
+                dot.opacity = 0
                 let spin = CAKeyframeAnimation(keyPath: "opacity")
-                spin.values = [1, 0.55, 0.3, 0.15, 0.15]
-                spin.keyTimes = [0, 0.125, 0.25, 0.375, 1]
-                spin.duration = 0.8
+                spin.values = tail.map { NSNumber(value: $0) } + [0, 0]
+                spin.keyTimes = (0...tail.count).map { NSNumber(value: Double($0) / count) } + [1]
+                spin.duration = count * step
                 spin.repeatCount = .infinity
-                // 第 n 颗晚 n/8 圈亮，点是顺时针排的，所以亮点顺时针转。
-                spin.beginTime = dot.convertTime(Self.epoch, from: nil) + Double(index) * 0.1
+                // 第 n 格晚 n 步亮，格子按顺时针排，所以亮光顺时针绕；共享起点，几行节奏一致、刷新不打乱。
+                spin.beginTime = dot.convertTime(Self.epoch, from: nil) + Double(index) * step
                 spin.fillMode = .backwards
                 dot.add(spin, forKey: Self.spinKey)
             }
@@ -618,4 +640,3 @@ final class LEDPipView: NSView {
         for dot in dots { dot.removeAnimation(forKey: Self.spinKey) }
     }
 }
-

@@ -61,11 +61,13 @@ public struct ClaudeSessionRegistry: Sendable {
         return [TimeZone(identifier: "UTC")!, localZone].contains { processStartText(started, zone: $0) == recorded }
     }
 
+    /// 保持 ps 的英文版式；值类型格式化避免每次创建可变 formatter，时区仍由本次调用提供。
     static func processStartText(_ date: Date, zone: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = zone
-        formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
-        return formatter.string(from: date)
+        date.formatted(Date.VerbatimFormatStyle(
+            format: "\(weekday: .abbreviated) \(month: .abbreviated) \(day: .defaultDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits):\(second: .twoDigits) \(year: .padded(4))",
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: zone,
+            calendar: Calendar(identifier: .gregorian)
+        ))
     }
 }
