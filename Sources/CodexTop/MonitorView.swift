@@ -61,6 +61,7 @@ struct MonitorView: View {
         .animation(ThemeMotion.transition(reduceMotion: reduceMotion), value: store.theme)
     }
 
+    /// 列表依据实际可用高度决定是否接收滚动，标题和底栏保持固定。
     private var panelContent: some View {
         VStack(spacing: 0) {
                 header.layoutPriority(1)
@@ -75,17 +76,21 @@ struct MonitorView: View {
                         Button("选择任务", action: pickTasks).controlSize(.large)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VStack(spacing: 0) {
+                    GeometryReader { viewport in
+                        let active = store.active
+                        let fresh = store.freshTasks
+                        let finished = showFinished ? store.finished : []
+                        let contentHeight = CGFloat(active.count + fresh.count) * PanelMetrics.expandedRow
+                            + (fresh.isEmpty ? 0 : PanelMetrics.freshHeader)
+                            + CGFloat(finished.count) * PanelMetrics.finishedRow
                         ScrollView {
                             // Each section has uniform rows and an exact total height. Keep
                             // offscreen controls lazy without estimating a mixed-height list.
                             VStack(spacing: 0) {
-                                let fresh = store.freshTasks
                                 if fresh.isEmpty {
-                                    taskSection(store.active, rowHeight: PanelMetrics.expandedRow, separated: true)
+                                    taskSection(active, rowHeight: PanelMetrics.expandedRow, separated: true)
                                 } else {
                                     // D-91：需要你处理 → 刚完成 → 进行中。
-                                    let active = store.active
                                     let attention = active.filter { [.waiting, .failed].contains(store.graph.activity(for: $0).phase) }
                                     taskSection(attention, rowHeight: PanelMetrics.expandedRow, separated: true)
                                     freshHeader(count: fresh.count)
@@ -94,7 +99,7 @@ struct MonitorView: View {
                                                 rowHeight: PanelMetrics.expandedRow, separated: true)
                                 }
                                 if showFinished {
-                                    taskSection(store.finished, rowHeight: PanelMetrics.finishedRow, separated: false)
+                                    taskSection(finished, rowHeight: PanelMetrics.finishedRow, separated: false)
                                 }
                             }
                             // The panel owns disclosure/morph animation. Do not animate the
@@ -102,7 +107,8 @@ struct MonitorView: View {
                             .transaction { $0.animation = nil }
                         }
                         // 鼠标滚轮会让 macOS 用占宽度的旧式滚动条，出现时整列内容往左挪；列表不显示滚动条，宽度始终不变。
-                        // 内容没超出时不回弹：放得下还滚一下，整列会被拉动再弹回（2026-11-09 用户：“滚轮动一下还是会界面动一下”）。
+                        // 内容放得下时直接禁滚；允许一个物理像素的布局取整误差，实际超出仍能滚动。
+                        .scrollDisabled(contentHeight <= viewport.size.height + hairline)
                         .scrollIndicators(.never).scrollBounceBehavior(.basedOnSize).frame(maxHeight: .infinity)
                     }
                 }
@@ -213,7 +219,7 @@ struct MonitorView: View {
     }
 
     /// 细线固定 1 个物理像素：0.5 点在 1 倍屏上会变成发虚的灰线。
-    private var hairline: CGFloat { 1 / (displayScale * store.uiScale) }
+    private var hairline: CGFloat { PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale) }
     private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline).padding(.horizontal, 16) }
 
     private var footer: some View {

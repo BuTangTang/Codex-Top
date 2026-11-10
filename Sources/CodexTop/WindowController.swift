@@ -224,7 +224,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if store.placement == .top { top.orderFrontRegardless() }
         if recoverFloating && store.placement != .orb {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
-            floatingResize.resize(to: WindowGeometry.floating(size: floatingSize, visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), animated: false)
+            floatingResize.resize(to: WindowGeometry.floating(size: floatingSize(on: display.screen), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY), animated: false)
         }
         for window in [picker, settings].compactMap({ $0 }) {
             let frame = WindowGeometry.recoverUtilityWindow(window.frame, visibleFrames: displays.map { $0.screen.visibleFrame },
@@ -232,7 +232,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             setFrame(frame, for: window, animated: false)
         }
     }
-    private func panelHeight(compact: Bool) -> CGFloat {
+    /// 按目标屏幕计算面板高度，分隔线与内容使用同一尺寸口径，避免短列表产生滚动余量。
+    private func panelHeight(compact: Bool, displayScale: CGFloat) -> CGFloat {
         let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
         let fresh = Set(store.freshFinished.keys)
         let visibleTasks = (store.active + store.freshTasks + (includesFinished ? store.finished : [])).prefix(store.preferences.resolvedVisibleTaskCount)
@@ -242,14 +243,19 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let body = store.selected.isEmpty ? 195 : freshHeader + visibleTasks.reduce(CGFloat.zero) { height, task in
             height + (fresh.contains(task.id) ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase))
         }
-        let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separator
+        let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale)
         let messageScale = max(0.8, store.uiScale) / store.uiScale
-        return height + (store.panelWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
+        let total = height + (store.panelWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
+        // 向上对齐物理像素，避免缩放后的窗口取整挤掉列表的最后一小段。
+        let pixelsPerPoint = displayScale * store.uiScale
+        return ceil(total * pixelsPerPoint) / pixelsPerPoint
     }
-    private var floatingSize: CGSize {
+    /// 常驻浮窗按它实际所在的屏幕预留分隔线，而不是沿用刘海所选屏幕的像素密度。
+    private func floatingSize(on screen: NSScreen) -> CGSize {
         if store.placement == .orb { return CGSize(width: 44, height: 44) }
-        return CGSize(width: PanelMetrics.floatingWidth * store.uiScale, height: panelHeight(compact: true) * store.uiScale)
+        return CGSize(width: PanelMetrics.floatingWidth * store.uiScale, height: panelHeight(compact: true, displayScale: screen.backingScaleFactor) * store.uiScale)
     }
+    /// 重新计算各显示方式的窗口大小；每个面板使用自身目标屏幕的像素密度。
     private func updateContentSize(animated: Bool = false) {
         guard !modeTransition.isActive || applyingMode else { return }
         // Keep the source surface stationary throughout menu interaction. Data
@@ -264,7 +270,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let display = isPopover ? displays.first { $0.screen.frame.contains(CGPoint(x: anchor.midX, y: anchor.midY)) } ?? chosen : chosen
         let cameraHeight: CGFloat = isPopover ? 0 : chosen.notchHeight
         let cameraWidth: CGFloat = isPopover ? 0 : chosen.notchWidth
-        let size = CGSize(width: max(PanelMetrics.expandedWidth * store.uiScale, cameraWidth + 32), height: panelHeight(compact: false) * store.uiScale + cameraHeight)
+        let size = CGSize(width: max(PanelMetrics.expandedWidth * store.uiScale, cameraWidth + 32), height: panelHeight(compact: false, displayScale: display.screen.backingScaleFactor) * store.uiScale + cameraHeight)
         let compactFrame: CGRect
         let expandedFrame: CGRect
         if isPopover {
@@ -293,7 +299,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let display = displays.first { $0.screen.visibleFrame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) } ?? chosen
             // Disclosure keeps the top edge stationary even near the bottom of
             // the display. Extra history scrolls inside the remaining viewport.
-            let frame = FloatingPanelResize.targetFrame(from: floating.frame, size: floatingSize, visible: display.screen.visibleFrame)
+            let frame = FloatingPanelResize.targetFrame(from: floating.frame, size: floatingSize(on: display.screen), visible: display.screen.visibleFrame)
             floatingResize.resize(to: frame, animated: animated && floating.isVisible && store.placement == .floating)
         }
         if let picker {
@@ -345,6 +351,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
         dismissExpanded()
     }
+    /// 按圆环实际所在屏幕布局展开面板，并在动画中保留原来的展开方向与锚点。
     private func updateOrbLayout(animated: Bool, expanded requestedExpanded: Bool? = nil) {
         guard store.placement == .orb, !dragging, let chosen else { return }
         // Refresh/disclosure changes can arrive while the surface still presents an
@@ -358,7 +365,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if orbAnchor.width == 0 { orbAnchor = WindowGeometry.orbAnchor(inCollapsed: floating.frame, growsLeft: orbState.capsuleGrowsLeft) }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
         orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame, inset: 0))
-        let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false) * store.uiScale)
+        let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false, displayScale: display.screen.backingScaleFactor) * store.uiScale)
         let desired: CGRect
         let direction: OrbExpansionDirection
         if let openFrame = orbExpandedFrame, let openingDirection = orbExpansionDirection, willExpand {

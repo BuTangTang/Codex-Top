@@ -6,6 +6,58 @@ import CodexTopCore
 @testable import CodexTop
 
 final class MonitorListTests: XCTestCase {
+    /// 短列表在两种屏幕像素密度和实际可用缩放下容纳完整行，展开长历史仍保留滚动范围。
+    @MainActor func testShortListFitsViewportAndLongHistoryStillScrolls() async throws {
+        let fixture = try makeFixture(count: 30, activeCount: 2)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let store = TaskStore(stateDirectory: fixture)
+        await store.refresh()
+        XCTAssertEqual(store.active.count, 2)
+        XCTAssertEqual(store.finished.count, 28)
+        for displayScale: CGFloat in [1, 2] {
+            for requestedScale: CGFloat in [0.7125, 0.75, 0.9] {
+                store.setScale(Double(requestedScale) / MonitorScale.baseline)
+                let uiScale = store.uiScale
+                XCTAssertEqual(uiScale, requestedScale, accuracy: 0.000001)
+                let state = MonitorPanelState()
+                let contentHeight = PanelMetrics.expandedHeader + 2 * PanelMetrics.expandedRow + PanelMetrics.footer
+                    + 2 * PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: uiScale)
+                let pixelsPerPoint = displayScale * uiScale
+                let height = ceil(contentHeight * pixelsPerPoint) / pixelsPerPoint
+                let root = ShortListHarness(store: store, state: state)
+                    .frame(width: PanelMetrics.expandedWidth, height: height)
+                    .environment(\.displayScale, displayScale)
+                    .scaleEffect(uiScale, anchor: .topLeading)
+                    .frame(width: PanelMetrics.expandedWidth * uiScale, height: height * uiScale, alignment: .topLeading)
+                    .windowTypography()
+                    .transaction { $0.disablesAnimations = true }
+                let host = NSHostingView(rootView: root)
+                host.sizingOptions = []
+                let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: PanelMetrics.expandedWidth * uiScale, height: height * uiScale),
+                                      styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.contentView = host
+                defer { window.close() }
+                flushLayout(host)
+                try await Task.sleep(for: .milliseconds(120))
+                flushLayout(host)
+                let scroll = try XCTUnwrap(findScroll(in: host))
+                let document = try XCTUnwrap(scroll.documentView)
+                let context = "displayScale=\(displayScale), uiScale=\(uiScale), document=\(document.frame.height), viewport=\(scroll.contentView.bounds.height)"
+                print("Short monitor list: \(context)")
+                XCTAssertLessThanOrEqual(document.frame.height - scroll.contentView.bounds.height, 0.1, context)
+                // 在同一隐藏窗口展开合成历史，验证短列表修复没有同时禁掉真正溢出的内容。
+                state.expandedFinished = true
+                flushLayout(host)
+                try await Task.sleep(for: .milliseconds(120))
+                flushLayout(host)
+                XCTAssertGreaterThan(try XCTUnwrap(scroll.documentView).frame.height - scroll.contentView.bounds.height,
+                                     PanelMetrics.finishedRow, context)
+                XCTAssertFalse(window.isVisible, "Synthetic tests must never open a desktop window")
+            }
+        }
+    }
+
     /// 收起后移除实际滚动列表，再次展开恢复内容，后台任务状态不受隐藏影响。
     @MainActor func testHiddenPanelReleasesListAndReopens() async throws {
         let fixture = try makeFixture(count: 30)
@@ -35,6 +87,7 @@ final class MonitorListTests: XCTestCase {
         XCTAssertNotNil(findScroll(in: host))
     }
 
+    /// 浮窗调整高度时保持运行行位置，并按所在屏幕的分隔线厚度核对底栏。
     @MainActor
     func testFloatingViewportKeepsRunningRowAndMovesFooterWithItsHeight() async throws {
         let fixture = try makeFixture(count: 60)
@@ -76,7 +129,9 @@ final class MonitorListTests: XCTestCase {
             XCTAssertEqual(viewport.minX, initialScroll.minX, accuracy: 0.5)
             XCTAssertEqual(viewport.minY, initialScroll.minY, accuracy: 0.5)
             XCTAssertEqual(viewport.width, initialScroll.width, accuracy: 0.5)
-            XCTAssertEqual(height - viewport.maxY, (PanelMetrics.footer + PanelMetrics.separator) * store.uiScale, accuracy: 1)
+            XCTAssertEqual(height - viewport.maxY,
+                           (PanelMetrics.footer + PanelMetrics.separatorHeight(displayScale: window.backingScaleFactor, uiScale: store.uiScale)) * store.uiScale,
+                           accuracy: 1)
         }
         state.floatingFinished = false
         flushLayout(host)
@@ -340,6 +395,16 @@ final class MonitorListTests: XCTestCase {
         }
         try PreferencesFile(url: directory.appendingPathComponent("preferences.json")).save(preferences)
         return directory
+    }
+}
+
+/// 订阅展开状态，确保测试中的“已结束”切换会更新真实列表。
+private struct ShortListHarness: View {
+    @ObservedObject var store: TaskStore
+    @ObservedObject var state: MonitorPanelState
+    var body: some View {
+        MonitorView(store: store, compact: false, showFinished: $state.expandedFinished,
+                    animationsActive: false, pickTasks: {}, settings: {})
     }
 }
 

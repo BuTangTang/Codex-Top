@@ -12,7 +12,10 @@ enum PanelMetrics {
     static let expandedHeader: CGFloat = 48
     static let floatingHeader: CGFloat = 44
     static let footer: CGFloat = 42
-    static let separator: CGFloat = 0.5
+    /// 分隔线占一个物理像素；窗口预留高度与 SwiftUI 绘制必须使用相同的屏幕、界面缩放。
+    static func separatorHeight(displayScale: CGFloat, uiScale: CGFloat) -> CGFloat {
+        1 / (displayScale * uiScale)
+    }
 
     static func rowHeight(for phase: TaskPhase) -> CGFloat {
         phase.isFinished ? finishedRow : expandedRow
