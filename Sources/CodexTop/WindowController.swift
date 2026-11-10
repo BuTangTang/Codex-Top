@@ -217,7 +217,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         topHovered = false
         if store.placement == .orb && recoverFloating {
             let display = displays.first { $0.id == store.preferences.floatingDisplay } ?? chosen
-            let anchor = WindowGeometry.floating(size: CGSize(width: 44, height: 44), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY)
+            let anchor = WindowGeometry.floating(size: CGSize(width: 44, height: 44), visible: display.screen.visibleFrame, x: store.preferences.floatingX, y: store.preferences.floatingY, inset: 0)
             restoreCollapsedOrb(to: anchor)
         }
         updateContentSize()
@@ -357,7 +357,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let willExpand = requestedExpanded ?? orbState.expanded
         if orbAnchor.width == 0 { orbAnchor = WindowGeometry.orbAnchor(inCollapsed: floating.frame, growsLeft: orbState.capsuleGrowsLeft) }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
-        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame))
+        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame, inset: 0))
         let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false) * store.uiScale)
         let desired: CGRect
         let direction: OrbExpansionDirection
@@ -585,7 +585,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             let frame = floating.frame
             let display = displays.first { $0.screen.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) } ?? chosen
             if let display {
-                let anchor = WindowGeometry.clamp(CGRect(x: frame.midX - 22, y: frame.midY - 22, width: 44, height: 44), to: display.screen.visibleFrame)
+                let anchor = WindowGeometry.clamp(CGRect(x: frame.midX - 22, y: frame.midY - 22, width: 44, height: 44), to: display.screen.visibleFrame, inset: 0)
                 restoreCollapsedOrb(to: anchor)
             }
         }
@@ -744,7 +744,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         if store.placement == .orb { finishOrbCanvas() }
         if let display = displays.first(where: { $0.screen.frame.contains(pointer) }) ??
             displays.first(where: { $0.screen.frame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) }) ?? chosen {
-            let frame = WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame)
+            // 悬浮球松手停在原处，只保证不出屏幕、不压菜单栏和程序坞；常驻浮窗仍离边 8 点。
+            let frame = WindowGeometry.clamp(floating.frame, to: display.screen.visibleFrame, inset: store.placement == .orb ? 0 : 8)
             let target = store.placement == .orb && !orbState.expanded
                 ? CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: frame.width.rounded(), height: 44) : frame
             moveFloatingFrameForDrag(target)

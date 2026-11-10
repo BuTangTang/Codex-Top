@@ -64,11 +64,12 @@ public enum WindowGeometry {
         let opened = expanded(from: closed, size: CGSize(width: width, height: scaledSize.height), visible: visible)
         return (closed, opened)
     }
-    public static func floating(size: CGSize, visible: CGRect, x: Double, y: Double) -> CGRect {
+    /// 悬浮球传 inset 0：拖到贴边就停在贴边，重启也回到原处（2026-11-09 用户：“改成能贴边”）。
+    public static func floating(size: CGSize, visible: CGRect, x: Double, y: Double, inset: CGFloat = 8) -> CGRect {
         let availableX = max(0, visible.width - size.width), availableY = max(0, visible.height - size.height)
         let safeX = x.isFinite ? min(1, max(0, x)) : 0.7
         let safeY = y.isFinite ? min(1, max(0, y)) : 0.7
-        return clamp(CGRect(x: visible.minX + availableX * safeX, y: visible.minY + availableY * safeY, width: size.width, height: size.height), to: visible)
+        return clamp(CGRect(x: visible.minX + availableX * safeX, y: visible.minY + availableY * safeY, width: size.width, height: size.height), to: visible, inset: inset)
     }
     /// The open surface grows from the same top edge, including above visibleFrame on a notched display.
     public static func expanded(from compact: CGRect, size: CGSize, visible: CGRect) -> CGRect {
