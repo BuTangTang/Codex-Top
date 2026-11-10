@@ -133,12 +133,11 @@ public struct ClaudeTranscriptReducer: Sendable {
         return items(content).first { $0["text"] is String }?["text"] as? String
     }
 
+    /// 复用系统的 ISO 8601 解析样式，避免每条记录创建格式器；缺失或无效时间保持为空。
     private static func date(_ value: Any?) -> Date? {
         guard let text = value as? String else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: text) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: text)
+        // 先接受含小数秒的记录，再兼容整秒；时区偏移仍由记录自身决定。
+        return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text))
+            ?? (try? Date.ISO8601FormatStyle().parse(text))
     }
 }

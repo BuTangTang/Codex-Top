@@ -155,12 +155,63 @@ final class ClaudeCodeSourceTests: XCTestCase {
         XCTAssertLessThan(snapshot.bytesRead, 400)
     }
 
+    /// 同一会话跨项目的不同文件不得共用游标或待答状态；未变化的下一轮不应再次读取正文。
+    func testDuplicateSessionFilesKeepIndependentIncrementalState() async throws {
+        let root = try temporary()
+        let otherProject = root.appendingPathComponent("projects/-work-other")
+        try FileManager.default.createDirectory(at: otherProject, withIntermediateDirectories: true)
+        let shortFile = root.appendingPathComponent("projects/-work-app/shared.jsonl")
+        let longFile = otherProject.appendingPathComponent("shared.jsonl")
+        let shortLines = [user("short"), toolUse("short-question", name: "AskUserQuestion")]
+        let longLines = [line("file-history-snapshot", ["padding": String(repeating: "x", count: 2048)]), endTurn()]
+        try write(shortLines, to: shortFile)
+        try write(longLines, to: longFile)
+        // 先遍历较短的待答文件，再遍历较长的已结束文件；后者不能沿用前者的待答调用编号。
+        try FileManager.default.setAttributes([.modificationDate: clock.addingTimeInterval(1)], ofItemAtPath: shortFile.path)
+        let expected = reduce(longLines).activity
+        let source = ClaudeCodeSource(root: root)
+        let first = await source.snapshot(now: clock)
+        XCTAssertEqual(first.tasks.map(\.id), ["cc:shared"], "一个会话只输出一个任务，避免下游重复键")
+        XCTAssertEqual(first.tasks.first?.activity, expected, "旧副本修改时间更晚，也不能盖过另一副本的较新事件")
+        XCTAssertEqual(first.tasks.first?.rolloutURL.deletingLastPathComponent().lastPathComponent, "-work-other")
+        let second = await source.snapshot(now: clock)
+        XCTAssertEqual(second.bytesRead, 0, "不同大小的同名会话文件不能让游标每轮来回失效")
+        XCTAssertEqual(second.tasks.map(\.id), ["cc:shared"])
+        XCTAssertEqual(second.tasks.first?.activity, expected, "缓存命中不能把另一项目的待答调用编号带进来")
+    }
+
     func testRunningGoesUnknownWhenStaleWithClaudeWording() async throws {
         let root = try temporary()
         try write([user("go")], to: root.appendingPathComponent("projects/-work-app/s1.jsonl"))
         let snapshot = await ClaudeCodeSource(root: root).snapshot(now: clock.addingTimeInterval(901))
         XCTAssertEqual(snapshot.tasks.first?.activity.phase, .unknown)
         XCTAssertEqual(snapshot.tasks.first?.activity.detail, "较久未收到新活动，请回到 Claude Code 查看")
+    }
+
+    /// 空行、CRLF 和尚未写完的行不丢事件；追加换行后才消费完整结束记录。
+    func testIncrementalLinesKeepUnfinishedTailUntilNewline() async throws {
+        let root = try temporary()
+        let file = root.appendingPathComponent("projects/-work-app/partial.jsonl")
+        try write([user("go")], to: file)
+        let source = ClaudeCodeSource(root: root)
+        let initial = await source.snapshot(now: clock)
+        XCTAssertEqual(initial.tasks.first?.activity.phase, .running)
+        let completed = endTurn()
+        let split = completed.count / 2
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n\r\n".utf8) + completed.prefix(split))
+        let partial = await source.snapshot(keep: ["cc:partial"], now: clock)
+        XCTAssertEqual(partial.tasks.first?.activity.phase, .running)
+        try handle.write(contentsOf: completed.suffix(from: split))
+        let noNewline = await source.snapshot(keep: ["cc:partial"], now: clock)
+        XCTAssertEqual(noNewline.tasks.first?.activity.phase, .running)
+        try handle.write(contentsOf: Data("\r\n\n".utf8))
+        let finished = await source.snapshot(keep: ["cc:partial"], now: clock)
+        XCTAssertEqual(finished.tasks.first?.activity.phase, .completed)
+        let unchanged = await source.snapshot(keep: ["cc:partial"], now: clock)
+        XCTAssertEqual(unchanged.bytesRead, 0)
     }
 
     func testUnnamedSessionAndOldSessionsSkippedUnlessKept() async throws {
