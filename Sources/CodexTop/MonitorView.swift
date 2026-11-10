@@ -47,10 +47,6 @@ struct MonitorView: View {
                 else { panelContent }
             }
         }
-        // D-91：面板打开就算看过“刚完成”，悬浮球上的绿色个数清零；面板里那一段还在。
-        .onChange(of: contentVisible && !store.unseenFinished.isEmpty, initial: true) { _, needsAcknowledge in
-            if needsAcknowledge { store.acknowledgeFinishedOnOrb() }
-        }
         .task(id: contentVisible) {
             // 展开立即生成内容；关闭保留短暂过渡，重新展开会取消释放任务。
             if contentVisible { retainsClosingContent = true }
@@ -175,7 +171,7 @@ struct MonitorView: View {
             if compact && store.demo { Text("演示").font(.system(size: 12)).foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             Spacer(minLength: 4)
             // D-90：原来的关注总数换成小点阵屏，和悬浮球一样显示 在跑｜等你｜失败。
-            LEDMiniSummary(groups: store.ledGroups(fresh: store.freshFinished.count), dark: store.theme.colorScheme == .dark)
+            LEDMiniSummary(groups: store.ledGroups(), dark: store.theme.colorScheme == .dark)
                 .help("\(store.runningCount) 个在跑 · \(store.statusSummary.waiting) 个等你回答 · \(store.statusSummary.failed) 个失败 · 共关注 \(store.selected.count) 个")
             HStack(spacing: 4) {
                 Button(action: pickTasks) {

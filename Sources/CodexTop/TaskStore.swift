@@ -31,9 +31,8 @@ import CodexTopCore
     @Published private(set) var loading = true
     @Published private(set) var completionSequence = 0
     /// D-91 刚完成、还没看过的任务：编号 → 完成时间。点开、标为已看或 10 分钟后收进“已结束”。
+    /// 悬浮球上的绿色个数就是这里还剩几个（2026-11-09 改：打开面板不再清零）。
     @Published private(set) var freshFinished: [String: Date] = [:]
-    /// 悬浮球上的绿色个数；打开面板就算看过并清零，面板里的“刚完成”一段不受影响。
-    @Published private(set) var unseenFinished: Set<String> = []
     static let freshWindow: TimeInterval = 600
     @Published private(set) var demoPhase: TaskPhase?
     @Published private(set) var systemTheme: PanelTheme = .light
@@ -149,15 +148,11 @@ import CodexTopCore
     var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished && freshFinished[$0.id] == nil } }
     func markFinishedSeen(_ id: String) {
         guard freshFinished[id] != nil else { return }
-        freshFinished[id] = nil; unseenFinished.remove(id); onChange?()
+        freshFinished[id] = nil; onChange?()
     }
     func markAllFinishedSeen() {
         guard !freshFinished.isEmpty else { return }
-        freshFinished = [:]; unseenFinished = []; onChange?()
-    }
-    /// 打开面板时调用：悬浮球上的绿色个数清零。
-    func acknowledgeFinishedOnOrb() {
-        if !unseenFinished.isEmpty { unseenFinished = [] }
+        freshFinished = [:]; onChange?()
     }
     /// 汇总只需已选根任务的阶段，不进行列表排序，也不生成子任务展示文案。
     var statusSummary: MonitorStatusSummary {
@@ -371,8 +366,6 @@ import CodexTopCore
                     graph.roots.first(where: { $0.id == id }).map { graph.activitySource(for: $0).activity.phase == .completed } == true
             }
             if fresh != freshFinished { freshFinished = fresh; needsLayout = true }
-            let unseen = unseenFinished.union(justCompleted).intersection(fresh.keys)
-            if unseen != unseenFinished { unseenFinished = unseen }
         }
         if needsLayout { onChange?() }
     }

@@ -174,10 +174,10 @@ private struct LEDOrbContent: View {
 
 extension TaskStore {
     /// 圆球和窗口宽度共用同一份分组，保证画出来的宽度和窗口一致（OK 和 Zz 一样宽）。
-    /// fresh 默认是悬浮球上“没看过”的个数；面板标题栏传“刚完成”一段的个数。
-    func ledGroups(sleeping: Bool = false, fresh: Int? = nil) -> [LEDOrbLayout.Group] {
+    /// 绿色个数是“刚完成”一段还剩几个，悬浮球和面板标题栏一致。
+    func ledGroups(sleeping: Bool = false) -> [LEDOrbLayout.Group] {
         LEDOrbLayout.groups(running: runningCount, waiting: statusSummary.waiting, failed: statusSummary.failed,
-                            fresh: fresh ?? unseenFinished.count,
+                            fresh: freshFinished.count,
                             allDone: statusSummary.phase == .completed && runningCount == 0, sleeping: sleeping,
                             unknown: paused || loading || statusSummary.phase == .unknown)
     }

@@ -71,6 +71,8 @@ final class ClaudeCodeSourceTests: XCTestCase {
         XCTAssertEqual(reducer.activity.phase, .completed, "上一轮的提问不带到下一轮")
         XCTAssertEqual(reduce([user("go"), wrapUp(["recap": "done"]), toolResult("w1"), endTurn()]).activity.phase, .completed)
         XCTAssertEqual(reduce([user("go"), wrapUp(["recap": "done", "ask": "  "]), toolResult("w2"), endTurn()]).activity.phase, .completed)
+        XCTAssertEqual(reduce([user("go"), wrapUp(["recap": "done", "ask": "提交吗？"]), toolResult("w2"), wrapUp(["recap": "done"]), toolResult("w1"), endTurn()]).activity.phase,
+                       .completed, "带提问的收尾被退回、改成不带提问再收尾，以最后一次为准")
     }
 
     func testInterruptErrorAndIgnoredLines() {

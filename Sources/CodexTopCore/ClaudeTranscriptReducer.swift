@@ -87,8 +87,9 @@ public struct ClaudeTranscriptReducer: Sendable {
             case "AskUserQuestion": waitingCalls.insert(id); question = "等待你的回答"
             case "ExitPlanMode": waitingCalls.insert(id); question = question ?? "等待你的确认"
             case "mcp__ccd_turn__wrap_up":
-                if let ask = (item["input"] as? [String: Any])?["ask"] as? String,
-                   !ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { endsWithQuestion = true }
+                // 以最后一次收尾为准：先带提问、被退回后再不带提问地收尾，就不算在等你（2026-11-09）。
+                let ask = (item["input"] as? [String: Any])?["ask"] as? String
+                endsWithQuestion = !(ask ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             case let name?: tool = name
             default: break
             }
