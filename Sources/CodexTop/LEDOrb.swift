@@ -270,6 +270,13 @@ final class LEDOrbView: NSView {
         let tail = lapRunning ? Self.longTail : Self.tail
         let count = Double(comet.count)
         guard count > Double(tail.count) else { return }
+        // 起点往前挪整圈，让每颗灯的开始时间都已经过去：还没轮到的灯如果开始时间在将来，
+        // 会先停在第一帧（全亮），小球收回、彗星重新起步时整圈会亮一下（2026-11-11 用户：“变为小窗后全亮有点丑”）。
+        // 动画一圈一循环，往前挪整圈不改变位置。
+        let period = count * Self.step
+        let now = cometNow
+        var base = cometOrigin
+        while base + period > now { base -= period }
         for (index, dot) in comet.enumerated() {
             dot.opacity = 0
             let animation = CAKeyframeAnimation(keyPath: "opacity")
@@ -278,7 +285,7 @@ final class LEDOrbView: NSView {
             animation.duration = count * Self.step
             animation.repeatCount = .infinity
             // 第 n 颗比第 0 颗晚 n 步亮，灯圈是顺时针排的，所以亮点顺时针跑。
-            animation.beginTime = cometOrigin + Double(index) * Self.step
+            animation.beginTime = base + Double(index) * Self.step
             animation.fillMode = .backwards
             dot.add(animation, forKey: Self.animationKey)
         }

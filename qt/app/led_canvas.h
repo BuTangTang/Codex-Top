@@ -1,6 +1,6 @@
 #pragma once
 
-#include "led_layout.h"
+#include "led/led_layout.h"
 
 #include <QQuickItem>
 
