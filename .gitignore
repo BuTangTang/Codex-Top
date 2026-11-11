@@ -11,3 +11,5 @@ xcuserdata/
 *.p12
 *.mobileprovision
 
+qt/build/
+qt/build-*/
