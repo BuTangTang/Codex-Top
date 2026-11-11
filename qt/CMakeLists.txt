@@ -10,6 +10,10 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Sql Test)
 qt_standard_project_setup(REQUIRES 6.5)
 enable_testing()
+# MSVC 以 UTF-8 解读源码和字符串，使用户可见文案与合成测试在两端相同。
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 # 数据层模块：目录名即模块名，目录里的 .cpp 全部编进去。
 function(codextop_core_module name)
@@ -31,13 +35,17 @@ file(GLOB zstd_sources CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/vendor/lib/common/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/vendor/lib/decompress/*.c)
 enable_language(C)
-add_library(codextop_zstd STATIC ${zstd_sources})
-target_include_directories(codextop_zstd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/vendor/lib)
+add_library(codextop_zstd STATIC ${zstd_sources} ../Sources/CZstd/CZstd.c)
+set_target_properties(codextop_zstd PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+target_include_directories(codextop_zstd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/vendor/lib ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/include)
 target_compile_definitions(codextop_zstd PRIVATE ZSTD_DISABLE_ASM)
 target_link_libraries(codextop_codex PUBLIC codextop_zstd)
+if(WIN32)
+    target_link_libraries(codextop_codex PRIVATE advapi32)
+endif()
 
 # 测试：tests/<模块>/test_*.cpp 每个文件一个 Qt Test 程序，链接同名模块。
-file(GLOB test_dirs LIST_DIRECTORIES true ${CMAKE_CURRENT_SOURCE_DIR}/tests/*)
+file(GLOB test_dirs CONFIGURE_DEPENDS LIST_DIRECTORIES true ${CMAKE_CURRENT_SOURCE_DIR}/tests/*)
 foreach(dir ${test_dirs})
     if(IS_DIRECTORY ${dir})
         get_filename_component(module ${dir} NAME)
@@ -47,6 +55,10 @@ foreach(dir ${test_dirs})
             add_executable(${module}_${test_name} ${test})
             target_link_libraries(${module}_${test_name} PRIVATE codextop_${module} Qt6::Test)
             add_test(NAME ${module}_${test_name} COMMAND ${module}_${test_name})
+            # 用例显式创建自己的临时目录；默认根也指向独立位置，避免误读真实记录。
+            set(test_root "${CMAKE_CURRENT_BINARY_DIR}/synthetic-roots/${module}_${test_name}")
+            set_tests_properties(${module}_${test_name} PROPERTIES ENVIRONMENT
+                "CODEX_HOME=${test_root}/codex;CLAUDE_CONFIG_DIR=${test_root}/claude")
         endforeach()
     endif()
 endforeach()
