@@ -26,7 +26,7 @@ endfunction()
 codextop_core_module(models)
 codextop_core_module(led)
 codextop_core_module(codex codextop_models Qt6::Sql)
-codextop_core_module(claude codextop_models)
+codextop_core_module(claude codextop_models codextop_codex)
 codextop_core_module(policy codextop_models)
 codextop_core_module(usage codextop_models)
 
@@ -43,6 +43,10 @@ target_link_libraries(codextop_codex PUBLIC codextop_zstd)
 if(WIN32)
     target_link_libraries(codextop_codex PRIVATE advapi32)
 endif()
+
+add_executable(codextop_claude_hook helper/claude_hook_main.cpp)
+set_target_properties(codextop_claude_hook PROPERTIES OUTPUT_NAME codex-top-claude-hook)
+target_link_libraries(codextop_claude_hook PRIVATE codextop_claude)
 
 # 测试：tests/<模块>/test_*.cpp 每个文件一个 Qt Test 程序，链接同名模块。
 file(GLOB test_dirs CONFIGURE_DEPENDS LIST_DIRECTORIES true ${CMAKE_CURRENT_SOURCE_DIR}/tests/*)
@@ -62,6 +66,10 @@ foreach(dir ${test_dirs})
         endforeach()
     endif()
 endforeach()
+
+if(TARGET claude_test_claude_hook)
+    add_dependencies(claude_test_claude_hook codextop_claude_hook)
+endif()
 
 qt_add_executable(CodexTopQt MACOSX_BUNDLE WIN32
     app/main.cpp
