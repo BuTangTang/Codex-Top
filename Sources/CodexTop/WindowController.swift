@@ -243,7 +243,9 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let body = store.selected.isEmpty ? 195 : freshHeader + visibleTasks.reduce(CGFloat.zero) { height, task in
             height + (fresh.contains(task.id) ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase))
         }
-        let height = header + body + PanelMetrics.footer + 2 * PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale)
+        let separator = PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale)
+        let usageCard = store.openUsageCard.map { UsageCard.height($0, store: store) + separator } ?? 0
+        let height = header + body + PanelMetrics.footer + 2 * separator + usageCard
         let messageScale = max(0.8, store.uiScale) / store.uiScale
         let total = height + (store.panelWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
         // 向上对齐物理像素，避免缩放后的窗口取整挤掉列表的最后一小段。

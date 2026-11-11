@@ -53,6 +53,8 @@ struct MonitorView: View {
             else {
                 do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
                 retainsClosingContent = false
+                // 面板收回圆环后用量卡片也收起，下次打开不再带着它（2026-11-10 用户要求）。
+                store.closeUsageCard()
             }
         }
         .foregroundStyle(Palette.primary(store.theme.colorScheme))
@@ -83,6 +85,7 @@ struct MonitorView: View {
                         let contentHeight = CGFloat(active.count + fresh.count) * PanelMetrics.expandedRow
                             + (fresh.isEmpty ? 0 : PanelMetrics.freshHeader)
                             + CGFloat(finished.count) * PanelMetrics.finishedRow
+                            + usageCardHeight
                         ScrollView {
                             // Each section has uniform rows and an exact total height. Keep
                             // offscreen controls lazy without estimating a mixed-height list.
@@ -101,6 +104,9 @@ struct MonitorView: View {
                                 if showFinished {
                                     taskSection(finished, rowHeight: PanelMetrics.finishedRow, separated: false)
                                 }
+                                // 点底栏 CX／CC，用量卡片接在列表最底下、紧挨底栏（2026-11-10 用户选 D1）。放在列表里面，
+                                // 和“已结束”展开一样随窗口长高露出来，不会先把列表挤矮再撑开（用户：“打开的时候界面会有点抖动”）。
+                                usageCardSection
                             }
                             // The panel owns disclosure/morph animation. Do not animate the
                             // insertion or removal of every offscreen history row as well.
@@ -220,6 +226,16 @@ struct MonitorView: View {
 
     /// 细线固定 1 个物理像素：0.5 点在 1 倍屏上会变成发虚的灰线。
     private var hairline: CGFloat { PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale) }
+    private var usageCardHeight: CGFloat {
+        guard let origin = store.openUsageCard else { return 0 }
+        return UsageCard.height(origin, store: store) + hairline
+    }
+    @ViewBuilder private var usageCardSection: some View {
+        if let origin = store.openUsageCard {
+            separator
+            UsageCard(store: store, origin: origin)
+        }
+    }
     private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline).padding(.horizontal, 16) }
 
     private var footer: some View {
@@ -249,7 +265,11 @@ struct MonitorView: View {
                         .accessibilityLabel("任务刷新已暂停").help("任务刷新已暂停，额度仍独立更新")
                 }
                 UsageSummaryButton(store: store)
-            }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.horizontal, 16).frame(height: PanelMetrics.footer)
+                if store.showsClaudeUsage {
+                    Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(width: hairline, height: 14)
+                    ClaudeUsageButton(store: store)
+                }
+            }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.leading, 16).padding(.trailing, 18).frame(height: PanelMetrics.footer)
         }
     }
 }

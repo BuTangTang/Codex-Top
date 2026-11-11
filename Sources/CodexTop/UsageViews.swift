@@ -44,7 +44,8 @@ struct UsageSummaryButton: View {
     @Environment(\.compactMonitorTypography) private var compactTypography
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            Button { store.openUsagePage() } label: {
+            // 2026-11-10：点 CX 展开 Codex 用量卡片；官方用量网页放在卡片右上角和右键菜单里。
+            Button { store.toggleUsageCard(.codex) } label: {
                 ViewThatFits(in: .horizontal) {
                     summary(at: context.date, abbreviated: false)
                     summary(at: context.date, abbreviated: true)
@@ -52,12 +53,14 @@ struct UsageSummaryButton: View {
                 .font(PanelFonts.readable(14, scale: store.uiScale, weight: .medium, compact: compactTypography))
                 .foregroundStyle(Palette.primary(store.theme.colorScheme))
                 .lineLimit(1)
+                .padding(.horizontal, 6).frame(height: 26)
+                .background(store.openUsageCard == .codex ? Color(store.theme.colorScheme == .dark ? .white : .black).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
                 .frame(maxWidth: .infinity, alignment: .trailing).frame(height: 30)
                 .contentShape(Rectangle())
             }
             .buttonStyle(QuietButtonStyle())
             .help(tooltip(at: context.date))
-            .accessibilityLabel("Codex 额度，打开官方用量网页")
+            .accessibilityLabel("Codex 额度和用量，点一下展开用量卡片")
             .accessibilityValue(store.quota.map { UsageText.details($0, at: context.date) } ?? "额度暂无数据")
             .contextMenu {
                 Button("打开 Codex 用量网页") { store.openUsagePage() }
@@ -68,7 +71,9 @@ struct UsageSummaryButton: View {
     private func summary(at date: Date, abbreviated: Bool) -> some View {
         HStack(spacing: 6) {
             // 有 Claude Code 任务时写明这是 Codex 的额度（R-22）。
-            if store.hasClaudeTasks { Text("Codex").foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
+            // 旁边有 CC 用量时用 CX 小标，和任务行的来源标记一致（2026-11-10）。
+            if store.showsClaudeUsage { SourceMark(origin: .codex, scale: store.uiScale) }
+            else if store.hasClaudeTasks { Text("Codex").foregroundStyle(Palette.secondary(store.theme.colorScheme)) }
             if let quota = store.quota {
                 if abbreviated { Text(UsageText.summary(quota, at: date, abbreviated: true)).monospacedDigit() }
                 else { bars(quota, at: date) }
@@ -106,7 +111,7 @@ struct UsageSummaryButton: View {
     private func tooltip(at date: Date) -> String {
         let value = store.quota.map { UsageText.details($0, at: date) }
             ?? (store.demo ? "演示模式不读取真实账户额度。" : "等待账户额度，或打开官方用量页面查看。")
-        return value + (store.quotaWarning.map { "\n" + $0 } ?? "") + "\n点击打开 Codex 官方用量网页"
+        return value + (store.quotaWarning.map { "\n" + $0 } ?? "") + "\n点击查看 Codex 用量"
     }
 }
 

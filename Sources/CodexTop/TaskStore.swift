@@ -53,6 +53,14 @@ import CodexTopCore
     var onExternalNavigation: (() -> Void)?
     private var source: LocalCodexSource
     private var claudeSource: ClaudeCodeSource
+    private var usageCounter: (root: URL, counter: ClaudeUsageCounter)?
+    /// 本机 Claude Code 近 7 天的 token 用量；没开 Claude Code 监控时为 nil。
+    @Published private(set) var claudeUsage: ClaudeUsageSummary?
+    /// 本机 Codex 近 7 天的 token 用量（演示模式为 nil）。
+    @Published private(set) var codexUsage: CodexUsageSummary?
+    /// 底栏上方展开的是哪一张用量卡片；同时只开一张。
+    @Published private(set) var usageCardOpen: TaskOrigin?
+    private let codexUsageCounter = CodexUsageCounter()
     /// 独立状态目录（测试、合成验收）里不读本机真实的 ~/.claude，默认目录改到状态目录下。
     private let defaultClaudeRoot: URL
     /// 压缩记录读取结果缓存，跟设置文件放在同一状态目录。
@@ -357,6 +365,14 @@ import CodexTopCore
                 needsLayout = true
             }
             if historicalQuota != snapshot.quota { historicalQuota = snapshot.quota }
+            if !demo {
+                // 底栏 Codex 用量：近 8 天有更新的任务记录，只读新增部分（2026-11-10）。
+                let since = snapshot.observedAt.addingTimeInterval(-8 * 86_400)
+                let urls = tasks.filter { $0.origin == .codex && $0.updatedAt >= since }.map(\.rolloutURL)
+                let usage = await codexUsageCounter.summary(files: urls, now: snapshot.observedAt)
+                guard !stopping, generation == sourceGeneration else { return }
+                if codexUsage != usage { codexUsage = usage }
+            }
             updateQuota()
             if sourceWarning != snapshot.warning {
                 let previousPanelWarning = panelWarning
@@ -395,8 +411,37 @@ import CodexTopCore
         if demo { return DemoTasks.claudeTasks(phase: demoPhase) }
         let installed = await claudeSource.installed
         if claudeInstalled != installed { claudeInstalled = installed }
-        guard installed, preferences.resolvedClaudeEnabled else { return [] }
-        return await claudeSource.snapshot(keep: preferences.selectedIDs).tasks
+        guard installed, preferences.resolvedClaudeEnabled else {
+            if claudeUsage != nil { claudeUsage = nil }
+            return []
+        }
+        let tasks = await claudeSource.snapshot(keep: preferences.selectedIDs).tasks
+        // 底栏的 Claude 用量：同一份数据目录里近 7 天的 token 数，只读新增部分。
+        let root = claudeRootURL
+        if usageCounter?.root != root { usageCounter = (root, ClaudeUsageCounter(root: root)) }
+        if let counter = usageCounter?.counter {
+            let usage = await counter.summary()
+            if claudeUsage != usage { claudeUsage = usage }
+        }
+        return tasks
+    }
+    /// 底栏右边有 Claude 任务时显示 CC 今天的用量；点开在面板里展开用量卡片。
+    var showsClaudeUsage: Bool { !demo && claudeUsage != nil && hasClaudeTasks }
+    /// 当前展开、而且还该显示的那张卡片。
+    var openUsageCard: TaskOrigin? {
+        switch usageCardOpen {
+        case .claudeCode?: showsClaudeUsage ? .claudeCode : nil
+        case .codex?: codexUsage == nil ? nil : .codex
+        case nil: nil
+        }
+    }
+    func toggleUsageCard(_ origin: TaskOrigin) {
+        usageCardOpen = usageCardOpen == origin ? nil : origin
+        onChange?()
+    }
+    /// 面板已经收起时调用：只改标记，不触发重新排版，下次打开按收起的高度算。
+    func closeUsageCard() {
+        if usageCardOpen != nil { usageCardOpen = nil }
     }
     /// 第一次出现 Claude Code 会话时，把已有会话记为基线，避免历史会话一次性涌进关注列表；
     /// 当时正在运行或等待的会话照首次启动的规则加入关注（设计第 6 节）。
