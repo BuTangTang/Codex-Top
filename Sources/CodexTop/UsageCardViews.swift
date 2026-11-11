@@ -23,6 +23,7 @@ enum UsageCardText {
 /// 底栏右边 CC 一项：小标 + “今天 1.24M”，点一下展开或收起 Claude 用量卡片。
 struct ClaudeUsageButton: View {
     @ObservedObject var store: TaskStore
+    var pill: Namespace.ID
     var body: some View {
         let dark = store.theme.colorScheme == .dark, open = store.openUsageCard == .claudeCode
         Button { store.toggleUsageCard(.claudeCode) } label: {
@@ -34,12 +35,25 @@ struct ClaudeUsageButton: View {
             }
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 6).frame(height: 26)
-            .background(open ? Color(dark ? .white : .black).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background { UsagePill(open: open, dark: dark, namespace: pill) }
             .fixedSize().contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle())
         .help(open ? "收起 Claude 用量" : "查看 Claude 用量（按本机记录统计，走网关没有额度上限）")
         .accessibilityLabel("Claude 今天用了 \(UsageCardText.tokens(store.claudeUsage?.today.total ?? 0)) token")
+    }
+}
+
+/// 底栏 CX／CC 选中时的底色，圆角和按下时一样；切换时在两个按钮之间滑过去。
+struct UsagePill: View {
+    let open: Bool
+    let dark: Bool
+    let namespace: Namespace.ID
+    var body: some View {
+        if open {
+            RoundedRectangle(cornerRadius: 8).fill(Color(dark ? .white : .black).opacity(0.08))
+                .matchedGeometryEffect(id: "usage-pill", in: namespace)
+        }
     }
 }
 
@@ -58,10 +72,41 @@ struct UsageCard: View {
         baseHeight + CGFloat(quotaRows(store)) * quotaRow + 9
     }
 
-    private struct Segment { let label: String; let value: Int; let level: Double }
-
     var body: some View {
         let dark = store.theme.colorScheme == .dark
+        ZStack(alignment: .top) {
+            UsageCardContent(store: store, origin: origin)
+                .id(origin)
+                // CX 在左、CC 在右：切到 CC 新内容从右边滑进来、旧的往左出去，切回来反过来（2026-11-11 用户要切换动画）。
+                .transition(.offset(x: origin == .codex ? -36 : 36).combined(with: .opacity))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(height: Self.height(origin, store: store) - 24, alignment: .top)
+        .background(Color(dark ? .white : .black).opacity(dark ? 0.05 : 0.04), in: RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(12)
+        .frame(height: Self.height(origin, store: store))
+    }
+}
+
+/// 卡片里的内容，每个来源一份：每次出现（拉出卡片、CX／CC 切过来）都淡入、轻轻上浮，柱子从下往上一根根亮起
+/// （2026-11-11 用户：往下展开的动画完善一下；切换时也要柱子亮起）。
+private struct UsageCardContent: View {
+    @ObservedObject var store: TaskStore
+    let origin: TaskOrigin
+    private struct Segment { let label: String; let value: Int; let level: Double }
+    @State private var revealed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        content(dark: store.theme.colorScheme == .dark)
+            .opacity(revealed ? 1 : 0).offset(y: revealed ? 0 : 6)
+            .onAppear {
+                if reduceMotion { revealed = true } else { withAnimation(.easeOut(duration: 0.3).delay(0.05)) { revealed = true } }
+            }
+    }
+
+    @ViewBuilder private func content(dark: Bool) -> some View {
         let tint = UsageCardText.tint(origin, dark: dark)
         // 看得清（2026-11-10 用户：“有点看不清”）：说明字用主色的七成，空格子加深，字号整体大一号。
         let secondary = Palette.primary(store.theme.colorScheme).opacity(0.72)
@@ -92,10 +137,10 @@ struct UsageCard: View {
                 } else {
                     VStack(spacing: 0) {
                         noteRow("额度", origin == .codex ? "暂无额度数据" : "走网关，没有额度上限", secondary: secondary)
-                        if Self.quotaRows(store) > 1 { noteRow("统计", "按本机 Claude Code 记录", secondary: secondary) }
+                        if UsageCard.quotaRows(store) > 1 { noteRow("统计", "按本机 Claude Code 记录", secondary: secondary) }
                     }
                 }
-            }.frame(height: CGFloat(Self.quotaRows(store)) * Self.quotaRow, alignment: .top)
+            }.frame(height: CGFloat(UsageCard.quotaRows(store)) * UsageCard.quotaRow, alignment: .top)
             Rectangle().fill(off).frame(height: 1).padding(.top, 4).padding(.bottom, 4)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(UsageCardText.tokens(model.today)).font(.system(size: 26, weight: .heavy, design: .monospaced))
@@ -127,11 +172,6 @@ struct UsageCard: View {
             week(model.days, starts: model.starts, tint: tint, off: off, secondary: secondary).frame(height: 70)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .frame(height: Self.height(origin, store: store) - 24, alignment: .top)
-        .background(Color(dark ? .white : .black).opacity(dark ? 0.05 : 0.04), in: RoundedRectangle(cornerRadius: 14))
-        .padding(12)
-        .frame(height: Self.height(origin, store: store))
     }
 
     /// starts 是每根柱子那天的起点（两边都按本地中午 12 点切天）；空的就按本地零点倒推。
@@ -166,7 +206,7 @@ struct UsageCard: View {
                 .foregroundStyle(expired ? secondary : color).frame(width: 46, alignment: .trailing)
             Spacer(minLength: 4)
             Text(reset(window, at: date)).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(1)
-        }.font(.system(size: 12.5)).frame(height: Self.quotaRow)
+        }.font(.system(size: 12.5)).frame(height: UsageCard.quotaRow)
     }
 
     private func noteRow(_ label: String, _ text: String, secondary: Color) -> some View {
@@ -174,7 +214,7 @@ struct UsageCard: View {
             Text(label).frame(width: 32, alignment: .leading)
             Text(text)
             Spacer(minLength: 0)
-        }.font(.system(size: 12.5)).foregroundStyle(secondary).frame(height: Self.quotaRow)
+        }.font(.system(size: 12.5)).foregroundStyle(secondary).frame(height: UsageCard.quotaRow)
     }
 
     private func reset(_ window: QuotaWindow, at date: Date) -> String {
@@ -218,7 +258,8 @@ struct UsageCard: View {
                         .font(.system(size: 10.5, weight: .semibold, design: .monospaced)).foregroundStyle(isToday ? tint : secondary)
                     VStack(spacing: 1) {
                         ForEach((0..<8).reversed(), id: \.self) { row in
-                            Rectangle().fill(row < lit ? (isToday ? tint : tint.opacity(0.8)) : off).frame(width: 12, height: 3)
+                            Rectangle().fill(revealed && row < lit ? (isToday ? tint : tint.opacity(0.8)) : off).frame(width: 12, height: 3)
+                                .animation(reduceMotion ? nil : .easeOut(duration: 0.16).delay(0.12 + Double(index) * 0.03 + Double(row) * 0.025), value: revealed)
                         }
                     }
                     Text(isToday ? "今天" : weekday(starts.count == days.count ? starts[index]

@@ -41,6 +41,7 @@ enum UsageText {
 
 struct UsageSummaryButton: View {
     @ObservedObject var store: TaskStore
+    var pill: Namespace.ID
     @Environment(\.compactMonitorTypography) private var compactTypography
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -54,8 +55,7 @@ struct UsageSummaryButton: View {
                 .foregroundStyle(Palette.primary(store.theme.colorScheme))
                 .lineLimit(1)
                 .padding(.horizontal, 6).frame(height: 26)
-                .background(store.openUsageCard == .codex ? Color(store.theme.colorScheme == .dark ? .white : .black).opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                .frame(maxWidth: .infinity, alignment: .trailing).frame(height: 30)
+                .background { UsagePill(open: store.openUsageCard == .codex, dark: store.theme.colorScheme == .dark, namespace: pill) }
                 .contentShape(Rectangle())
             }
             .buttonStyle(QuietButtonStyle())
@@ -66,6 +66,8 @@ struct UsageSummaryButton: View {
                 Button("打开 Codex 用量网页") { store.openUsagePage() }
                 Button("刷新额度") { store.refreshQuota(force: true) }.disabled(store.demo || store.quotaRefreshing)
             }
+            // 按钮本身只有内容那么大：按下、悬停和选中的底色一样，只框住“CX 周剩余 0%”（2026-11-11 用户）；空出来的宽度放在按钮外面。
+            .frame(maxWidth: .infinity, alignment: .trailing).frame(height: 30)
         }
     }
     private func summary(at date: Date, abbreviated: Bool) -> some View {

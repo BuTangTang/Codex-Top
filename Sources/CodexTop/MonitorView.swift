@@ -37,11 +37,21 @@ struct MonitorView: View {
     /// 悬浮球面板：列表固定按算好的高度，取整多出来的一点留在最底下。不这样的话，开关用量卡片时面板总高取整不同，
     /// 多出来的零头被列表吃掉，底栏和标题会跟着挪一两个像素（2026-11-11 用户录屏逐帧量出来：标题 +1、底栏 +2）。
     var fixedListHeight = false
+    /// 悬浮球面板：列表高度和是否排出“已结束”几行由窗口控制器给。展开、收起“已结束”时列表高度跟外框同一个弹簧变，
+    /// 底栏贴着下边一起滑；收起时那几行留到外框收完再拿掉（2026-11-11 用户：展开已结束的时候同理）。
+    var listHeightOverride: CGFloat? = nil
+    var finishedRowsOverride: Bool? = nil
+    /// “已结束”刚展开的时刻（之后不久出现的行依次淡入上浮）和正在收起（各行淡出下沉）。
+    var finishedShownAt: Date? = nil
+    var finishedLeaving = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
     @StateObject private var menuPresenter = MonitorMenuPresenter()
     @State private var retainsClosingContent = false
+    /// 底栏 CX／CC 选中底色在两个按钮之间滑动用。
+    @Namespace private var usagePill
+    private static let listTop = "monitor-list-top"
     private var compactTypography: Bool { compact || windowCompactTypography }
 
     /// 收起动画结束后卸载列表内容，避免隐藏列表继续排序和生成行视图。
@@ -86,14 +96,17 @@ struct MonitorView: View {
                     GeometryReader { viewport in
                         let active = store.active
                         let fresh = store.freshTasks
-                        let finished = showFinished ? store.finished : []
+                        let listsFinished = finishedRowsOverride ?? showFinished
+                        let finished = listsFinished ? store.finished : []
                         let contentHeight = CGFloat(active.count + fresh.count) * PanelMetrics.expandedRow
                             + (fresh.isEmpty ? 0 : PanelMetrics.freshHeader)
                             + CGFloat(finished.count) * PanelMetrics.finishedRow
+                        ScrollViewReader { proxy in
                         ScrollView {
                             // Each section has uniform rows and an exact total height. Keep
                             // offscreen controls lazy without estimating a mixed-height list.
                             VStack(spacing: 0) {
+                                Color.clear.frame(height: 0).id(Self.listTop)
                                 if fresh.isEmpty {
                                     taskSection(active, rowHeight: PanelMetrics.expandedRow, separated: true)
                                 } else {
@@ -105,8 +118,9 @@ struct MonitorView: View {
                                     taskSection(active.filter { task in !attention.contains { $0.id == task.id } },
                                                 rowHeight: PanelMetrics.expandedRow, separated: true)
                                 }
-                                if showFinished {
-                                    taskSection(finished, rowHeight: PanelMetrics.finishedRow, separated: false)
+                                if listsFinished {
+                                    taskSection(finished, rowHeight: PanelMetrics.finishedRow, separated: false,
+                                                cascade: reduceMotion ? nil : RowCascade(since: finishedShownAt, leaving: finishedLeaving))
                                 }
                             }
                             // The panel owns disclosure/morph animation. Do not animate the
@@ -117,8 +131,25 @@ struct MonitorView: View {
                         // 内容放得下时直接禁滚；允许一个物理像素的布局取整误差，实际超出仍能滚动。
                         .scrollDisabled(contentHeight <= viewport.size.height + hairline)
                         .scrollIndicators(.never).scrollBounceBehavior(.basedOnSize).frame(maxHeight: .infinity)
+                        // 展开“已结束”（2026-11-11 用户选“列表自动往下滚”）：上面的任务已经占满可见行数时，平滑往下滚到露出前 3 条已结束的，
+                        // 它们滚进来时依次淡入。面板高度仍按“可见任务数”。
+                        .onChange(of: finishedShownAt) { _, shownAt in
+                            guard shownAt != nil, !reduceMotion else { return }
+                            let above = CGFloat(active.count + fresh.count) * PanelMetrics.expandedRow + (fresh.isEmpty ? 0 : PanelMetrics.freshHeader)
+                            let count = min(3, store.finished.count)
+                            guard count > 0, above + CGFloat(count) * PanelMetrics.finishedRow > viewport.size.height + hairline else { return }
+                            let target = store.finished[count - 1].id
+                            DispatchQueue.main.async { withAnimation(.easeInOut(duration: 0.38)) { proxy.scrollTo(target, anchor: .bottom) } }
+                        }
+                        // 收起：一边淡出一边平滑滚回顶部，滚完再拿掉那几行，不会一下跳回去。
+                        .onChange(of: finishedLeaving) { _, leaving in
+                            guard leaving else { return }
+                            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) { proxy.scrollTo(Self.listTop, anchor: .top) }
+                        }
+                        }
                     }
-                    .frame(maxHeight: fixedListHeight ? store.listHeight(includesFinished: showFinished) : .infinity)
+                    .frame(maxHeight: fixedListHeight ? listHeightOverride ?? store.listHeight(includesFinished: showFinished) : .infinity)
+                    .clipped()
                 }
                 if let warning = store.panelWarning {
                     Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
@@ -165,11 +196,12 @@ struct MonitorView: View {
         .padding(.horizontal, 16).frame(height: PanelMetrics.freshHeader)
     }
 
-    private func taskSection(_ tasks: [CodexTask], rowHeight: CGFloat, separated: Bool, fresh: Bool = false) -> some View {
+    private func taskSection(_ tasks: [CodexTask], rowHeight: CGFloat, separated: Bool, fresh: Bool = false, cascade: RowCascade? = nil) -> some View {
         LazyVStack(spacing: 0) {
-            ForEach(tasks.map(\.id), id: \.self) { taskID in
+            ForEach(Array(tasks.map(\.id).enumerated()), id: \.element) { index, taskID in
                 MonitorTaskRow(store: store, taskID: taskID, compact: compact, animationsActive: animationsActive, fresh: fresh)
                     .frame(height: rowHeight)
+                    .modifier(CascadeRow(index: index, cascade: cascade))
                     .overlay(alignment: .bottom) {
                         // D-90：进行中的每行之间一道 1 像素细线（两块屏上都是整像素）。
                         if separated && taskID != tasks.last?.id {
@@ -269,12 +301,14 @@ struct MonitorView: View {
                     Image(systemName: "pause.circle").font(.system(size: 13))
                         .accessibilityLabel("任务刷新已暂停").help("任务刷新已暂停，额度仍独立更新")
                 }
-                UsageSummaryButton(store: store)
+                UsageSummaryButton(store: store, pill: usagePill)
                 if store.showsClaudeUsage {
                     Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(width: hairline, height: 14)
-                    ClaudeUsageButton(store: store)
+                    ClaudeUsageButton(store: store, pill: usagePill)
                 }
             }.foregroundStyle(Palette.secondary(store.theme.colorScheme)).padding(.leading, 16).padding(.trailing, 18).frame(height: PanelMetrics.footer)
+            // CX、CC 互相切换时选中底色滑过去（2026-11-11 用户要切换动画）。
+            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: store.openUsageCard)
         }
     }
 }
@@ -424,6 +458,37 @@ private struct MonitorTaskRow: View {
 }
 
 /// Resolve actual button bounds after scaling/layout so every other header point is draggable.
+/// “已结束”几行的进出场：展开后不久出现的行从上到下依次淡入、从下面浮上来；收起时一起淡出、往下沉。
+/// 之后滚动才出现的行不做动画。外层列表关掉了动画，这里自己按 visible 挂动画。
+struct RowCascade {
+    var since: Date?
+    var leaving: Bool
+}
+
+private struct CascadeRow: ViewModifier {
+    let index: Int
+    let cascade: RowCascade?
+    @State private var shown = false
+    @State private var animatesIn = false
+    func body(content: Content) -> some View {
+        if let cascade {
+            let visible = shown && !cascade.leaving
+            content
+                .opacity(visible ? 1 : 0)
+                .offset(y: visible ? 0 : cascade.leaving ? 6 : 10)
+                .animation(cascade.leaving ? .easeIn(duration: 0.24)
+                           : animatesIn ? .easeOut(duration: 0.26).delay(0.04 + Double(min(index, 10)) * 0.04) : nil,
+                           value: visible)
+                .onAppear {
+                    animatesIn = cascade.since.map { Date.now.timeIntervalSince($0) < 0.5 } ?? false
+                    shown = true
+                }
+        } else {
+            content
+        }
+    }
+}
+
 private struct HeaderButtonBounds: PreferenceKey {
     static var defaultValue: [Anchor<CGRect>] { [] }
     static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {

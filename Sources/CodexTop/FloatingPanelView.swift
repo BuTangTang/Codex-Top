@@ -10,6 +10,12 @@ import CodexTopCore
     @Published var expandedSize = CGSize(width: 410, height: 340)
     /// 面板里实际显示的用量卡片，和 expandedSize 一起改：卡片先插进来、面板还是旧高度时，列表会被挤没一下。
     @Published var usageCard: TaskOrigin?
+    /// 面板里列表这一段的高度、是否排出“已结束”几行；由窗口控制器跟外框一起改，见 MonitorView.listHeightOverride。
+    /// 还没排过（nil）时跟着“已结束”的开关走。
+    @Published var listHeight: CGFloat?
+    @Published var finishedRows: Bool?
+    @Published var finishedShownAt: Date?
+    @Published var finishedLeaving = false
     /// 收起后的面板比 44 宽时，靠近屏幕右边缘就向左长。
     @Published var capsuleGrowsLeft = false
 }
@@ -71,7 +77,9 @@ private struct OrbPanelView: View {
             GlassFill()
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, contentVisible: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
-                        draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded, usageCardOverride: .some(state.usageCard), fixedListHeight: true)
+                        draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded, usageCardOverride: .some(state.usageCard), fixedListHeight: true,
+                        listHeightOverride: state.listHeight, finishedRowsOverride: state.finishedRows,
+                        finishedShownAt: state.finishedShownAt, finishedLeaving: state.finishedLeaving)
                 .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
                 // Keep text at its final scale while the enclosing surface reveals it.
                 // A second center-based zoom makes the fixed header drift at opening.

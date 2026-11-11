@@ -4,7 +4,7 @@
 
 Keep an eye on your Codex and Claude Code tasks from the desktop: what is running, what is waiting for you, and what just finished — without switching windows.
 
-A native macOS app (SwiftUI + AppKit). The current source and local install are **v1.0.0 build 154**. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are versioned separately. A cross-platform Qt version is in development; see [below](#cross-platform-qt-version-in-development).
+A native macOS app (SwiftUI + AppKit). The current source and local install are **v1.0.0 build 158**. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are versioned separately. A cross-platform Qt version is in development; see [below](#cross-platform-qt-version-in-development).
 
 ## Install
 

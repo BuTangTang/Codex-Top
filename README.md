@@ -4,7 +4,7 @@
 
 在桌面上盯住 Codex 和 Claude Code 的任务：哪些在跑、哪些在等你、哪些刚做完，不用来回切窗口。
 
-原生 macOS 应用（SwiftUI + AppKit），当前源码与本机安装为 **v1.0.0 build 154**。[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)单独记录版本。跨平台的 Qt 版正在开发中，见[后面](#跨平台qt-版开发中)。
+原生 macOS 应用（SwiftUI + AppKit），当前源码与本机安装为 **v1.0.0 build 158**。[已发布安装包](https://github.com/BuTangTang/Codex-Top/releases)单独记录版本。跨平台的 Qt 版正在开发中，见[后面](#跨平台qt-版开发中)。
 
 ## 安装
 

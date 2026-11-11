@@ -101,6 +101,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var orbLayoutPending = false
     /// 展开时窗口画布额外包进去的面板位置（用量卡片换个开关状态时的面板），见 updateOrbLayout。
     private var orbSlack: CGRect?
+    private var finishedRowsRemoval = 0
     private var orbMotionGeneration = 0
     private var orbTarget = CGRect.zero
     private var orbClickMonitors: [Any] = []
@@ -396,13 +397,46 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         let expanded = desired
         if willExpand { orbExpandedFrame = expanded; orbExpansionDirection = direction }
         if willExpand || (!orbState.expanded && orbMotion == nil) {
+            let card = store.openUsageCard
+            // 收卡片：内容先不缩，卡片留在原处让外框往上收的时候盖住它，收完再拿掉（finishOrbLayout），像把抽屉推回去。
+            let closingCard = requestedExpanded == nil && orbState.expanded && direction == .down && orbState.usageCard != nil
+                && card == nil && expanded.height < orbState.expandedSize.height
+            // CX、CC 卡片一样高，互相切换时内容左右滑着换。
+            let switchingCard = orbState.usageCard != nil && card != nil && orbState.usageCard != card
             // Lay out the list once at its destination size. The outer surface owns
             // the morph; update the hidden endpoint before its first reveal too.
+            // “已结束”：展开时几行马上排进去（淡入），收起时留到外框收完；列表高度在面板开着时跟外框同一个弹簧变，底栏贴着下边滑。
+            let showsFinished = monitorState.expandedFinished
+            let list = store.listHeight(includesFinished: showsFinished)
+            let resizingOpen = requestedExpanded == nil && orbState.expanded
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             var transaction = Transaction(); transaction.disablesAnimations = true
             withTransaction(transaction) {
-                if orbState.expandedSize != expanded.size { orbState.expandedSize = expanded.size }
+                if !closingCard {
+                    if orbState.expandedSize != expanded.size { orbState.expandedSize = expanded.size }
+                    if !switchingCard && orbState.usageCard != card { orbState.usageCard = card }
+                }
                 if orbState.expansionDirection != direction { orbState.expansionDirection = direction }
-                if orbState.usageCard != store.openUsageCard { orbState.usageCard = store.openUsageCard }
+                if !resizingOpen || orbState.listHeight == nil {
+                    if orbState.listHeight != list { orbState.listHeight = list }
+                    if orbState.finishedRows != showsFinished { orbState.finishedRows = showsFinished }
+                    if orbState.finishedLeaving { orbState.finishedLeaving = false }
+                } else if showsFinished {
+                    // 展开：几行马上排进去，各行自己依次淡入上浮；收起途中又展开就淡回来。
+                    if orbState.finishedRows != true { orbState.finishedRows = true; orbState.finishedShownAt = .now }
+                    if orbState.finishedLeaving { orbState.finishedLeaving = false }
+                } else if orbState.finishedRows == true && !orbState.finishedLeaving {
+                    // 收起：各行淡出下沉、列表滚回顶部，0.32 秒后再拿掉；底栏同时跟着外框往上滑。
+                    orbState.finishedLeaving = true
+                    scheduleFinishedRowsRemoval()
+                }
+            }
+            if resizingOpen && orbState.listHeight != list {
+                // 和 animateOrb 里外框的弹簧一样，同一帧开始，底栏和下边对得上。
+                withAnimation(animated && !reduceMotion ? .spring(response: 0.32, dampingFraction: 1, blendDuration: 0) : nil) { orbState.listHeight = list }
+            }
+            if switchingCard {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.26)) { orbState.usageCard = card }
             }
         }
         let collapsed = WindowGeometry.collapsedOrbFrame(anchor: orbAnchor, extension: orbCapsuleExtension, visible: display.screen.visibleFrame)
@@ -411,6 +445,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             withTransaction(transaction) { orbState.capsuleGrowsLeft = collapsed.growsLeft }
         }
         animateOrb(to: willExpand ? expanded : collapsed.frame, expanded: willExpand, animated: animated)
+        // 没有动画要跑（比如面板已经顶到屏幕边、高度不变）就直接收掉卡片。
+        settleClosedCard()
     }
     /// D-89：经典圆环收起时是 LED 面板，宽度按点阵排版算（最窄 45）；双弧外观保持 44pt 圆球。
     private var orbCapsuleExtension: CGFloat {
@@ -513,8 +549,26 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         orbCanvas = rest == orbTarget ? nil : rest
         if !orbState.expanded { orbExpandedFrame = nil; orbExpansionDirection = nil }
     }
+    /// 外框已经收完（或者根本不用动）：这时再拿掉收起的卡片，内容换成新高度；它已经在外框外面，看不出变化。
+    private func settleClosedCard() {
+        guard orbMotion == nil, orbState.expanded else { return }
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if orbState.usageCard != nil && store.openUsageCard == nil { orbState.usageCard = nil; orbState.expandedSize = orbTarget.size }
+        }
+    }
+    private func scheduleFinishedRowsRemoval() {
+        finishedRowsRemoval &+= 1
+        let generation = finishedRowsRemoval
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
+            guard let self, self.finishedRowsRemoval == generation, self.orbState.finishedLeaving, !self.monitorState.expandedFinished else { return }
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { self.orbState.finishedRows = false; self.orbState.finishedLeaving = false }
+        }
+    }
     private func finishOrbLayout() {
         if !orbState.expanded { orbExpandedFrame = nil; orbExpansionDirection = nil }
+        settleClosedCard()
         guard orbLayoutPending else { return }
         orbLayoutPending = false
         updateOrbLayout(animated: true)
