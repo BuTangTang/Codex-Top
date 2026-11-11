@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 // Swift 的 IncrementalRolloutTests、RecoveryTests、LongWaitReplyTests 中依赖 LocalCodexSource 的五个用例。
 #include "rollout_test_support.h"
 #include "codex/local_codex_source.h"
@@ -52,7 +53,7 @@ private slots:
         const auto path = dir.filePath("rollout.jsonl");
         overwrite(path,initialQuestion());
         makeDatabase(dir,{"fixture"});
-        LocalCodexSource source(dir.path());
+        IsolatedCodexSource source(dir.path());
         QCOMPARE(source.snapshot(instant()).tasks.value(0).activity.phase,TaskPhase::Waiting);
         const int budget = 4*1024*1024;
         const auto burst = QByteArray(budget+1024,'x') + '\n' + lines({call("exec","other",0)});
@@ -79,7 +80,7 @@ private slots:
             overwrite(dir.filePath(ids[i]+".jsonl"),contents({startTurn(ids[i],i)},
                        {response("function_call",30,{{"name","work"}})},70000));
         makeDatabase(dir,ids,true);
-        LocalCodexSource source(dir.path());
+        IsolatedCodexSource source(dir.path());
         const auto cold = source.snapshot(instant(40));
         QCOMPARE(cold.tasks.size(),4);
         for (const auto &task : cold.tasks) QVERIFY(!task.activity.startedAt);
@@ -102,7 +103,7 @@ private slots:
             for (const auto &answer : replies) {
                 QTemporaryDir dir;
                 makeWaiting(dir);
-                LocalCodexSource source(dir.path());
+                IsolatedCodexSource source(dir.path());
                 QCOMPARE(source.snapshot(instant(10)).tasks.value(0).activity.phase,TaskPhase::Waiting);
                 for (int elapsed : {delay/2,delay-1}) {
                     const auto idle = source.snapshot(instant(elapsed));
@@ -126,7 +127,7 @@ private slots:
     void testLongWaitReplyBehindReadBudgetClearsAsSoonAsSourceCatchesUp() {
         QTemporaryDir dir;
         makeWaiting(dir);
-        LocalCodexSource source(dir.path());
+        IsolatedCodexSource source(dir.path());
         source.snapshot(instant(10));
         const int budget = 4*1024*1024;
         const auto burst = lines({response("function_call_output",7199,{{"call_id","ordinary-tool"},{"output",QString(budget,'x')}})}) + reply("first",7200);
@@ -145,7 +146,7 @@ private slots:
     void testFreshQuestionAfterDelayedReplyUsesItsOwnWaitAndClearsIndependently() {
         QTemporaryDir dir;
         makeWaiting(dir);
-        LocalCodexSource source(dir.path());
+        IsolatedCodexSource source(dir.path());
         source.snapshot(instant(10));
         const auto path = dir.filePath("rollout.jsonl");
         append(path,reply("first",7200)+lines({call("request_user_input_async","second",7209)}));

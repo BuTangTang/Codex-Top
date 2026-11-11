@@ -95,6 +95,8 @@ public:
 #endif
     }
 
+    void setReply(const QString &id, const QByteArray &reply) { replies_.insert(id, reply); }
+
     QString root;
     QList<QJsonObject> messages;
     bool timedOut = false;
@@ -488,6 +490,21 @@ private slots:
         QCOMPARE(server.messages.last().value("params").toObject().value("following"),QJsonValue(false));
     }
 
+    void sharedEndpointRequiresTheSameRolloutPath() {
+        for (const QString &relative : QStringList{"", "/other/root.jsonl", "/matching.jsonl", "/nested/../matching.jsonl"}) {
+            ReceiptSocketServer server({});
+            const auto expected = server.root + "/matching.jsonl";
+            auto desktop = state({item()});
+            if (!relative.isEmpty()) desktop.insert("rolloutPath", QDir::toNativeSeparators(server.root + relative));
+            server.setReply(thread, snapshot(desktop));
+            server.start();
+            const auto found = server.source(limits())->receipts({{thread, started.addSecs(10)}},
+                started.addSecs(21), {}, {{thread, expected}});
+            server.wait();
+            QCOMPARE(found.size(), relative == "/matching.jsonl" ? 1 : 0);
+        }
+    }
+
     void testThreadBudgetRotatesAndRejectsCrossRootSocket()
     {
         const QString other = "00000000-0000-4000-8000-000000000004";
@@ -523,8 +540,11 @@ private slots:
     void testLocalSourceAcceptedProjectionAndAuthoritativeStopWithoutSourceWrites()
     {
         for (const QString &status : QStringList{"accepted","pending","failed"}) {
-            ReceiptSocketServer server({{thread,snapshot(state({item(status)}))}});
+            ReceiptSocketServer server({});
             const auto log = server.root + "/rollout.jsonl";
+            auto desktop = state({item(status)});
+            desktop.insert("rolloutPath",log);
+            server.setReply(thread,snapshot(desktop));
             const auto db = server.root + "/state_5.sqlite";
             write(log,rollout("task_started",0,"event_msg",{{"turn_id",turn}}) + ask());
             database(db,log);
@@ -556,6 +576,9 @@ private slots:
         ReceiptSocketServer server({{thread,snapshot(state({item()}))}});
         const QString ancestor = "00000000-0000-4000-8000-000000000004";
         const auto childLog = server.root + "/child.jsonl", rootLog = server.root + "/root.jsonl";
+        auto desktop = state({item()});
+        desktop.insert("rolloutPath",childLog);
+        server.setReply(thread,snapshot(desktop));
         write(childLog,rollout("task_started",0,"event_msg",{{"turn_id",turn}}) + QByteArray(70000,'x') + '\n' + ask());
         write(rootLog,rollout("task_complete",0,"event_msg",{{"turn_id","synthetic-root"}}));
         database(server.root + "/state_5.sqlite",childLog,ancestor,rootLog);

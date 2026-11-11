@@ -462,21 +462,29 @@ SourceSnapshot LocalCodexSource::snapshot(QDateTime now, const QSet<QString> &ro
         tasks.append(std::move(task));
     }
     const auto taskRoots = resolveRootIDs(tasks);
-    const auto &monitored = monitoredRootIDs ? *monitoredRootIDs : roots;
+    auto normalizedIDs = [](const QSet<QString> &rawIDs) {
+        QSet<QString> result;
+        for (const auto &id : rawIDs)
+            result.insert(taskIDKey(id));
+        return result;
+    };
+    const auto timingRoots = normalizedIDs(roots);
+    const auto monitored = monitoredRootIDs ? normalizedIDs(*monitoredRootIDs) : timingRoots;
     QSet<QString> selected, compressedIDs, ids;
     QList<qsizetype> ordered, recover;
     QHash<QString, QDateTime> pending;
     for (qsizetype i = 0; i < tasks.size(); ++i) {
         const auto &t = tasks.at(i);
         ids.insert(t.id);
-        if (monitored.contains(taskRoots.value(t.id, t.id))) {
+        const auto id = taskIDKey(t.id), rootID = taskRoots.value(id, id);
+        if (monitored.contains(rootID)) {
             selected.insert(t.id);
             if (compressedCandidates.contains(t.id)) {
                 compressedIDs.insert(t.id);
                 ordered.append(i);
             }
         }
-        if (roots.contains(taskRoots.value(t.id, t.id))) {
+        if (timingRoots.contains(rootID)) {
             const auto tail = d->tails.constFind(t.id);
             if (tail != d->tails.cend() && !tail->reducer.activity.startedAt && isActive(tail->reducer.activity.phase))
                 recover.append(i);
@@ -484,7 +492,7 @@ SourceSnapshot LocalCodexSource::snapshot(QDateTime now, const QSet<QString> &ro
     }
     d->compressed.beginCycle(compressedIDs);
     std::stable_sort(ordered.begin(), ordered.end(), [&](qsizetype a, qsizetype b) {
-        bool ar = monitored.contains(tasks.at(a).id), br = monitored.contains(tasks.at(b).id);
+        bool ar = monitored.contains(taskIDKey(tasks.at(a).id)), br = monitored.contains(taskIDKey(tasks.at(b).id));
         return ar != br ? ar : tasks.at(a).updatedAt > tasks.at(b).updatedAt;
     });
     int reading = 0, limited = 0;
@@ -525,7 +533,8 @@ SourceSnapshot LocalCodexSource::snapshot(QDateTime now, const QSet<QString> &ro
             t.activity = tail.reducer.activity.effective(now);
     }
     for (const auto &t : std::as_const(tasks)) {
-        if (!roots.contains(taskRoots.value(t.id, t.id)) || t.activity.phase != TaskPhase::Waiting)
+        const auto id = taskIDKey(t.id);
+        if (!timingRoots.contains(taskRoots.value(id, id)) || t.activity.phase != TaskPhase::Waiting)
             continue;
         auto i = d->tails.constFind(t.id);
         auto since = i != d->tails.cend() && i->isCaughtUp ? i->reducer.awaitingReplySince() : std::nullopt;
@@ -552,7 +561,13 @@ SourceSnapshot LocalCodexSource::snapshot(QDateTime now, const QSet<QString> &ro
             if (projected && projected->phase == TaskPhase::Waiting)
                 need.insert(i.key(), *i);
         }
-        for (const auto &reply : d->replies->receipts(need, now))
+        QHash<QString, QString> rolloutPaths;
+#ifdef Q_OS_WIN
+        // Windows 的桌面端点跨数据目录共享，只接受这轮已从本地库确认的记录。
+        for (const auto &task : std::as_const(tasks))
+            if (need.contains(task.id)) rolloutPaths.insert(task.id, task.rolloutPath);
+#endif
+        for (const auto &reply : d->replies->receipts(need, now, {}, rolloutPaths))
             if (pending.contains(reply.threadID) && reply.receivedAt >= pending.value(reply.threadID))
                 d->received.insert(reply.threadID + ':' + reply.clientID, reply);
         if (d->received.size() > 1024) {

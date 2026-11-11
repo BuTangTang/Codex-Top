@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 #include "codex/local_codex_source.h"
 #include "codex/rollout_reducer.h"
 #include <QJsonDocument>
@@ -224,7 +225,7 @@ class CoreReadingTests : public QObject {
         QVERIFY(originalFile.open(QIODevice::ReadOnly));
         const auto original = originalFile.readAll();
         originalFile.close();
-        LocalCodexSource source(root.path());
+        IsolatedCodexSource source(root.path());
         const auto snapshot = source.snapshot(timeBase);
         QCOMPARE(snapshot.tasks.size(), 2);
         QHash<QString, TaskPhase> phases;
@@ -241,14 +242,14 @@ class CoreReadingTests : public QObject {
     void testMissingAndUnsupportedDatabaseHaveActionableErrors() {
         QTemporaryDir root;
         try {
-            LocalCodexSource(root.path()).snapshot();
+            IsolatedCodexSource(root.path()).snapshot();
             QFAIL("missing database should fail");
         } catch (CodexSourceError e) {
             QVERIFY(errorDescription(e).contains("未找到"));
         }
         QVERIFY(database(root.filePath("state_99.sqlite"), {"CREATE TABLE threads(other TEXT)"}));
         try {
-            LocalCodexSource(root.path()).snapshot();
+            IsolatedCodexSource(root.path()).snapshot();
             QFAIL("unsupported schema should fail");
         } catch (CodexSourceError e) {
             QVERIFY(errorDescription(e).contains("格式不受支持"));

@@ -33,11 +33,12 @@ public:
     explicit DesktopReplyReceiptSource(const QString &root, DesktopReceiptLimits limits = {});
 
 #ifdef Q_OS_WIN
-    // 正式管道当前不能证明所属的数据根。显式提供的合成管道只允许用于对应的临时根。
+    // 合成服务的管道名必须对应它的独立临时目录。
     DesktopReplyReceiptSource(const QString &root, DesktopReceiptLimits limits, const QString &fixturePipe);
 #endif
     QList<QuestionReplyReceipt> receipts(const QHash<QString, QDateTime> &threads, const QDateTime &now,
-                                         std::stop_token cancellation = {});
+                                         std::stop_token cancellation = {},
+                                         const QHash<QString, QString> &rolloutPaths = {});
 private:
     QString root_;
     QString windowsPipe_;

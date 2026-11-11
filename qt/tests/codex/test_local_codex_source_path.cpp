@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 #include "local_source_fixture.h"
 #include "local_source_links.h"
 #include <QProcess>
@@ -37,7 +38,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(outside, local_fixture::event("task_started"));
         QVERIFY(symlink(link, first));
         f.add("synthetic", link);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         auto initial = src.snapshot(now);
         phase(initial, TaskPhase::Completed);
         QVERIFY(initial.bytesRead > 0);
@@ -65,7 +66,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(f.outside + leaf, local_fixture::event("task_started"));
         QVERIFY(symlink(link, first, true));
         f.add("synthetic", link + leaf);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         phase(src.snapshot(now), TaskPhase::Completed);
         QVERIFY(unlinkFixture(link));
         QVERIFY(symlink(link, f.outside, true));
@@ -86,7 +87,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto dest = f.path("later/task.jsonl"), link = f.path("current.jsonl");
         QVERIFY(symlink(link, dest));
         f.add("synthetic", link);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         auto missing = src.snapshot(now);
         phase(missing, TaskPhase::Unknown);
         QCOMPARE(missing.bytesRead, 0);
@@ -122,7 +123,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(expected, local_fixture::event("task_complete"));
         const auto relative = QDir::current().relativeFilePath(f.root) + "/alias/../" + leaf;
         f.add("synthetic", relative);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         auto s = src.snapshot(now);
         phase(s, TaskPhase::Completed);
         QVERIFY(s.bytesRead > 0);
@@ -140,7 +141,7 @@ class LocalCodexSourcePathTests : public QObject {
         const auto raw = "//" + leaf, expected = '/' + leaf;
 #endif
         f.add("synthetic", raw);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         for (int i = 0; i < 2; ++i) {
             auto s = src.snapshot(now);
             blocked(s);
@@ -153,7 +154,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto file = f.base + "/root-other/event.jsonl";
         write(file, local_fixture::event("task_started"));
         f.add("synthetic", file);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         auto s = src.snapshot(now);
         blocked(s);
         resolved(s, file);
@@ -164,7 +165,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto entry = f.path("event.jsonl");
         QVERIFY(QDir().mkpath(entry));
         f.add("synthetic", entry);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         auto s = src.snapshot(now);
         phase(s, TaskPhase::Unknown);
         QCOMPARE(s.bytesRead, 0);
@@ -193,7 +194,7 @@ class LocalCodexSourcePathTests : public QObject {
 #endif
         write(p, local_fixture::event("task_complete"));
         f.add("synthetic", p);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         for (int i = 0; i < 2; ++i) {
             auto s = src.snapshot(now);
             phase(s, TaskPhase::Completed);
@@ -213,7 +214,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto dir = f.path("history"), p = dir + "/later.jsonl";
         QVERIFY(QDir().mkpath(dir));
         f.add("synthetic", p);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         for (int i = 0; i < 2; ++i)
             phase(src.snapshot(now), TaskPhase::Unknown);
         write(p, local_fixture::event("task_complete"));
@@ -235,7 +236,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto dir = f.path("private"), p = dir + "/later.jsonl";
         QVERIFY(QDir().mkpath(dir));
         f.add("synthetic", p);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         src.snapshot(now);
 #ifdef Q_OS_WIN
         QProcess who;
@@ -270,7 +271,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(f.outside + leaf, local_fixture::event("task_complete"));
         QVERIFY(symlink(link, first, true));
         f.add("synthetic", link + leaf);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         src.snapshot(now);
         QVERIFY(unlinkFixture(link));
         QVERIFY(symlink(link, f.outside, true));
@@ -290,7 +291,7 @@ class LocalCodexSourcePathTests : public QObject {
         auto stamp = std::filesystem::last_write_time(fs) - std::chrono::hours(24 * 10);
         std::filesystem::last_write_time(fs, stamp);
         f.add("synthetic", p);
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         src.snapshot(now);
         write(p, local_fixture::event("task_complete"));
         std::filesystem::last_write_time(fs, stamp);
@@ -309,7 +310,7 @@ class LocalCodexSourcePathTests : public QObject {
             f.add(id, p);
         }
         QVERIFY(f.db.commit());
-        LocalCodexSource src(f.root);
+        IsolatedCodexSource src(f.root);
         src.snapshot(now);
         auto start = std::clock();
         for (int n = 0; n < 20; ++n) {

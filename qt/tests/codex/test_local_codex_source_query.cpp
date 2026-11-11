@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 #include "local_source_fixture.h"
 #include <QTextBoundaryFinder>
 #include <algorithm>
@@ -52,7 +53,7 @@ class LocalCodexSourceQueryTests : public QObject {
         write(other, otherBegin);
         f.add("waiting", waiting, "合成待答", "/synthetic", 2);
         f.add("other", other, "合成运行", "/synthetic", 1);
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto first = source.snapshot(now);
         QCOMPARE(first.bytesRead, begin.size() + question.size() + otherBegin.size());
         const auto original = task(first, "waiting");
@@ -95,7 +96,7 @@ class LocalCodexSourceQueryTests : public QObject {
             write(logs.last(), original);
             f.add(QString("tail-%1").arg(i), logs.last(), "合成归档");
         }
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto initial = source.snapshot(now);
         QCOMPARE(initial.tasks.size(), logs.size());
         QCOMPARE(initial.bytesRead, original.size() * logs.size());
@@ -140,7 +141,7 @@ class LocalCodexSourceQueryTests : public QObject {
             write(logs[i], running);
             f.add(QString("failed-%1").arg(i), logs[i], "合成缺失");
         }
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto initial = source.snapshot(now);
         QCOMPARE(initial.bytesRead, running.size() * logs.size());
         for (const auto &t : initial.tasks) {
@@ -183,7 +184,7 @@ class LocalCodexSourceQueryTests : public QObject {
             write(logs.last(), original);
             f.add(QString("partial-%1").arg(i), logs.last(), "合成部分失败");
         }
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto initial = source.snapshot(now);
         QCOMPARE(initial.bytesRead, original.size() * logs.size());
         for (const auto &log : logs.mid(1))
@@ -221,7 +222,7 @@ class LocalCodexSourceQueryTests : public QObject {
               "INSERT INTO threads SELECT printf('cache-%04d',n),'合成标题 ' || "
               "n,'/synthetic/project',?,1,n,0,? FROM numbers",
               {f.log, spawn("old-parent")});
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto initial = source.snapshot(now);
         QCOMPARE(initial.tasks.size(), 2200);
         for (const auto &t : initial.tasks) {
@@ -283,7 +284,7 @@ class LocalCodexSourceQueryTests : public QObject {
                                  "('storage-0','storage-3','storage-4','storage-5','storage-8') ORDER BY id"),
                         0),
                  (QStringList{"null", "integer", "real", "text", "blob"}));
-        const auto snap = LocalCodexSource(f.root).snapshot(now);
+        const auto snap = IsolatedCodexSource(f.root).snapshot(now);
         QCOMPARE(snap.tasks.size(), values.size() + 1);
         for (int i = 0; i < values.size(); ++i) {
             const auto &t = task(snap, QString("storage-%1").arg(i));
@@ -312,7 +313,7 @@ class LocalCodexSourceQueryTests : public QObject {
         f.sql("INSERT INTO threads VALUES(NULL,'missing id','/synthetic/project',?,1,100,0)", {f.log});
         f.sql("INSERT INTO threads VALUES('missing-path','missing path','/synthetic/project',NULL,1,100,0)");
         f.sql("INSERT INTO threads VALUES('archived','archived','/synthetic/project',?,1,1000,1)", {f.log});
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         for (bool indexed : {false, true}) {
             if (indexed)
                 f.sql("CREATE INDEX threads_updated_idx ON threads(updated_at)");
@@ -350,7 +351,7 @@ class LocalCodexSourceQueryTests : public QObject {
         const QStringList fields{"id",         "title",      "cwd",     "rollout_path",
                                  "created_at", "updated_at", "archived"};
         QCOMPARE(column(f.select("PRAGMA table_info(threads)"), 1), fields);
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         try {
             source.snapshot(now);
             QFAIL("主查询缺少排序规则时必须报告 prepare 失败");
@@ -384,7 +385,7 @@ class LocalCodexSourceQueryTests : public QObject {
         f.sql("CREATE TABLE thread_spawn_edges(unrelated TEXT)");
         f.sql("INSERT INTO threads VALUES('child','测试','/synthetic/project',?,1,2,0,?)",
               {f.log, spawn("source-parent")});
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto fallback = source.snapshot(now);
         QCOMPARE(task(fallback, "child").parentID, QString("source-parent"));
         QVERIFY(!fallback.warning);

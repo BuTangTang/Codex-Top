@@ -89,7 +89,7 @@ struct CodexTask {
 };
 
 struct QuotaWindow {
-    int minutes = 0;
+    qint64 minutes = 0;
     double usedPercent = 0;
     std::optional<QDateTime> resetsAt;
     bool operator==(const QuotaWindow &) const = default;

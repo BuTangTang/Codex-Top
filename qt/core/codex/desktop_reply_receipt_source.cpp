@@ -83,12 +83,12 @@ public:
 #ifdef Q_OS_WIN
     void open(const QString &root, const QString &fixturePipe, QDeadlineTimer until, std::stop_token cancellation)
     {
-        // 已知正式管道 codex-ipc 跨数据根共用，其握手没有根路径证据。只连接显式注入的同根合成管道。
+        // 正式桌面进程共享本机命名管道；每份快照还要核对数据库给出的任务记录路径。
         const auto digest = QCryptographicHash::hash(root.toUtf8(), QCryptographicHash::Sha256).toHex();
         const QString expected = QStringLiteral("codextop-receipt-fixture-") + QString::fromLatin1(digest);
-        if (root.isEmpty() || fixturePipe != expected)
+        if (root.isEmpty() || (!fixturePipe.isEmpty() && fixturePipe != expected))
             throw ReadError::Unavailable;
-        const auto path = (QStringLiteral("\\\\.\\pipe\\") + fixturePipe).toStdWString();
+        const auto path = (QStringLiteral("\\\\.\\pipe\\") + (fixturePipe.isEmpty() ? QStringLiteral("codex-ipc") : fixturePipe)).toStdWString();
         check(until, cancellation);
         while (true) {
             handle_.value = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
@@ -239,7 +239,8 @@ public:
     }
 
     QList<QuestionReplyReceipt> read(const QString &root, const QString &pipe,
-                                     const QMap<QString,QDateTime> &threads, const QDateTime &now)
+                                     const QMap<QString,QDateTime> &threads, const QDateTime &now,
+                                     const QHash<QString,QString> &rolloutPaths)
     {
         transport_.open(root, pipe, readDeadline_, cancellation_);
         const auto requestID = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -288,7 +289,25 @@ public:
                 throw ReadError::Invalid;
             const auto change = params.value("change").toObject();
             if (change.value("type") != "snapshot") continue;
-            auto found = DesktopReceiptProtocol::receipts(change.value("conversationState").toObject(), thread,
+            const auto state = change.value("conversationState").toObject();
+            if (!rolloutPaths.isEmpty()) {
+                // 同一用户可能有多份历史，线程号和轮次相同也不能串用回执。
+                // 只比较选中库已验证过的记录路径，绝不打开快照传来的文件。
+                const auto reported = QDir::fromNativeSeparators(state.value("rolloutPath").toString());
+                QString path = reported;
+#ifdef Q_OS_WIN
+                if (path.startsWith("//?/UNC/", Qt::CaseInsensitive)) path = "//" + path.mid(8);
+                else if (path.startsWith("//?/")) path.remove(0, 4);
+#endif
+                const QString expected = rolloutPaths.value(thread);
+                const auto rootPrefix = root.endsWith('/') ? root : root + '/';
+                if (path.isEmpty() || !QDir::isAbsolutePath(path) || path.split('/').contains("..")
+                    || !expected.startsWith(rootPrefix) || QDir::cleanPath(path) != expected) {
+                    remaining.remove(thread);
+                    continue;
+                }
+            }
+            auto found = DesktopReceiptProtocol::receipts(state, thread,
                                                          remaining.value(thread), now, limits_, readDeadline_, cancellation_);
             if (!found || result.size() + found->size() > limits_.maximumReceipts)
                 throw ReadError::Invalid;
@@ -462,13 +481,17 @@ DesktopReplyReceiptSource::DesktopReplyReceiptSource(const QString &root, Deskto
 #endif
 
 QList<QuestionReplyReceipt> DesktopReplyReceiptSource::receipts(const QHash<QString,QDateTime> &threads,
-                                                                const QDateTime &now, std::stop_token cancellation)
+                                                                const QDateTime &now, std::stop_token cancellation,
+                                                                const QHash<QString,QString> &rolloutPaths)
 {
     if (!now.isValid() || threads.isEmpty() || cancellation.stop_requested())
         return {};
+#ifdef Q_OS_WIN
+    if (windowsPipe_.isEmpty() && rolloutPaths.isEmpty()) return {};
+#endif
     QStringList keys;
     for (auto it = threads.begin(); it != threads.end(); ++it)
-        if (QuestionReplyReceipt::isUUID(it.key()) && it.value().isValid() && it.value() <= now)
+        if ((rolloutPaths.isEmpty() || rolloutPaths.contains(it.key())) && QuestionReplyReceipt::isUUID(it.key()) && it.value().isValid() && it.value() <= now)
             keys.append(it.key());
     keys.sort();
     QMap<QString,QDateTime> selected;
@@ -491,7 +514,7 @@ QList<QuestionReplyReceipt> DesktopReplyReceiptSource::receipts(const QHash<QStr
         || limits_.maximumFrameBytes <= 0 || limits_.maximumTotalBytes < 4 || limits_.maximumFrames <= 0)
         return {};
     try {
-        return ReceiptConnection(limits_, cancellation).read(root_, windowsPipe_, selected, now);
+        return ReceiptConnection(limits_, cancellation).read(root_, windowsPipe_, selected, now, rolloutPaths);
     } catch (ReadError) {
         return {};
     }

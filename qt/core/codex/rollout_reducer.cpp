@@ -306,7 +306,7 @@ void RolloutReducer::updateQuota(const QJsonObject &limits, const QDateTime &at)
         if (!minutes) {
             if (const auto seconds = integerValue(window["limit_window_seconds"])) minutes = *seconds / 60;
         }
-        if (!minutes || *minutes <= 0 || *minutes > std::numeric_limits<int>::max()) continue;
+        if (!minutes || *minutes <= 0) continue;
         std::optional<QDateTime> resets;
         if (const auto seconds = numericValue(window["resets_at"])) {
             const double milliseconds = *seconds * 1000;
@@ -314,7 +314,7 @@ void RolloutReducer::updateQuota(const QJsonObject &limits, const QDateTime &at)
                 && milliseconds < static_cast<double>(std::numeric_limits<qint64>::max()))
                 resets = QDateTime::fromMSecsSinceEpoch(qRound64(milliseconds), QTimeZone::UTC);
         }
-        windows.append(QuotaWindow{static_cast<int>(*minutes), *used, resets});
+        windows.append(QuotaWindow{*minutes, *used, resets});
     }
     if (!windows.isEmpty()) quota = QuotaSnapshot{at, windows};
 }

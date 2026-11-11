@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 #include "codex/compressed_rollout_reader.h"
 #include "local_source_fixture.h"
 using namespace local_fixture;
@@ -320,7 +321,7 @@ void CompressedRolloutTests::testSourceScopeAndPlainRecovery() {
     f.add("other", f.path("missing.jsonl"), "other", "/fixture");
     f.sql("INSERT INTO thread_spawn_edges VALUES('root','child')");
     write(f.path("root.jsonl"), cevent("task_started"));
-    LocalCodexSource src(f.root);
+    IsolatedCodexSource src(f.root);
     auto none = src.snapshot(now, {}, QSet<QString>{});
     QVERIFY(!none.warning);
     QCOMPARE(task(none, "child").activity.detail, QStringLiteral("历史记录已压缩，尚未读取"));

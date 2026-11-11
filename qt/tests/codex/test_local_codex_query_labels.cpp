@@ -1,3 +1,4 @@
+#include "isolated_codex_source.h"
 #include "local_source_fixture.h"
 
 using namespace local_fixture;
@@ -51,7 +52,7 @@ private slots:
         }
         for (int i = 0; i < cases.size(); ++i)
             f.add("title-" + QString::number(i),f.log,cases.at(i).first,"/synthetic/project");
-        const auto snapshot = LocalCodexSource(f.root).snapshot(now);
+        const auto snapshot = IsolatedCodexSource(f.root).snapshot(now);
         QCOMPARE(snapshot.tasks.size(),cases.size());
         for (int i = 0; i < cases.size(); ++i)
             QCOMPARE(task(snapshot,"title-" + QString::number(i)).title.toUtf8(),cases.at(i).second.toUtf8());
@@ -71,7 +72,7 @@ private slots:
             childOf("")};
         for (int i = 0; i < values.size(); ++i)
             f.sql("INSERT INTO threads VALUES(?,?,?,?,1,2,0,?)",{"source-" + QString::number(i),"测试","/synthetic/project",f.log,values.at(i)});
-        const auto snapshot = LocalCodexSource(f.root).snapshot(now);
+        const auto snapshot = IsolatedCodexSource(f.root).snapshot(now);
         QCOMPARE(snapshot.tasks.size(),values.size());
         for (int i = 0; i < values.size(); ++i) {
             std::optional<QString> expected;
@@ -92,7 +93,7 @@ private slots:
             "/synthetic/e\u0301"};
         for (int i = 0; i < paths.size(); ++i)
             f.sql("INSERT INTO threads VALUES(?,?,?,?,1,2,0)",{"project-" + QString::number(i),"测试",paths.at(i),f.log});
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto first = source.snapshot(now);
         const QString here = QDir::current().dirName();
         const QString parent = QDir(QDir::currentPath() + "/..").absolutePath().section('/',-1);
@@ -120,7 +121,7 @@ private slots:
         f.sql(insert,{"null-path","缺少路径","/synthetic/不可见",QVariant{},QVariant{},QVariant{}});
         const auto db = f.path("state_5.sqlite");
         const auto original = readFile(db);
-        const auto snapshot = LocalCodexSource(f.root).snapshot(now);
+        const auto snapshot = IsolatedCodexSource(f.root).snapshot(now);
         QSet<QString> ids;
         for (const auto &t : snapshot.tasks) {
             ids.insert(t.id);
@@ -143,7 +144,7 @@ private slots:
     void testEmptyResultsAndSchemaChangesAreReadAgainOnSameSource()
     {
         QueryFixture f;
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         QVERIFY(source.snapshot(now).tasks.isEmpty());
         f.add("root",f.log,"原始标题","/synthetic/项目");
         const auto original = source.snapshot(now);
@@ -175,7 +176,7 @@ private slots:
         f.sql("ALTER TABLE threads ADD COLUMN source TEXT");
         f.sql("CREATE TABLE thread_spawn_edges(parent_thread_id TEXT,child_thread_id TEXT)");
         f.sql("INSERT INTO threads VALUES(?,?,?,?,1,2,0,?)",{"child","  初始\n标题  ","/synthetic/原项目/",f.log,childOf("original-parent")});
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         const auto first = source.snapshot(now);
         QCOMPARE(task(first,"child").title,"初始 标题");
         QCOMPARE(task(first,"child").parentID,std::optional<QString>("original-parent"));
@@ -206,7 +207,7 @@ private slots:
     {
         QueryFixture f;
         f.add("root",f.log,"旧标题","/synthetic/旧项目");
-        LocalCodexSource source(f.root);
+        IsolatedCodexSource source(f.root);
         source.snapshot(now);
         f.sql("UPDATE threads SET archived=1");
         QVERIFY(source.snapshot(now).tasks.isEmpty());
