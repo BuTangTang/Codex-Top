@@ -89,14 +89,20 @@ int waitSlice(const std::stop_token &stop, const QDeadlineTimer &deadline) {
     return int(std::min<qint64>(50, remaining));
 }
 
-/// 不转发后端错误，写入失败统一显示账户不可用。
-void send(QProcess &process, const QByteArray &message) {
+/// 等待本次请求实际写入管道。对端已关 stdin 时不能接受它提前给出的额度。
+void send(QProcess &process, const QByteArray &message, const std::stop_token &stop, const QDeadlineTimer &deadline) {
     if (process.write(message) != message.size()) throw AccountUsageClientError::Unavailable;
+    while (process.bytesToWrite() > 0) {
+        const bool written = process.waitForBytesWritten(waitSlice(stop, deadline));
+        if (!written && (process.error() == QProcess::WriteError || process.state() == QProcess::NotRunning))
+            throw AccountUsageClientError::Unavailable;
+    }
+    if (process.error() == QProcess::WriteError) throw AccountUsageClientError::Unavailable;
 }
 
 /// 按行握手。成功请求只产出数值模型，其他消息在当前行解析后立即丢弃。
 std::optional<QuotaSnapshot> consumeMessage(const QByteArray &line, bool &initialized, QProcess &process,
-                                            const std::stop_token &stop) {
+                                            const std::stop_token &stop, const QDeadlineTimer &deadline) {
     if (line.isEmpty()) return std::nullopt;
     const auto document = QJsonDocument::fromJson(line);
     if (!document.isObject()) throw AccountUsageClientError::InvalidResponse;
@@ -112,7 +118,7 @@ std::optional<QuotaSnapshot> consumeMessage(const QByteArray &line, bool &initia
         throw AccountUsageClientError::Unavailable;
     if (initialReply) {
         initialized = true;
-        send(process, AccountUsageProtocol::read());
+        send(process, AccountUsageProtocol::read(), stop, deadline);
         return std::nullopt;
     }
     if (stop.stop_requested()) throw AccountUsageCancelled{};
@@ -146,7 +152,7 @@ QuotaSnapshot runProcess(const QString &root, const std::optional<QString> &inje
     });
     while (process.state() == QProcess::Starting) process.waitForStarted(waitSlice(stop, deadline));
     if (process.state() == QProcess::NotRunning) throw AccountUsageClientError::Unavailable;
-    send(process, AccountUsageProtocol::initialize());
+    send(process, AccountUsageProtocol::initialize(), stop, deadline);
     QByteArray buffer;
     bool initialized = false;
     qsizetype bytesRead = 0;
@@ -164,7 +170,7 @@ QuotaSnapshot runProcess(const QString &root, const std::optional<QString> &inje
         buffer.append(chunk);
         qsizetype begin = 0, end;
         while ((end = buffer.indexOf('\n', begin)) >= 0) {
-            if (auto value = consumeMessage(buffer.mid(begin, end - begin), initialized, process, stop)) return *value;
+            if (auto value = consumeMessage(buffer.mid(begin, end - begin), initialized, process, stop, deadline)) return *value;
             begin = end + 1;
         }
         buffer.remove(0, begin);

@@ -41,6 +41,10 @@ file(GLOB zstd_sources CONFIGURE_DEPENDS
 enable_language(C)
 add_library(codextop_zstd STATIC ${zstd_sources} ../Sources/CZstd/CZstd.c)
 set_target_properties(codextop_zstd PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+if(MSVC)
+    set_property(SOURCE ../Sources/CZstd/CZstd.c APPEND PROPERTY COMPILE_OPTIONS
+        "/FI${CMAKE_CURRENT_SOURCE_DIR}/core/codex/zstd_msvc_alignment.h")
+endif()
 target_include_directories(codextop_zstd PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/vendor/lib ${CMAKE_CURRENT_SOURCE_DIR}/../Sources/CZstd/include)
 target_compile_definitions(codextop_zstd PRIVATE ZSTD_DISABLE_ASM)
 target_link_libraries(codextop_codex PUBLIC codextop_zstd)

@@ -24,7 +24,9 @@
 #include <cstring>
 #include <array>
 #include <system_error>
-#ifndef Q_OS_WIN
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#else
 #include <sys/stat.h>
 #endif
 
@@ -125,6 +127,11 @@ QString projectName(QString path) {
 QString normalized(const QString &path) {
     const auto absolute = QDir::cleanPath(QDir::current().absoluteFilePath(QDir::fromNativeSeparators(path)));
     const auto canonical = QFileInfo(absolute).canonicalFilePath();
+#ifdef Q_OS_WIN
+    // Windows Qt 也会返回悬空链接声明的目的地。只有真实存在的目标才能替换原记录路径。
+    if (!canonical.isEmpty() && canonical != absolute && !QFileInfo::exists(canonical))
+        return absolute;
+#endif
     return canonical.isEmpty() ? absolute : canonical;
 }
 bool inside(const QString &root, const QString &path) {
@@ -136,18 +143,54 @@ struct Location {
     QString path;
     std::errc error{};
 };
+
+// Windows 可以绕过父目录遍历检查而收到 FILE_NOT_FOUND。只有能列出最近的现存父目录，
+// 才把此结果视为已证实的缺失；不读取目录列表或文件内容。
+std::errc missingError(const QString &path) {
+#ifdef Q_OS_WIN
+    QString parent = QFileInfo(path).absolutePath();
+    while (!parent.isEmpty()) {
+        const auto native = QDir::toNativeSeparators(parent).toStdWString();
+        HANDLE directory = CreateFileW(native.c_str(), FILE_LIST_DIRECTORY,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (directory != INVALID_HANDLE_VALUE) {
+            CloseHandle(directory);
+            break;
+        }
+        const DWORD error = GetLastError();
+        if (error == ERROR_ACCESS_DENIED || error == ERROR_PRIVILEGE_NOT_HELD)
+            return std::errc::permission_denied;
+        if (error != ERROR_PATH_NOT_FOUND && error != ERROR_FILE_NOT_FOUND)
+            break;
+        const QString next = QFileInfo(parent).absolutePath();
+        if (next == parent)
+            break;
+        parent = next;
+    }
+#else
+    Q_UNUSED(path);
+#endif
+    return std::errc::no_such_file_or_directory;
+}
 Location inspect(QString path) {
     try {
-        (void)RolloutFileMetadata::read(path);
+        if (!RolloutFileMetadata::read(path).regular)
+            return {path, std::errc::invalid_argument};
         return {path, {}};
     } catch (const std::system_error &e) {
         // Windows 系统错误码经 default_error_condition 映射到可移植的类别。
+        if (e.code() == std::errc::no_such_file_or_directory)
+            return {path, missingError(path)};
         return {path, static_cast<std::errc>(e.code().default_error_condition().value())};
     }
 }
 struct Parent {
     QString path;
-#ifndef Q_OS_WIN
+#ifdef Q_OS_WIN
+    // 同一快照内同目录所有缺失的任务和压缩兄弟文件只需探测一次 ACL。
+    std::optional<std::errc> missingLeafError;
+#else
     quint64 dev = 0, ino = 0, mode = 0;
     qint64 mtime = 0, mtimeNs = 0, ctime = 0, ctimeNs = 0;
 #endif
@@ -256,7 +299,7 @@ struct LocalCodexSource::Impl {
                 return inspect(normalized(path));
             parents.insert(text->parent, *p);
         }
-        const Parent &p = parents.constFind(text->parent).value();
+        Parent &p = parents.find(text->parent).value();
         QString candidate = QDir::cleanPath(QDir(p.path).filePath(text->leaf));
 #ifndef Q_OS_WIN
         if (auto i = missing.find(candidate); i != missing.end()) {
@@ -272,14 +315,18 @@ struct LocalCodexSource::Impl {
                 return {candidate, {}};
         } catch (const std::system_error &e) {
             if (e.code() == std::errc::no_such_file_or_directory) {
-#ifndef Q_OS_WIN
+#ifdef Q_OS_WIN
+                if (!p.missingLeafError)
+                    p.missingLeafError = missingError(candidate);
+                return {candidate, *p.missingLeafError};
+#else
                 const auto bytes = candidate.toUtf8().size();
                 if (missing.size() < 4096 && bytes <= 1024 && bytes <= (1 << 20) - missingBytes) {
                     missing.insert(candidate, p);
                     missingBytes += bytes;
                 }
-#endif
                 return {candidate, std::errc::no_such_file_or_directory};
+#endif
             }
         }
         return inspect(normalized(path));
@@ -414,6 +461,9 @@ SourceSnapshot LocalCodexSource::snapshot(QDateTime now, const QSet<QString> &ro
         if (!inside(d->root, location.path)) {
             task.activity = unknown(QStringLiteral("记录位于数据目录之外，未读取"));
             failures.insert(id);
+        } else if (location.error == std::errc::invalid_argument) {
+            // 尚未解析为普通文件的悬空链接/目录不可打开，以免链接在检查后转向。
+            fail(QStringLiteral("暂时无法读取任务记录"));
         } else {
             const bool missing = location.error == std::errc::no_such_file_or_directory;
             if (missing) {

@@ -16,6 +16,11 @@ extern "C" {
 #include <cstring>
 #include <future>
 #include <system_error>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace codextop {
 namespace {
@@ -38,6 +43,28 @@ struct Job {
     std::promise<Outcome> promise;
     std::future<Outcome> done = promise.get_future();
 };
+// 解码会持有旧文件直到后台读取结束。生产者在这期间仍可原子替换同名记录。
+std::error_code openCompressedFile(QFile &file) {
+#ifdef Q_OS_WIN
+    const auto path = QDir::toNativeSeparators(file.fileName()).toStdWString();
+    HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {int(GetLastError()), std::system_category()};
+    // QFile 及身份核验共用这个已打开的文件，成功后由 QFile 关闭描述符和底层句柄。
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
+    if (fd == -1) {
+        const std::error_code error(errno, std::generic_category());
+        CloseHandle(handle);
+        return error;
+    }
+    if (file.open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) return {};
+    _close(fd);
+#else
+    if (file.open(QIODevice::ReadOnly)) return {};
+#endif
+    return std::make_error_code(file.error() == QFileDevice::PermissionsError ? std::errc::permission_denied
+                                                                               : std::errc::io_error);
+}
 // 无完整状态时只给用户看固定原因，不泄漏文件名或正文。
 Result message(Category type, const QString &text) {
     Result value;
@@ -519,9 +546,8 @@ Reader::Result Reader::read(const QString &id, const QString &path, const QDateT
         return queued();
     d->used = true;
     auto file = std::make_shared<QFile>(path);
-    if (!file->open(QIODevice::ReadOnly)) {
-        auto code = file->error() == QFileDevice::PermissionsError ? std::errc::permission_denied : std::errc::io_error;
-        auto result = fileFailure(std::make_error_code(code));
+    if (const auto error = openCompressedFile(*file)) {
+        auto result = fileFailure(error);
         d->cache.insert(id, {f, result, {}});
         return result;
     }

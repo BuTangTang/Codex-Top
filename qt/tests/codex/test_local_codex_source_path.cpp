@@ -2,6 +2,7 @@
 #include "local_source_fixture.h"
 #include "local_source_links.h"
 #include <QProcess>
+#include <QScopeGuard>
 #include <ctime>
 #ifndef Q_OS_WIN
 #include <unistd.h>
@@ -65,6 +66,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(second + leaf, local_fixture::event("task_started"));
         write(f.outside + leaf, local_fixture::event("task_started"));
         QVERIFY(symlink(link, first, true));
+        const auto removeDirectoryLink = qScopeGuard([&] { unlinkFixture(link); });
         f.add("synthetic", link + leaf);
         IsolatedCodexSource src(f.root);
         phase(src.snapshot(now), TaskPhase::Completed);
@@ -118,6 +120,7 @@ class LocalCodexSourcePathTests : public QObject {
         QVERIFY(QDir().mkpath(nested));
         write(dir + '/' + leaf, local_fixture::event("task_complete"));
         QVERIFY(symlink(link, nested, true));
+        const auto removeDirectoryLink = qScopeGuard([&] { unlinkFixture(link); });
         // 和 Swift standardizedFileURL 一样，先规范化输入的 .. 再按现存目标解析链接。
         const QString expected = f.path(leaf);
         write(expected, local_fixture::event("task_complete"));
@@ -240,18 +243,39 @@ class LocalCodexSourcePathTests : public QObject {
         src.snapshot(now);
 #ifdef Q_OS_WIN
         QProcess who;
-        who.start("whoami.exe", QStringList{});
+        const QDir system32(QDir(qEnvironmentVariable("SystemRoot")).filePath("System32"));
+        who.start(system32.filePath("whoami.exe"), QStringList{});
         QVERIFY(who.waitForFinished());
         const auto user = QString::fromLocal8Bit(who.readAllStandardOutput()).trimmed();
         auto acl = [&](QStringList args) {
             QProcess proc;
-            proc.start("icacls.exe", args);
+            proc.start(system32.filePath("icacls.exe"), args);
             return proc.waitForFinished() && proc.exitCode() == 0;
         };
         // 拒绝活动目录的文件遍历和读取，在恢复 ACL 前先取得实际快照，避免测试夹具残留。
         QVERIFY(acl({QDir::toNativeSeparators(dir), "/deny", user + ":(OI)(CI)(RX)"}));
-        auto s = src.snapshot(now);
-        QVERIFY(acl({QDir::toNativeSeparators(dir), "/remove:d", user}));
+        SourceSnapshot s;
+        bool aclRestored = false;
+        {
+            const auto restoreAcl = qScopeGuard([&] {
+                aclRestored = acl({QDir::toNativeSeparators(dir), "/remove:d", user});
+            });
+            // 高权限构建账户可以用备份/还原特权绕过 DACL。仅在本用例的线程身份禁用两项，
+            // 普通用户已有的遍历权限仍保留，实际检验“叶不存在但无法列出父目录”。
+            QVERIFY(ImpersonateSelf(SecurityImpersonation));
+            const auto restoreIdentity = qScopeGuard([] { RevertToSelf(); });
+            HANDLE token = nullptr;
+            QVERIFY(OpenThreadToken(GetCurrentThread(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, TRUE, &token));
+            const auto closeToken = qScopeGuard([&] { CloseHandle(token); });
+            for (const wchar_t *name : {L"SeBackupPrivilege", L"SeRestorePrivilege"}) {
+                TOKEN_PRIVILEGES privilege{};
+                privilege.PrivilegeCount = 1;
+                QVERIFY(LookupPrivilegeValueW(nullptr, name, &privilege.Privileges[0].Luid));
+                QVERIFY(AdjustTokenPrivileges(token, FALSE, &privilege, 0, nullptr, nullptr));
+            }
+            s = src.snapshot(now);
+        }
+        QVERIFY(aclRestored);
 #else
         QVERIFY(::chmod(QFile::encodeName(dir).constData(), 0) == 0);
         auto s = src.snapshot(now);
@@ -270,6 +294,7 @@ class LocalCodexSourcePathTests : public QObject {
         write(second + leaf, local_fixture::event("task_started"));
         write(f.outside + leaf, local_fixture::event("task_complete"));
         QVERIFY(symlink(link, first, true));
+        const auto removeDirectoryLink = qScopeGuard([&] { unlinkFixture(link); });
         f.add("synthetic", link + leaf);
         IsolatedCodexSource src(f.root);
         src.snapshot(now);

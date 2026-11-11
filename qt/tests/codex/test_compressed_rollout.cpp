@@ -1,6 +1,13 @@
 #include "isolated_codex_source.h"
 #include "codex/compressed_rollout_reader.h"
 #include "local_source_fixture.h"
+#ifdef Q_OS_WIN
+#include <QScopeGuard>
+#include <qt_windows.h>
+#include <cstddef>
+#include <cstring>
+#include <vector>
+#endif
 using namespace local_fixture;
 using Reader = CompressedRolloutReader;
 using C = Reader::Category;
@@ -40,6 +47,34 @@ Reader::Result finish(Reader &r, const QString &p) {
 QByteArray longLine(QByteArray kind, QByteArray head, QByteArray filler = "output") {
     return "{\"timestamp\":\"2027-01-15T08:00:00Z\",\"type\":\"" + kind + "\",\"payload\":{" + head + ",\"" + filler +
            "\":\"" + QByteArray(70000, 'x') + "\"}}\n";
+}
+// Swift .atomic 允许替换已有读者的同名文件。Win32 普通 MoveFileEx 会拒绝这种替换。
+void replaceWhileReading(const QString &path, const QByteArray &bytes) {
+#ifdef Q_OS_WIN
+    QTemporaryDir staging(QFileInfo(path).absolutePath() + "/replace-XXXXXX");
+    QVERIFY(staging.isValid());
+    const auto incomingPath = staging.filePath("incoming.zst");
+    write(incomingPath, bytes);
+    const auto source = QDir::toNativeSeparators(incomingPath).toStdWString();
+    HANDLE handle = CreateFileW(source.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, 0, nullptr);
+    const auto openError = handle == INVALID_HANDLE_VALUE ? GetLastError() : DWORD(0);
+    QVERIFY2(handle != INVALID_HANDLE_VALUE, qPrintable(QStringLiteral("CreateFileW error %1").arg(openError)));
+    const auto cleanup = qScopeGuard([&] { CloseHandle(handle); });
+    const auto target = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toStdWString();
+    const auto nameBytes = target.size() * sizeof(wchar_t);
+    // Win32 路径转换需要尾零，FileNameLength 本身只计名字的字节。
+    std::vector<unsigned char> buffer(offsetof(FILE_RENAME_INFO, FileName) + nameBytes + sizeof(wchar_t));
+    auto info = reinterpret_cast<FILE_RENAME_INFO *>(buffer.data());
+    info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+    info->FileNameLength = DWORD(nameBytes);
+    std::memcpy(info->FileName, target.c_str(), nameBytes + sizeof(wchar_t));
+    const bool renamed = SetFileInformationByHandle(handle, FileRenameInfoEx, info, DWORD(buffer.size()));
+    const auto error = renamed ? DWORD(0) : GetLastError();
+    QVERIFY2(renamed, qPrintable(QStringLiteral("SetFileInformationByHandle error %1").arg(error)));
+#else
+    replaceFile(path, bytes);
+#endif
 }
 } // namespace
 class CompressedRolloutTests : public QObject {
@@ -161,7 +196,7 @@ class CompressedRolloutTests : public QObject {
         Reader r;
         r.beginCycle({"fixture"});
         QCOMPARE(r.read("fixture", p, now).category, C::Reading);
-        replaceFile(p, frame(cevent("task_complete")));
+        replaceWhileReading(p, frame(cevent("task_complete")));
         QCOMPARE(finish(r, p).activity.phase, TaskPhase::Completed);
     }
     // 缓存达到数量上限不循环淘汰重读；取消关注后可释放名额。

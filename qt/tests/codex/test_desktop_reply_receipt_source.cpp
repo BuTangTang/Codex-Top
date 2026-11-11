@@ -60,10 +60,13 @@ public:
 #ifdef Q_OS_WIN
         name_ = "codextop-receipt-fixture-" + QString::fromLatin1(
             QCryptographicHash::hash(root.toUtf8(), QCryptographicHash::Sha256).toHex());
-        const auto path = (QStringLiteral("\\\\.\\pipe\\") + name_).toStdWString();
-        listener_ = CreateNamedPipeW(path.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 1024*1024, 65536, 0, nullptr);
+        listener_ = makePipe(true);
         if (listener_ == INVALID_HANDLE_VALUE) throw std::runtime_error("create fixture pipe");
+        event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!event_) {
+            CloseHandle(listener_);
+            throw std::runtime_error("create fixture pipe event");
+        }
 #else
         const auto ipc = QFile::encodeName(root + "/ipc");
         const auto name = ipc + "/ipc.sock";
@@ -89,6 +92,7 @@ public:
     {
         wait();
 #ifdef Q_OS_WIN
+        CloseHandle(event_);
         CloseHandle(listener_);
 #else
         ::close(listener_);
@@ -123,28 +127,47 @@ private:
     using Endpoint = HANDLE;
     Endpoint listener_ = INVALID_HANDLE_VALUE;
     QString name_;
+    HANDLE event_ = nullptr;
 
-    Endpoint acceptClient(QDeadlineTimer deadline)
-    {
-        while (!deadline.hasExpired()) {
-            if (ConnectNamedPipe(listener_,nullptr)) return listener_;
-            const auto error = GetLastError();
-            if (error == ERROR_PIPE_CONNECTED) return listener_;
-            if (error != ERROR_PIPE_LISTENING && error != ERROR_NO_DATA) break;
-            QThread::msleep(1);
-        }
-        return INVALID_HANDLE_VALUE;
+    Endpoint makePipe(bool first) const {
+        const auto path = (QStringLiteral("\\\\.\\pipe\\") + name_).toStdWString();
+        const DWORD access = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
+        return CreateNamedPipeW(path.c_str(), access, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
+                                DWORD(connections_), 1024 * 1024, 65536, 0, nullptr);
     }
 
-    qsizetype transfer(Endpoint client, char *buffer, qsizetype n, bool writing)
-    {
+    // 只由单个服务线程使用，同一时刻只有一次内核 I/O。超时后先回收异步请求再释放栈上的结构。
+    bool awaitIO(Endpoint pipe, OVERLAPPED &op, QDeadlineTimer deadline, DWORD &count) {
+        if (GetOverlappedResultEx(pipe, &op, &count, DWORD(std::max<qint64>(0, deadline.remainingTime())), FALSE))
+            return true;
+        if (GetLastError() == WAIT_TIMEOUT) {
+            timedOut = true;
+            CancelIoEx(pipe, &op);
+            GetOverlappedResult(pipe, &op, &count, TRUE);
+        }
+        return false;
+    }
+    Endpoint acceptClient(QDeadlineTimer deadline) {
+        ResetEvent(event_);
+        OVERLAPPED op{};
+        op.hEvent = event_;
+        if (ConnectNamedPipe(listener_, &op))
+            return listener_;
+        const DWORD error = GetLastError();
+        if (error == ERROR_PIPE_CONNECTED)
+            return listener_;
         DWORD count = 0;
-        const auto size = static_cast<DWORD>(std::min<qsizetype>(n,65536));
-        const auto ok = writing ? WriteFile(client,buffer,size,&count,nullptr) : ReadFile(client,buffer,size,&count,nullptr);
-        if (ok) return count;
-        // 空的非阻塞管道可以继续等，断开的对端结束服务。
-        if (GetLastError() == ERROR_NO_DATA && PeekNamedPipe(client,nullptr,0,nullptr,nullptr,nullptr))
-            return 0;
+        return error == ERROR_IO_PENDING && awaitIO(listener_, op, deadline, count) ? listener_ : INVALID_HANDLE_VALUE;
+    }
+    qsizetype transfer(Endpoint client, char *buffer, qsizetype n, bool writing, QDeadlineTimer deadline) {
+        ResetEvent(event_);
+        OVERLAPPED op{};
+        op.hEvent = event_;
+        DWORD count = 0;
+        const auto size = DWORD(std::min<qsizetype>(n, 65536));
+        const BOOL ok = writing ? WriteFile(client, buffer, size, &count, &op) : ReadFile(client, buffer, size, &count, &op);
+        if (ok || (GetLastError() == ERROR_IO_PENDING && awaitIO(client, op, deadline, count)))
+            return count;
         return -1;
     }
 #else
@@ -169,7 +192,7 @@ private:
         return -1;
     }
 
-    qsizetype transfer(Endpoint client, char *buffer, qsizetype n, bool writing)
+    qsizetype transfer(Endpoint client, char *buffer, qsizetype n, bool writing, QDeadlineTimer)
     {
 #ifdef MSG_NOSIGNAL
         constexpr int flags = MSG_NOSIGNAL;
@@ -191,12 +214,19 @@ private:
             auto client = acceptClient(deadline);
 #ifdef Q_OS_WIN
             if (client == INVALID_HANDLE_VALUE) { timedOut = true; return; }
+            if (i + 1 < connections_) {
+                // 像 Unix 的监听队列一样预留后续入口，第二个客户无需等第一个实例重置。
+                const auto next = makePipe(false);
+                if (next == INVALID_HANDLE_VALUE) { timedOut = true; return; }
+                listener_ = next;
+            }
 #else
             if (client < 0) { timedOut = true; return; }
 #endif
             exchange(client, deadline);
 #ifdef Q_OS_WIN
             DisconnectNamedPipe(client);
+            if (client != listener_) CloseHandle(client);
 #else
             ::close(client);
 #endif
@@ -208,7 +238,7 @@ private:
         QByteArray buffer;
         char bytes[4096];
         while (!deadline.hasExpired()) {
-            const auto n = transfer(client,bytes,sizeof(bytes),false);
+            const auto n = transfer(client,bytes,sizeof(bytes),false,deadline);
             if (n < 0) return;
             if (!n) { QThread::msleep(1); continue; }
             buffer.append(bytes,n);
@@ -233,7 +263,7 @@ private:
                 while (offset < outgoing.size() && !deadline.hasExpired()) {
                     auto amount = outgoing.size() - offset;
                     if (split_) amount = std::min<qsizetype>(3,amount);
-                    const auto written = transfer(client,outgoing.data() + offset,amount,true);
+                    const auto written = transfer(client,outgoing.data() + offset,amount,true,deadline);
                     if (written < 0) return;
                     if (written == 0) QThread::msleep(1);
                     offset += written;

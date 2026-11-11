@@ -10,6 +10,7 @@
 #include <QTimeZone>
 #include <array>
 #include <atomic>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #ifdef Q_OS_WIN
@@ -55,6 +56,12 @@ int serve() {
         std::string line;
         if (!std::getline(std::cin, line)) return 4;
         if (!writeFile(dir.filePath("requests"), QByteArray::fromStdString(line) + '\n', true)) return 5;
+        if (i == 0 && mode == "closed-input") {
+            std::fclose(stdin);
+            std::cout << R"({"id":1,"result":{}})" << '\n' << successful.toStdString() << std::endl;
+            QThread::sleep(60);
+            return 6;
+        }
         if (i == 0) std::cout << R"({"id":1,"result":{}})" << std::endl;
     }
     if (mode == "hang") {
@@ -172,6 +179,15 @@ private slots:
         QCOMPARE(result.fiveHour()->remainingPercent(), 75);
         QCOMPARE(fixture.methods(), requiredMethods);
         QCOMPARE(QString::fromUtf8(readFile(fixture.dir.filePath("root"))), fixture.dir.path());
+        QVERIFY(fixture.reaped());
+    }
+    /// Swift 的同步管道写入会拒绝已经关闭 stdin 的服务器，即使它提前发了看似有效的余额。
+    void testClosedServerInputCannotAcknowledgeUnsentQuotaRequest() {
+        Fixture fixture("closed-input");
+        QVERIFY(fixture.ready);
+        AccountUsageClient client(fixture.dir.path(), fixture.executable(), 2);
+        expectError(AccountUsageClientError::Unavailable, [&]{ client.snapshot(); });
+        QCOMPARE(fixture.methods(), QStringList{"initialize"});
         QVERIFY(fixture.reaped());
     }
     /// 八个并发刷新只建一次连接，手动五秒、自动六十秒边界以单调时钟判定。
