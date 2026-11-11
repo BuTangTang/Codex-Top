@@ -29,6 +29,10 @@ codextop_core_module(codex codextop_models Qt6::Sql)
 codextop_core_module(claude codextop_models codextop_codex)
 codextop_core_module(policy codextop_models)
 codextop_core_module(usage codextop_models)
+if(APPLE)
+    target_sources(codextop_usage PRIVATE core/usage/account_usage_cli_mac.mm)
+    target_link_libraries(codextop_usage PRIVATE "-framework AppKit")
+endif()
 
 # 压缩记录要用的 zstd：直接复用原生版带着的源码（只要解压部分）。
 file(GLOB zstd_sources CONFIGURE_DEPENDS
