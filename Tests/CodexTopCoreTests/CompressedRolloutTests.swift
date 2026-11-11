@@ -290,6 +290,45 @@ final class CompressedRolloutTests: XCTestCase {
         XCTAssertEqual(finish(CompressedRolloutReader(cacheURL: cache), url: url).activity.phase, .failed)
     }
 
+    /// 压缩自动副本和普通文件共用来源规则，新版缓存重启后仍保留纯导入标记，旧版缓存强制重读。
+    func testAutomaticCopyCacheMigrationAndLocalContinuation() throws {
+        let folder = try directory(), url = folder.appendingPathComponent("team.zst"), cache = folder.appendingPathComponent("cache.json")
+        let header = #"{"ordinal":0,"type":"session_meta","payload":{"teamchat_copy":{"automatic":true}}}"# + "\n"
+        let imported = #"{"ordinal":1,"type":"event_msg","payload":{"type":"task_started"}}"# + "\n"
+        let history = Data((header + imported).utf8)
+        try frame(history).write(to: url)
+        XCTAssertEqual(finish(CompressedRolloutReader(cacheURL: cache), url: url).activity, .teamChatImport)
+        let restarted = finish(CompressedRolloutReader(cacheURL: cache), url: url)
+        XCTAssertEqual(restarted.activity, .teamChatImport)
+        XCTAssertEqual(restarted.bytes, 0)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: cache)) as? [String: Any])
+        legacy["version"] = 1
+        try JSONSerialization.data(withJSONObject: legacy).write(to: cache)
+        let migrated = finish(CompressedRolloutReader(cacheURL: cache), url: url)
+        XCTAssertEqual(migrated.activity, .teamChatImport)
+        XCTAssertGreaterThan(migrated.bytes, 0)
+        try frame(history + event("task_complete")).write(to: url, options: .atomic)
+        let local = finish(CompressedRolloutReader(cacheURL: cache), url: url)
+        XCTAssertEqual(local.activity.phase, .completed)
+        XCTAssertFalse(local.activity.isTeamChatImport)
+    }
+
+    /// 副本中可忽略的长摘要和本机续聊的大工具输出均不得遮掉明确结尾；无来源边界时仍不能宣告纯导入。
+    func testAutomaticCopyKeepsNativeCompletionAfterLongToolOutput() throws {
+        let url = try directory().appendingPathComponent("team.zst")
+        let header = Data((#"{"ordinal":0,"type":"session_meta","payload":{"teamchat_copy":{"automatic":true}}}"# + "\n").utf8)
+        let output = longLine("response_item", #""type":"function_call_output","call_id":"answer""#)
+        let compacted = longLine("compacted", #""message":"m""#, filler: "replacement")
+        try frame(header + compacted + event("task_started") + output + event("task_complete")).write(to: url)
+        let local = finish(CompressedRolloutReader(), url: url)
+        XCTAssertEqual(local.category, .ready)
+        XCTAssertEqual(local.activity.phase, .completed)
+        try frame(header + output).write(to: url, options: .atomic)
+        let unconfirmed = finish(CompressedRolloutReader(), url: url)
+        XCTAssertEqual(unconfirmed.category, .limited)
+        XCTAssertFalse(unconfirmed.activity.isTeamChatImport)
+    }
+
     func testWaitingResultsAreNotPersisted() throws {
         let folder = try directory()
         let url = folder.appendingPathComponent("task.zst"), cache = folder.appendingPathComponent("cache.json")

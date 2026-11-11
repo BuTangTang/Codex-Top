@@ -35,6 +35,13 @@ public struct TaskActivity: Equatable, Sendable {
     public var startedAt: Date?
     public var waitingStartedAt: Date?
     public var turnID: String?
+    /// 已确认只有 TeamChat Hub 自动导入的历史，尚未观察到本机执行活动。
+    var isTeamChatImport = false
+    static let teamChatImport: TaskActivity = {
+        var activity = TaskActivity(phase: .idle, detail: "团队同步副本，尚无本机执行记录")
+        activity.isTeamChatImport = true
+        return activity
+    }()
     public init(phase: TaskPhase = .unknown, detail: String = "尚无可识别的活动记录", lastEventAt: Date? = nil, startedAt: Date? = nil, waitingStartedAt: Date? = nil) {
         self.phase = phase; self.detail = detail; self.lastEventAt = lastEventAt; self.startedAt = startedAt
         self.waitingStartedAt = waitingStartedAt

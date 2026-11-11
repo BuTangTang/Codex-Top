@@ -6,6 +6,56 @@ final class LocalCodexSourceQueryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let schema = "CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,rollout_path TEXT,created_at INTEGER,updated_at INTEGER,archived INTEGER)"
 
+    /// 旧版自动关注的纯同步副本仍可手选；同标题的本机任务、手选及后来真实续聊分别按原规则监控。
+    func testAutomaticTeamChatCopiesStaySelectableWithoutAutomaticMonitoring() async throws {
+        let root = try fixture()
+        try execute(root, schema)
+        let imported = root.appendingPathComponent("import.jsonl")
+        let native = root.appendingPathComponent("native.jsonl")
+        let marker: [String: Any] = ["automatic": true, "sourceProject": "fixture-project", "sourceSession": "fixture-session"]
+        let rows: [[String: Any]] = [
+            ["ordinal": 0, "type": "session_meta", "payload": ["id": "import", "teamchat_copy": marker]],
+            ["ordinal": 1, "type": "event_msg", "payload": ["type": "task_started", "turn_id": "imported", "root_turn_id": "imported"]],
+            ["ordinal": 2, "type": "event_msg", "payload": ["type": "agent_message", "phase": "final_answer"]],
+            ["type": "event_msg", "payload": ["type": "thread_settings_applied"]]
+        ]
+        var history = Data()
+        for row in rows {
+            history += try JSONSerialization.data(withJSONObject: row)
+            history.append(10)
+        }
+        try history.write(to: imported)
+        let start = try rolloutRecord("task_started", at: now, extra: ["turn_id": "native-turn"])
+        try start.write(to: native)
+        for (id, log) in [("import", imported), ("native", native)] {
+            try execute(root, "INSERT INTO threads VALUES(?,?,?,?,1,2,0)", [id, "同名样例", "/synthetic", log.path])
+        }
+        let source = LocalCodexSource(root: root)
+        let snapshot = try await source.snapshot(now: now)
+        XCTAssertEqual(snapshot.tasks.count, 2)
+        XCTAssertTrue(try XCTUnwrap(snapshot.tasks.first { $0.id == "import" }).activity.isTeamChatImport)
+        var prefs = MonitorPreferences()
+        prefs.selectedIDs = ["import"]
+        MonitoringPolicy.reconcile(&prefs, tasks: snapshot.tasks, now: now)
+        XCTAssertEqual(prefs.selectedIDs, ["native"])
+        XCTAssertTrue(prefs.excludedIDs.isEmpty)
+
+        var manual = prefs
+        MonitoringPolicy.applySelection(["import", "native"], original: prefs.selectedIDs, preferences: &manual)
+        MonitoringPolicy.reconcile(&manual, tasks: snapshot.tasks, now: now)
+        XCTAssertTrue(manual.selectedIDs.contains("import"))
+        MonitoringPolicy.applySelection(["native"], original: manual.selectedIDs, preferences: &manual)
+        try append(start, to: imported)
+        let resumed = try await source.snapshot(now: now)
+        let activity = try XCTUnwrap(resumed.tasks.first { $0.id == "import" }).activity
+        XCTAssertEqual(activity.phase, .running)
+        XCTAssertFalse(activity.isTeamChatImport)
+        MonitoringPolicy.reconcile(&prefs, tasks: resumed.tasks, now: now)
+        XCTAssertTrue(prefs.selectedIDs.contains("import"))
+        MonitoringPolicy.reconcile(&manual, tasks: resumed.tasks, now: now)
+        XCTAssertFalse(manual.selectedIDs.contains("import"))
+    }
+
     /// 正常保留全部尾部时，不变文件读零字节；跨快照半行仍保留待答编号、开始时间和增量游标。
     func testWarmTailsKeepPendingHalfLineAndReadOnlyAppendedBytes() async throws {
         let root = try fixture()

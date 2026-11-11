@@ -253,6 +253,8 @@ public actor LocalCodexSource {
                     if !tail.isCaughtUp {
                         task.activity.phase = .unknown
                         task.activity.detail = "正在同步任务活动…"
+                        // 未读部分可能包含本机续聊，追平之前不能据此移除关注。
+                        task.activity.isTeamChatImport = false
                     }
                     if let candidate = tail.reducer.quota, quota == nil || candidate.observedAt > quota!.observedAt { quota = candidate }
                     tails[id] = tail

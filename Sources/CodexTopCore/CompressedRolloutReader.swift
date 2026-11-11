@@ -123,10 +123,13 @@ final class CompressedRolloutReader {
                         if !skipped && !line.isEmpty {
                             reducer.consume(line)
                         } else if skipped {
-                            // 与状态无关的超长行直接跳过；有关的只把能读到的顶层字段交给归约器；读不出时仍按证据缺口处理。
+                            reducer.noteUninspectedRecord()
                             switch CompressedRolloutReader.summarizeLongLine(longPrefix) {
                             case .ignore: break
-                            case .line(let summary): reducer.consume(summary)
+                            case .line(let summary):
+                                // 摘要不带导入序号；已确认本机开始后才按原规则归约，纯导入阶段保留证据缺口。
+                                if reducer.acceptsNativeLineSummary { reducer.consume(summary) }
+                                else { hasGap = true }
                             case .gap: hasGap = true
                             }
                             longPrefix.removeAll(keepingCapacity: true)
@@ -426,19 +429,25 @@ final class CompressedStatusStore {
         var lastEventAt: Date?
         var startedAt: Date?
         var limited: Bool
+        var isTeamChatImport: Bool
+        /// 保存读取结论和来源标记，确保重启后仍能区分纯导入记录与本机执行。
         init(fingerprint: CompressedFingerprint, activity: TaskActivity, limited: Bool) {
             self.fingerprint = fingerprint; phase = activity.phase; detail = activity.detail
             lastEventAt = activity.lastEventAt; startedAt = activity.startedAt; self.limited = limited
+            isTeamChatImport = activity.isTeamChatImport
         }
-        var activity: TaskActivity { TaskActivity(phase: phase, detail: detail, lastEventAt: lastEventAt, startedAt: startedAt) }
+        var activity: TaskActivity {
+            if isTeamChatImport { return .teamChatImport }
+            return TaskActivity(phase: phase, detail: detail, lastEventAt: lastEventAt, startedAt: startedAt)
+        }
     }
-    private struct File: Codable { var version = 1; var entries: [String: Entry] }
+    private struct File: Codable { var version = 2; var entries: [String: Entry] }
     let url: URL
     init(url: URL) { self.url = url }
 
     /// 读不到或格式不对就当没有缓存，照常重新解压。
     func load() -> [String: Entry] {
-        guard let data = try? Data(contentsOf: url), let file = try? JSONDecoder().decode(File.self, from: data), file.version == 1 else { return [:] }
+        guard let data = try? Data(contentsOf: url), let file = try? JSONDecoder().decode(File.self, from: data), file.version == 2 else { return [:] }
         return file.entries
     }
 

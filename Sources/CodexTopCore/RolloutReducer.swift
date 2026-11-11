@@ -10,6 +10,10 @@ public struct RolloutReducer: Sendable {
     private var replyQuestions: [String: ReplyQuestion] = [:]
     private var untrackedWait = false
     private var turnEnded = false
+    private var expectsFileHeader = true
+    private(set) var isAutomaticTeamChatCopy = false
+    private var hasNativePagination = false
+    private var onlyImportedRecords = false
 
     /// 只保留问题编号、选项序号和提问时间，不保留提问或回答正文。
     private struct ReplyQuestion: Sendable {
@@ -18,11 +22,74 @@ public struct RolloutReducer: Sendable {
     }
     public init() {}
 
+    /// 只有文件首行的正式布尔标记才能确认自动副本；字符串和数字不作布尔值解释。
+    static func isAutomaticCopyHeader(_ row: [String: Any]) -> Bool {
+        guard row["type"] as? String == "session_meta", let payload = row["payload"] as? [String: Any],
+              let copy = payload["teamchat_copy"] as? [String: Any], let flag = copy["automatic"] as? NSNumber else { return false }
+        return CFGetTypeID(flag) == CFBooleanGetTypeID() && flag.boolValue
+    }
+
+    /// 副本生成器为每条导入记录写入顶层的非负整数序号；只在已确认的自动副本内使用。
+    static func hasImportedOrdinal(_ row: [String: Any]) -> Bool {
+        guard let number = row["ordinal"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              let ordinal = row["ordinal"] as? Int else { return false }
+        return ordinal >= 0
+    }
+
+    /// 同步器只生成这些显示历史的事件，新出现的记录种类不能作为纯导入证据。
+    private static func isTeamChatProjection(kind: String, type: String?) -> Bool {
+        switch kind {
+        case "event_msg":
+            return ["task_started", "task_complete", "user_message", "agent_message", "mcp_tool_call_begin", "mcp_tool_call_end"].contains(type)
+        case "response_item":
+            return ["message", "function_call", "function_call_output"].contains(type)
+        default: return false
+        }
+    }
+
+    /// 已进入可识别本机执行后，较长的原生事件仍沿用压缩读取器的原有摘要规则。
+    var acceptsNativeLineSummary: Bool {
+        !isAutomaticTeamChatCopy || hasNativePagination || activity.phase.isActive || activity.phase.isFinished || activity.phase == .failed
+    }
+
+    /// 漏读、损坏或未识别的本机行会撤销“只有导入记录”的结论；后续明确本机事件仍照常归约。
+    mutating func noteUninspectedRecord() {
+        expectsFileHeader = false
+        onlyImportedRecords = false
+        if activity.isTeamChatImport { activity = TaskActivity() }
+    }
+
+    /// 一行被拆成几次写入或仍在追赶时先显示未知，读取完整后才可以恢复纯导入标记。
+    mutating func publishImportIfComplete(_ complete: Bool) {
+        guard onlyImportedRecords else { return }
+        activity = complete ? .teamChatImport : TaskActivity()
+    }
+
     /// 按任务记录更新真实状态，并保存可供早期回复证据核对的问题元数据。
     public mutating func consume(_ line: Data) {
+        let first = expectsFileHeader
+        expectsFileHeader = false
         guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let payload = value["payload"] as? [String: Any],
-              let kind = value["type"] as? String else { return }
+              let kind = value["type"] as? String else { noteUninspectedRecord(); return }
+        if first && Self.isAutomaticCopyHeader(value) {
+            isAutomaticTeamChatCopy = true
+            onlyImportedRecords = true
+            activity = .teamChatImport
+            return
+        }
+        if isAutomaticTeamChatCopy {
+            let type = payload["type"] as? String
+            // 原生分页续聊也带序号。同步器不会生成 turn_context 或带这些原生字段的开始事件。
+            if kind == "turn_context" || (kind == "event_msg" && (type == "turn_started" ||
+                (type == "task_started" && (payload["started_at"] != nil || payload["turn_attribution"] != nil)))) {
+                hasNativePagination = true
+            }
+            if !hasNativePagination && Self.hasImportedOrdinal(value) && Self.isTeamChatProjection(kind: kind, type: type) { return }
+            // 登记副本时桌面会追加设置/改名事件；这两种记录在同步器中也只算登记。
+            if kind == "event_msg" && (type == "thread_settings_applied" || type == "thread_name_updated") { return }
+            noteUninspectedRecord()
+        }
         let at = Self.date(value["timestamp"])
         // Old records may arrive after newer records during a compaction/replay.
         if let at, let last = activity.lastEventAt, at < last { return }
@@ -275,28 +342,65 @@ public struct IncrementalRollout: Sendable {
         if reset { reducer = RolloutReducer(); offset = 0; pending.removeAll(); skippingLongLine = false; isCaughtUp = false; timingRecovery = nil }
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         // Cold starts remain bounded. Warm reads must not skip events or discard pending questions/turn IDs.
-        let start = reset && size > UInt64(maximumRead) ? size - UInt64(maximumRead) : offset
-        let skipped = start > offset
-        if skipped { pending.removeAll(); skippingLongLine = true }
-        try handle.seek(toOffset: start)
-        offset = start; inode = newInode; observedSize = size; modified = newModified
-        let budget = reset ? maximumRead : maximumCatchUpRead
+        var prefetched = Data()
         var bytesRead = 0
-        while offset < size && bytesRead < budget {
-            let count = min(maximumRead, budget - bytesRead, Int(min(UInt64(maximumRead), size - offset)))
-            let data = try handle.read(upToCount: count) ?? Data()
+        if reset && size > UInt64(maximumRead) {
+            // Qt 生成器按键顺序写紧凑 JSON，只有这种序号零前缀才需读完首行核实身份。
+            let prefix = Data(#"{"ordinal":0,"#.utf8)
+            prefetched = try handle.read(upToCount: prefix.count) ?? Data()
+            if prefetched == prefix {
+                while !prefetched.contains(10), prefetched.count < maximumRead {
+                    let chunk = try handle.read(upToCount: min(1_024, maximumRead - prefetched.count)) ?? Data()
+                    guard !chunk.isEmpty else { break }
+                    prefetched.append(chunk)
+                }
+            }
+            bytesRead = prefetched.count
+            // 从头顺读已确认的副本，下轮继续有限追赶；仅凭最后一段看不到本机活动不能将其隐藏。
+            let header = prefetched.firstIndex(of: 10).flatMap { newline in
+                try? JSONSerialization.jsonObject(with: prefetched[..<newline]) as? [String: Any]
+            }
+            if header.map(RolloutReducer.isAutomaticCopyHeader) != true {
+                // 首部检查与冷尾读共用预算；极长候选头用完预算时，下一轮仍从冷尾边界继续。
+                let tailBudget = maximumRead - bytesRead
+                offset = size - UInt64(tailBudget > 0 ? tailBudget : maximumRead)
+                skippingLongLine = true
+                reducer.noteUninspectedRecord()
+                prefetched.removeAll()
+            }
+        }
+        try handle.seek(toOffset: offset + UInt64(prefetched.count))
+        inode = newInode; observedSize = size; modified = newModified
+        let budget = reset ? maximumRead : maximumCatchUpRead
+        while offset < size && (!prefetched.isEmpty || bytesRead < budget) {
+            let data: Data
+            if !prefetched.isEmpty {
+                data = prefetched
+                prefetched = Data()
+            } else {
+                let count = min(maximumRead, budget - bytesRead, Int(min(UInt64(maximumRead), size - offset)))
+                data = try handle.read(upToCount: count) ?? Data()
+                bytesRead += data.count
+            }
             guard !data.isEmpty else { break }
-            offset += UInt64(data.count); bytesRead += data.count
+            offset += UInt64(data.count)
             pending.append(data)
             while let newline = pending.firstIndex(of: 10) {
                 let line = pending[..<newline]
-                if !skippingLongLine && !line.isEmpty && line.count <= maximumRead { reducer.consume(Data(line)) }
+                if !line.isEmpty && !skippingLongLine {
+                    if line.count <= maximumRead { reducer.consume(Data(line)) }
+                    else { reducer.noteUninspectedRecord() }
+                }
                 skippingLongLine = false
                 pending.removeSubrange(...newline)
             }
-            if pending.count > maximumRead { pending.removeAll(); skippingLongLine = true }
+            if pending.count > maximumRead {
+                reducer.noteUninspectedRecord()
+                pending.removeAll(); skippingLongLine = true
+            }
         }
         isCaughtUp = offset >= size
+        reducer.publishImportIfComplete(isCaughtUp && pending.isEmpty && !skippingLongLine)
         if reducer.activity.startedAt != nil { timingRecovery = nil }
         return bytesRead
     }
@@ -304,7 +408,8 @@ public struct IncrementalRollout: Sendable {
     /// 仅为所选任务补查开始时间；未变或追加保留进度，读取前后核对替换、重写与截断。
     public mutating func recoverTiming(url: URL, maximumBytes: Int = 4 * 1_024 * 1_024) throws -> Int {
         guard reducer.activity.startedAt == nil else { timingRecovery = nil; return 0 }
-        guard isCaughtUp, reducer.activity.phase == .running || reducer.activity.phase == .waiting,
+        // 自动副本始终从字节零顺读，已处理全部可用的本机开始；另行回放可能借用导入时间。
+        guard !reducer.isAutomaticTeamChatCopy, isCaughtUp, reducer.activity.phase == .running || reducer.activity.phase == .waiting,
               timingRecovery?.isFinished != true else { return 0 }
         let metadata = try RolloutFileMetadata.read(url)
         let size = metadata.size

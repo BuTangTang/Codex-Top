@@ -131,6 +131,14 @@ public enum MonitoringPolicy {
             }
         }
         applyRetention(&preferences, graph: graph, now: now)
+        // 旧版可能已自动关注纯导入历史。保留选择器里的手动关注和有本机子任务的根。
+        // 不记入排除名单，本机开始续聊后仍能按原有策略加入。
+        for root in graph.roots where root.activity.isTeamChatImport
+            && preferences.selectedIDs.contains(root.id)
+            && preferences.retentionProtectedIDs?.contains(root.id) != true
+            && (graph.children[root.id] ?? []).allSatisfy({ $0.activity.isTeamChatImport }) {
+            preferences.selectedIDs.remove(root.id)
+        }
     }
     private static func applyRetention(_ preferences: inout MonitorPreferences, graph: TaskGraph, now: Date) {
         var retired = preferences.automaticallyRemovedIDs ?? []
