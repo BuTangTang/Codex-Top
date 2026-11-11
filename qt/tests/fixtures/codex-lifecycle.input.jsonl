@@ -1,0 +1,14 @@
+{"payload":{"type":"future_event"},"type":"event_msg"}
+{"payload":{"turn_id":"synthetic-turn","type":"task_started"},"timestamp":"2027-01-15T08:00:00.900900Z","type":"event_msg"}
+{"payload":{"turn_id":"synthetic-turn","type":"task_complete"},"timestamp":"2027-01-15T08:00:00.900100Z","type":"event_msg"}
+{"payload":{"call_id":"q1","name":"request_user_input","type":"function_call"},"timestamp":"2027-01-15T16:00:01.900100+08:00","type":"response_item"}
+{"payload":{"call_id":"q1","type":"function_call_output"},"timestamp":"2027-01-15T08:00:05Z","type":"response_item"}
+{"payload":{"turn_id":"synthetic-turn","type":"turn_failed"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"type":"agent_message"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"turn_id":"second","type":"task_started"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"turn_id":"synthetic-turn","type":"task_complete"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"turn_id":"second","type":"turn_aborted"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"turn_id":"no-clock","type":"task_started"},"type":"event_msg"}
+{"payload":{"type":"exec_approval_request"},"type":"event_msg"}
+{"payload":{"type":"approval_resolved"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}
+{"payload":{"type":"task_complete"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}

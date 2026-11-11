@@ -1,0 +1,7 @@
+{"ordinal":0,"payload":{"teamchat_copy":{"automatic":true}},"type":"session_meta"}
+{"ordinal":1,"payload":{"turn_id":"remote","type":"task_started"},"timestamp":"2027-01-15T08:00:00.900900Z","type":"event_msg"}
+{"ordinal":2,"payload":{"type":"agent_message"},"timestamp":"2027-01-15T16:00:01.900100+08:00","type":"event_msg"}
+{"payload":{"type":"thread_settings_applied"},"type":"event_msg"}
+{"ordinal":12,"payload":{"turn_id":"local"},"type":"turn_context"}
+{"ordinal":13,"payload":{"turn_id":"local","type":"task_started"},"timestamp":"2027-01-15T16:00:01.900100+08:00","type":"event_msg"}
+{"ordinal":14,"payload":{"turn_id":"local","type":"task_complete"},"timestamp":"2027-01-15T08:00:05Z","type":"event_msg"}

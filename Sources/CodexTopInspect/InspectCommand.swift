@@ -4,6 +4,17 @@ import CodexTopCore
 @main struct Inspect {
     static func main() async {
         let arguments = CommandLine.arguments
+        // 合成样例只进两个归约器；在解析真实数据根和用途之前返回。
+        if let index = arguments.firstIndex(of: "--export-fixtures") {
+            guard index == 1, arguments.count == 3, !arguments[2].isEmpty else {
+                fputs("Usage: codex-top-inspect --export-fixtures <directory>\n", stderr)
+                exit(2)
+            }
+            do {
+                try NativeFixtures.export(to: URL(fileURLWithPath: arguments[2], isDirectory: true))
+            } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+            return
+        }
         let root: URL
         if let index = arguments.firstIndex(of: "--root"), index + 1 < arguments.count { root = URL(fileURLWithPath: arguments[index + 1]) }
         else { root = LocalCodexSource.defaultRoot }

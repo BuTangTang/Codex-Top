@@ -1,0 +1,13 @@
+{"customTitle":"合成会话","type":"custom-title"}
+{"message":{"content":"合成输入","role":"user"},"timestamp":"2027-01-15T08:00:00.900900Z","type":"user"}
+{"message":{"content":[{"text":"done","type":"text"}],"role":"assistant","stop_reason":"end_turn"},"timestamp":"2027-01-15T08:00:00.900100Z","type":"assistant"}
+{"message":{"content":[{"id":"t1","input":{},"name":"Bash","type":"tool_use"}],"role":"assistant","stop_reason":"tool_use"},"timestamp":"2027-01-15T08:00:00.900900Z","type":"assistant"}
+{"message":{"content":[{"id":"q1","input":{},"name":"AskUserQuestion","type":"tool_use"}],"role":"assistant","stop_reason":"tool_use"},"timestamp":"2027-01-15T16:00:01.900100+08:00","type":"assistant"}
+{"message":{"content":[{"content":"ok","tool_use_id":"q1","type":"tool_result"}],"role":"user"},"timestamp":"2027-01-15T08:00:05Z","type":"user"}
+{"message":{"content":[{"id":"p1","input":{},"name":"ExitPlanMode","type":"tool_use"}],"role":"assistant","stop_reason":"tool_use"},"timestamp":"2027-01-15T08:00:05Z","type":"assistant"}
+{"message":{"content":"[Request interrupted by user for tool use]","role":"user"},"timestamp":"2027-01-15T08:00:05Z","type":"user"}
+{"message":{"content":"合成输入","role":"user"},"timestamp":"2027-01-15T08:00:05Z","type":"user"}
+{"isApiErrorMessage":true,"message":{"content":[],"role":"assistant"},"timestamp":"2027-01-15T08:00:05Z","type":"assistant"}
+{"message":{"content":"合成输入","role":"user"},"type":"user"}
+{"message":{"content":[{"text":"done","type":"text"}],"role":"assistant","stop_reason":"end_turn"},"timestamp":"invalid","type":"assistant"}
+{"isSidechain":true,"message":{"content":"合成输入","role":"user"},"timestamp":"2027-01-15T08:00:05Z","type":"user"}
