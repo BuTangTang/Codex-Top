@@ -8,6 +8,8 @@ import CodexTopCore
     @Published var expansionDirection: OrbExpansionDirection = .down
     @Published var surfaceFrame = CGRect(x: 0, y: 0, width: 44, height: 44)
     @Published var expandedSize = CGSize(width: 410, height: 340)
+    /// 面板里实际显示的用量卡片，和 expandedSize 一起改：卡片先插进来、面板还是旧高度时，列表会被挤没一下。
+    @Published var usageCard: TaskOrigin?
     /// 收起后的面板比 44 宽时，靠近屏幕右边缘就向左长。
     @Published var capsuleGrowsLeft = false
 }
@@ -69,12 +71,13 @@ private struct OrbPanelView: View {
             GlassFill()
             MonitorView(store: store, compact: false, showFinished: $showFinished, drawsSurface: false, animationsActive: state.expanded, contentVisible: state.expanded, collapse: closeTasks,
                         pickTasks: pickTasks, settings: settings, finishedChanged: finishedChanged,
-                        draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded)
+                        draggable: true, dragStarted: dragStarted, dragMoved: dragMoved, dragEnded: dragEnded, usageCardOverride: .some(state.usageCard), fixedListHeight: true)
                 .frame(width: state.expandedSize.width / store.uiScale, height: state.expandedSize.height / store.uiScale)
                 // Keep text at its final scale while the enclosing surface reveals it.
                 // A second center-based zoom makes the fixed header drift at opening.
-                .scaleEffect(store.uiScale)
-                .frame(width: state.expandedSize.width, height: state.expandedSize.height)
+                // 从左上角缩放：按中心缩放时面板总高一变，取整会让整块内容上下挪零点几个像素。
+                .scaleEffect(store.uiScale, anchor: .topLeading)
+                .frame(width: state.expandedSize.width, height: state.expandedSize.height, alignment: .topLeading)
                 .modifier(OrbRevealOpacity(progress: state.expanded ? 1 : 0, layer: .content))
                 .allowsHitTesting(state.expanded)
                 .accessibilityHidden(!state.expanded)

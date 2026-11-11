@@ -124,7 +124,7 @@ struct UsageCard: View {
                 Spacer()
                 Text("合计 ").foregroundStyle(secondary) + Text(UsageCardText.tokens(model.days.reduce(0, +))).font(.system(size: 12, weight: .semibold, design: .monospaced))
             }.font(.system(size: 12)).foregroundStyle(secondary).frame(height: 24).padding(.top, 6)
-            week(model.days, tint: tint, off: off, secondary: secondary).frame(height: 70)
+            week(model.days, starts: model.starts, tint: tint, off: off, secondary: secondary).frame(height: 70)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -134,10 +134,11 @@ struct UsageCard: View {
         .frame(height: Self.height(origin, store: store))
     }
 
-    private var data: (today: Int, yesterday: Int, days: [Int], segments: [Segment]) {
+    /// starts 是每根柱子那天的起点（两边都按本地中午 12 点切天）；空的就按本地零点倒推。
+    private var data: (today: Int, yesterday: Int, days: [Int], starts: [Date], segments: [Segment]) {
         if origin == .codex {
             let usage = store.codexUsage ?? .empty, t = usage.today
-            return (t.total, usage.yesterday.total, usage.days.map(\.total), [
+            return (t.total, usage.yesterday.total, usage.days.map(\.total), usage.starts, [
                 Segment(label: "输入", value: max(0, t.input - t.cached), level: 1),
                 Segment(label: "缓存", value: t.cached, level: 0.32),
                 Segment(label: "输出", value: max(0, t.output - t.reasoning), level: 0.7),
@@ -145,7 +146,7 @@ struct UsageCard: View {
             ])
         }
         let usage = store.claudeUsage ?? .empty, t = usage.today
-        return (t.total, usage.yesterday.total, usage.days.map(\.total), [
+        return (t.total, usage.yesterday.total, usage.days.map(\.total), usage.starts, [
             Segment(label: "输入", value: t.input, level: 1),
             Segment(label: "输出", value: t.output, level: 0.65),
             Segment(label: "缓存读取", value: t.cacheRead, level: 0.32),
@@ -204,7 +205,7 @@ struct UsageCard: View {
     }
 
     /// 7 根 8 格的点阵柱，今天那根最亮；最高的一天和今天在柱顶写数。高度按对数算：几百万和几亿的天都看得见，差距还在。
-    private func week(_ days: [Int], tint: Color, off: Color, secondary: Color) -> some View {
+    private func week(_ days: [Int], starts: [Date], tint: Color, off: Color, secondary: Color) -> some View {
         let peak = max(1, days.max() ?? 1)
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
@@ -220,7 +221,8 @@ struct UsageCard: View {
                             Rectangle().fill(row < lit ? (isToday ? tint : tint.opacity(0.8)) : off).frame(width: 12, height: 3)
                         }
                     }
-                    Text(isToday ? "今天" : weekday(calendar.date(byAdding: .day, value: index - 6, to: today) ?? today, calendar))
+                    Text(isToday ? "今天" : weekday(starts.count == days.count ? starts[index]
+                                                     : calendar.date(byAdding: .day, value: index - 6, to: today) ?? today, calendar))
                         .font(.system(size: 11, weight: isToday ? .bold : .medium)).foregroundStyle(isToday ? tint : secondary)
                 }
                 if index < days.count - 1 { Spacer(minLength: 0) }

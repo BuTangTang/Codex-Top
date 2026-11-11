@@ -2,93 +2,92 @@
 
 [简体中文](README.md) · **English**
 
-A native macOS monitor for Codex tasks. Follow selected tasks near the notch, in a floating list, or through a small 44pt desktop orb without repeatedly switching back to Codex.
+Keep an eye on your Codex and Claude Code tasks from the desktop: what is running, what is waiting for you, and what just finished — without switching windows.
 
-The current source and installed build are **v1.0.0 build 36**. Orb appearance now offers Classic Ring and Fading Twin Arcs, preserving the original ring and removing the robot prototype. The new style keeps a 44pt circle and a stationary running count, with clearer fading arcs in both themes. Panel transitions, task lists, and all four display modes retain their existing behavior; see the [validation record and limits](docs/validation/twin-arc-orb.md). The two-column quick menu, seven-day automatic retirement, manual selection, and 80%–120% scaling remain available. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are tracked separately.
+A native macOS app (SwiftUI + AppKit). The current source and local install are **v1.0.0 build 154**. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are versioned separately. A cross-platform Qt version is in development; see [below](#cross-platform-qt-version-in-development).
 
 ## Install
 
-Requires **macOS 14+**. The DMG is **universal for Apple Silicon and Intel**. Real tasks require a local Codex installation and task records saved to disk; account usage requires the official Codex CLI to be signed in. No API key needs to be entered in this app.
+- Requires **macOS 14+**; the DMG is universal for Apple silicon and Intel.
+- Download the DMG from [releases](https://github.com/BuTangTang/Codex-Top/releases), drag `Codex Top.app` into Applications, and open it.
+- Codex tasks need a local Codex installation with task records; Claude Code sessions need a local Claude Code installation; Codex usage limits need the official Codex CLI to be signed in. No API key is entered in this app.
+- The app is ad-hoc signed and not notarized. If macOS blocks it, verify the download source and follow [Apple's instructions](https://support.apple.com/en-us/102445); do not turn off system-wide protection.
 
-1. Download a DMG from [published releases](https://github.com/BuTangTang/Codex-Top/releases), or [build the current 1.0.0 source](docs/development.md).
-2. Open the DMG and drag `Codex Top.app` to Applications.
-3. Launch the app. Left-click its menu bar item to view tasks; right-click for task selection, display modes, and settings.
+## What it does
 
-The app is ad-hoc signed, without Developer ID signing or Apple notarization. If macOS blocks the app, verify the download source and follow [Apple's instructions](https://support.apple.com/en-us/102445). Do not disable system-wide protection.
+### Four display modes
 
-## Screenshots
-
-These four images show **actual v1.0.0 build 10 windows on the Mac’s built-in Retina display**, at 100% app scale. They were captured from the production app running in isolated demo mode with synthetic tasks, without reading real tasks or account usage. These are original window captures, not mockups, upscaled images, or redraws.
-
-| Notch | Floating list |
+| Mode | Behavior |
 |---|---|
-| ![Notch panel on the built-in display](docs/images/1.0.0-build10/notch-dark.jpg) | ![Floating list on the built-in display](docs/images/1.0.0-build10/floating-dark.jpg) |
+| Orb | An LED dot-matrix orb; click to open the task panel, click outside or press Esc to close; drag it anywhere, including flush against a screen edge |
+| Floating panel | The task panel stays on the desktop |
+| Notch | Shown near the notch and expands on hover; screens without a notch show it along the top |
+| Menu bar only | A count in the menu bar; click to open the panel |
 
-| Expanded orb | Expanded menu bar panel |
-|---|---|
-| ![Expanded orb on the built-in display](docs/images/1.0.0-build10/orb-expanded-dark.jpg) | ![Menu bar panel on the built-in display](docs/images/1.0.0-build10/menubar-dark.jpg) |
+All modes share one watch list. The top-right “＋” picks tasks and “⋯” switches modes and themes.
 
-These images retain build 10’s original scale and layout. Current modes share single-line finished rows, two-line active rows, and a combined finished/usage footer. The collapsed orb remains 44pt; all modes share one task selection and the same two header controls. See [capture provenance and validation scope](docs/validation/appearance-restore.md).
+### The orb
 
-## Features
+- White number = running tasks; amber = waiting for your answer or approval; red = failed; green = just finished and not yet seen.
+- While something runs, a blue comet circles clockwise. When a task finishes, starts waiting, or fails, the comet turns green, amber, or red in place for two laps. With nothing running it slows to a stop.
+- When everything is done it shows a green OK with a short charge-up celebration, then a slowly breathing Zz after 5 minutes without new work.
+- Dots are aligned to device pixels on both 1x external and 2x built-in displays.
 
-Four display modes share one set of monitored tasks:
+### The task panel
 
-| Mode | Interaction |
-|---|---|
-| Notch | Attention status on the left, remaining allowance on the right; hover to expand and leave to collapse. Uses the top edge on displays without a notch. |
-| Floating list | A compact, always-on-top list that hides the notch panel. Drag its title or header whitespace, excluding buttons. |
-| Orb | Left-click to expand in place. Moving the pointer away keeps it open; click outside, choose “⋯ → Collapse to orb,” or press Escape to close. Right-click for the menu. |
-| Menu bar only | Status counts on a transparent background. Left-click to show/hide tasks; right-click for the menu. |
+- Sections: needs you → just finished → in progress → finished (collapsible).
+- Each row has a vertical status light on the left and a monospaced timer on the right; waiting and failed rows carry a tag. When no reliable start time exists it shows `--:--` instead of guessing.
+- With both Codex and Claude Code tasks present, each row is marked CX or CC.
+- Clicking a task opens it in the Codex or Claude desktop app.
+- Footer: toggle finished tasks on the left; the CX weekly limit and CC tokens used today on the right (a usage day starts at 12:00 noon local time, so late nights count toward the same day). Clicking CX or CC pulls a usage card out below the footer: limits (5-hour only when your plan has one), today's tokens vs. yesterday, input/cache/output breakdown, and a 7-day chart.
 
-- **Task selection:** Search, select multiple tasks, or select/deselect current results. Right-click to remove a task from monitoring; select it again to restore it. Newly created tasks join automatically when they start; manual exclusions take priority. Child tasks are grouped under their parent, attention comes first, and finished tasks can be collapsed. Creating tasks, answering questions, and granting approvals still happen in Codex.
-- **Status cues:** Blue running arcs share a rotation phase; newly shown or resumed arcs join the same rhythm. The orb's center shows the running count. The running label uses the theme's primary text color, while the arc stays blue. Attention adds a subtle tint and `!`: orange in the light theme, amber in dark, red for failures, and green for completion. Attention gently pulses; Reduce Motion keeps static cues.
-- **Fixed elapsed time:** The `mm:ss` next to a waiting label measures from the current turn's start to the start of the current wait. It stays fixed while awaiting an answer and is omitted when reliable timestamps are missing. It is not CPU time and does not subtract earlier waits in the same turn.
-- **Running timer:** Without a reliable record of the current turn's start, the timer shows `--:--` with an explanation on hover. A bounded search for explicit start records runs only for monitored tasks and their children, filling time fields after compatibility checks. Missing or uncertain evidence keeps the placeholder; app launch time, file modification time, and the latest output timestamp are not used to invent a duration.
-- **Appearance and placement:** Choose black or light glass under “⋯ → Theme,” with the existing reveal transition matching the window outline. Adjust app scale from 80% to 120% in 5% steps, or reset to 100% (the previous 75% size); the orb stays at 44pt. Built-in displays, external displays, and floating lists use the same compact type. Finished task titles use a lighter weight, with readability floors retained at small scales.
-- **Free dragging:** Drag any non-button area of the header in the floating list or expanded orb panel. Dropping at the screen's top edge does not dock or change modes; choose modes from the menu. After moving an expanded orb panel, it collapses to its new orb position.
-- **Two header controls:** “+ / ⋯” remain visible at every scale, using native small icons and compact click targets. “+” selects tasks; “⋯” contains display modes, themes, settings, and collapse. Choosing the floating list hides other monitor windows; closing it returns to the previous mode. The system menu bar item stays available.
-- **Task and usage links:** Click a task to attempt to open its Codex conversation, or click usage to open the [official usage page](https://chatgpt.com/codex/settings/usage). Account usage refreshes about every 60 seconds, with a 5-second minimum between manual requests and a 15-second timeout. Hover for source, update, and reset details.
+### Watch rules
 
-While the app is active, `⌘,` opens Settings and `⌘T` shows tasks. When the app or a monitor window has keyboard focus, `⌘+` / `⌘=` increases scale and `⌘-` decreases it in 5-percentage-point steps within 80%–120%. These shortcuts do not globally intercept keys in other apps. Settings opens on the display containing the pointer; if already visible within that display, it keeps its position. See the [usage guide](docs/usage.md) for detailed instructions.
+- With auto-watch on, newly started tasks — and older tasks that start running or waiting again — join the watch list; tasks you removed by hand stay out.
+- Finished tasks drop off after a set number of days; you can also right-click “Stop watching”.
+- Subtasks roll up into their parent task.
 
-## Data and limitations
+### Claude Code
 
-- Uses `CODEX_HOME` or `~/.codex` by default, with a custom directory available in Settings. Task metadata and incremental logs are read-only: the app does not modify Codex data or upload task content. The official CLI manages authentication; this app does not directly read or copy authentication files.
-- Status comes from records saved to disk, not another process's live memory. Running records become unknown after 15 minutes without activity. Remote/cloud tasks not synced locally are outside the current scope. The initial bounded tail read may miss older waiting events; a backlog is shown as activity still being synced.
-- Start-time recovery fills only time fields compatible with the current activity. It does not enlarge the initial tail read for every task or replace current task state with historical replay state. Missing or unconfirmed records are not estimated, and this does not guarantee recovery of all historical waits.
-- Waiting activities in the monitored list, including waiting child tasks grouped under a parent, use file-change notifications for up to 64 local rollout files. Changes are coalesced for about 200ms before an incremental refresh; 2-second polling remains as a fallback. Reading a saved user reply clears the waiting state without awaiting a later completion event. This does not guarantee a fixed delay from pressing Send. Pausing task refresh stops these watches; account usage retains its independent 60-second refresh cycle.
-- The main usage display uses only the current account interface. Log-based usage is shown separately as historical. Failed reads do not fall back to another account or old logs, and missing usage windows are not invented. Pausing task refresh does not pause usage refresh. Account changes appear on the next actual read, not necessarily immediately.
-- Codex's internal formats may change. Conversation destinations, real account switching, physical display disconnects/lid closure, complete mouse dragging, and animation frame rates still have unverified scenarios. See [current status](docs/STATUS.md) and the [validation matrix](docs/validation/acceptance-matrix.md).
-- **Only the macOS app is implemented.** The [Windows implementation prompts](docs/handoff/windows-implementation-prompts.md) are handoff material for future work, not a Windows release.
+- Reads local Claude Code transcripts and the session registry, so sessions from the desktop app and the terminal both appear.
+- Optional switch “Show waiting for approval”: adds one notification hook to Claude Code's settings that records only the session id and time (backed up before editing, removed cleanly when switched off), so permission prompts show as amber. It applies to sessions started after the switch is turned on.
+
+## Data and privacy
+
+- Reads `~/.codex` (or `CODEX_HOME`) and `~/.claude` (or `CLAUDE_CONFIG_DIR`) by default; both can be chosen in Settings.
+- Read-only: it does not modify Codex or Claude Code records or settings (the only exception is the hook switch you turn on yourself), uploads nothing, and does not read credential files.
+- Status comes from records written to disk, not live process state. A running task with no new activity for 15 minutes shows as unknown. Tasks running on another machine (for example, projects opened over SSH) keep their records there and are not visible.
+- Usage counts come from token numbers in local records. When Claude Code runs through a gateway there is no plan limit, so only the amount used is shown.
 
 ## Build locally
 
-Requires macOS 14+ and a Swift 6 toolchain (Xcode). Built with SwiftUI, AppKit, and system SQLite, without third-party Swift runtime dependencies.
+Requires macOS 14+ and Xcode (Swift 6).
 
 ```sh
 swift test
 bash scripts/build-app.sh
 ```
 
-Open `dist/Codex Top.app` to use real tasks. To try the UI with sample data only:
+`dist/Codex Top.app` reads your real tasks. To look at the sample interface only:
 
 ```sh
 bash scripts/build-app.sh --demo
 ```
 
-`dist/Codex Top Demo.app` uses separate settings and synthetic tasks. It does not read local tasks or account usage. Quit Demo before switching back to the real app.
+`dist/Codex Top Demo.app` uses separate settings and synthetic tasks and reads no local data. Universal builds, DMG packaging, and diagnostics are covered in the [development notes](docs/development.md).
 
-Build scripts default to the host architecture and ad-hoc signing. See the [development guide](docs/development.md) for universal builds, ZIP/DMG packaging, and read-only diagnostics. Automated tests do not replace packaged-app or physical-device validation.
+## Cross-platform Qt version (in development)
 
-## Documentation and contributing
+To support both macOS and Windows, the app is being ported to Qt 6 (C++ and QML). The code lives in [`qt/`](qt/); progress is tracked in the [REQ-004 task overview](docs/REQ-004-Qt跨平台迁移/tasks/progress.md) (Chinese).
 
-The detailed documentation and implementation prompts are currently in Chinese.
+- Done: the technical spike — the orb is crisp, never steals focus, and idles at zero CPU on both Mac displays and Windows 11 ([record](docs/validation/qt-m0-20261111.md)).
+- In progress: porting the data layer, followed by the interface, platform differences, and a side-by-side trial. Once the Qt version reaches parity, the native Mac app stops receiving updates (and the phone connection pauses at that point).
+- The C#/WPF version on the `windows` branch is no longer being developed.
 
-- [Usage guide](docs/usage.md) · [Development and packaging](docs/development.md)
-- [Documentation and prompt index](docs/README.md) · [Windows implementation prompts](docs/handoff/windows-implementation-prompts.md)
-- [Current status](docs/STATUS.md) · [Application validation records](docs/validation/notch-orb-refinement.md)
+## Docs
 
-Feedback through [Issues](https://github.com/BuTangTang/Codex-Top/issues) and pull requests is welcome. Include macOS/Codex versions and reproduction steps. Do not upload raw `.codex` data, authentication files, or screenshots of private tasks.
+- [Usage](docs/usage.md) · [Development and packaging](docs/development.md) · [Docs index](docs/README.md) · [Current status](docs/STATUS.md) (Chinese)
 
-Copyright © 2026 BuTangTang. Licensed under [GNU GPL v3](LICENSE). An independent community project, not officially affiliated with OpenAI.
+Issues and pull requests are welcome on [GitHub](https://github.com/BuTangTang/Codex-Top/issues). Please include your macOS, Codex, or Claude Code version and steps to reproduce, and do not upload raw `.codex` or `.claude` data, credential files, or screenshots with private content.
+
+Copyright © 2026 BuTangTang. Licensed under the [GNU GPL v3](LICENSE). An independent community project, not affiliated with OpenAI or Anthropic.

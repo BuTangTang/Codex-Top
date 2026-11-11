@@ -32,6 +32,11 @@ struct MonitorView: View {
     var dragStarted: (CGPoint) -> Void = { _ in }
     var dragMoved: (CGPoint) -> Void = { _ in }
     var dragEnded: (CGPoint) -> Void = { _ in }
+    /// 悬浮球面板传窗口控制器定下的卡片（和面板尺寸同一步换）；不传就直接跟着 store。
+    var usageCardOverride: TaskOrigin?? = nil
+    /// 悬浮球面板：列表固定按算好的高度，取整多出来的一点留在最底下。不这样的话，开关用量卡片时面板总高取整不同，
+    /// 多出来的零头被列表吃掉，底栏和标题会跟着挪一两个像素（2026-11-11 用户录屏逐帧量出来：标题 +1、底栏 +2）。
+    var fixedListHeight = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @Environment(\.compactMonitorTypography) private var windowCompactTypography
@@ -85,7 +90,6 @@ struct MonitorView: View {
                         let contentHeight = CGFloat(active.count + fresh.count) * PanelMetrics.expandedRow
                             + (fresh.isEmpty ? 0 : PanelMetrics.freshHeader)
                             + CGFloat(finished.count) * PanelMetrics.finishedRow
-                            + usageCardHeight
                         ScrollView {
                             // Each section has uniform rows and an exact total height. Keep
                             // offscreen controls lazy without estimating a mixed-height list.
@@ -104,9 +108,6 @@ struct MonitorView: View {
                                 if showFinished {
                                     taskSection(finished, rowHeight: PanelMetrics.finishedRow, separated: false)
                                 }
-                                // 点底栏 CX／CC，用量卡片接在列表最底下、紧挨底栏（2026-11-10 用户选 D1）。放在列表里面，
-                                // 和“已结束”展开一样随窗口长高露出来，不会先把列表挤矮再撑开（用户：“打开的时候界面会有点抖动”）。
-                                usageCardSection
                             }
                             // The panel owns disclosure/morph animation. Do not animate the
                             // insertion or removal of every offscreen history row as well.
@@ -117,6 +118,7 @@ struct MonitorView: View {
                         .scrollDisabled(contentHeight <= viewport.size.height + hairline)
                         .scrollIndicators(.never).scrollBounceBehavior(.basedOnSize).frame(maxHeight: .infinity)
                     }
+                    .frame(maxHeight: fixedListHeight ? store.listHeight(includesFinished: showFinished) : .infinity)
                 }
                 if let warning = store.panelWarning {
                     Label(warning, systemImage: "exclamationmark.circle").font(PanelFonts.readable(14, scale: store.uiScale, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme))
@@ -137,7 +139,11 @@ struct MonitorView: View {
                     .padding(.horizontal, 12).padding(.vertical, 6)
                 }
                 footer.fixedSize(horizontal: false, vertical: true).layoutPriority(1)
+                // 用量卡片在底栏下面，像从底栏下面拉出的抽屉（2026-11-11 用户看过对比后选“挪到底栏下面”）：
+                // 打开时上面的任务和底栏位置都不动，外框往下长多少就露出多少卡片，不会再抖。
+                usageCardSection.layoutPriority(1)
         }
+        .frame(maxHeight: fixedListHeight ? .infinity : nil, alignment: .top)
         // The native panel/surface owns size changes. Inheriting its spring or
         // the disclosure transaction gives text and footer a second layout path.
         .animation(nil, value: showFinished)
@@ -226,14 +232,13 @@ struct MonitorView: View {
 
     /// 细线固定 1 个物理像素：0.5 点在 1 倍屏上会变成发虚的灰线。
     private var hairline: CGFloat { PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale) }
-    private var usageCardHeight: CGFloat {
-        guard let origin = store.openUsageCard else { return 0 }
-        return UsageCard.height(origin, store: store) + hairline
-    }
+    /// 卡片一打开就按全高放好，不自己做动画：面板换尺寸时内容一次按最终大小排好，只有外框慢慢长出来。
     @ViewBuilder private var usageCardSection: some View {
-        if let origin = store.openUsageCard {
-            separator
-            UsageCard(store: store, origin: origin)
+        if let origin = usageCardOverride ?? store.openUsageCard {
+            VStack(spacing: 0) {
+                Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline)
+                UsageCard(store: store, origin: origin)
+            }
         }
     }
     private var separator: some View { Rectangle().fill(Palette.hairline(store.theme.colorScheme)).frame(height: hairline).padding(.horizontal, 16) }

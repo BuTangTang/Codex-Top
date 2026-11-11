@@ -99,6 +99,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     private var orbCanvas: CGRect?
     private var orbMotion: Int?
     private var orbLayoutPending = false
+    /// 展开时窗口画布额外包进去的面板位置（用量卡片换个开关状态时的面板），见 updateOrbLayout。
+    private var orbSlack: CGRect?
     private var orbMotionGeneration = 0
     private var orbTarget = CGRect.zero
     private var orbClickMonitors: [Any] = []
@@ -233,18 +235,12 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         }
     }
     /// 按目标屏幕计算面板高度，分隔线与内容使用同一尺寸口径，避免短列表产生滚动余量。
-    private func panelHeight(compact: Bool, displayScale: CGFloat) -> CGFloat {
+    private func panelHeight(compact: Bool, displayScale: CGFloat, card: TaskOrigin?? = nil) -> CGFloat {
         let includesFinished = compact ? monitorState.floatingFinished : monitorState.expandedFinished
-        let fresh = Set(store.freshFinished.keys)
-        let visibleTasks = (store.active + store.freshTasks + (includesFinished ? store.finished : [])).prefix(store.preferences.resolvedVisibleTaskCount)
         let header = compact ? PanelMetrics.floatingHeader : PanelMetrics.expandedHeader
-        // D-91：“刚完成”的行和进行中一样高，另加一个段头。
-        let freshHeader = visibleTasks.contains { fresh.contains($0.id) } ? PanelMetrics.freshHeader : 0
-        let body = store.selected.isEmpty ? 195 : freshHeader + visibleTasks.reduce(CGFloat.zero) { height, task in
-            height + (fresh.contains(task.id) ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: store.graph.activity(for: task).phase))
-        }
+        let body = store.listHeight(includesFinished: includesFinished)
         let separator = PanelMetrics.separatorHeight(displayScale: displayScale, uiScale: store.uiScale)
-        let usageCard = store.openUsageCard.map { UsageCard.height($0, store: store) + separator } ?? 0
+        let usageCard = (card ?? store.openUsageCard).map { UsageCard.height($0, store: store) + separator } ?? 0
         let height = header + body + PanelMetrics.footer + 2 * separator + usageCard
         let messageScale = max(0.8, store.uiScale) / store.uiScale
         let total = height + (store.panelWarning == nil ? 0 : 62 * messageScale) + (store.notice == nil ? 0 : 52 * messageScale)
@@ -356,17 +352,10 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
     /// 按圆环实际所在屏幕布局展开面板，并在动画中保留原来的展开方向与锚点。
     private func updateOrbLayout(animated: Bool, expanded requestedExpanded: Bool? = nil) {
         guard store.placement == .orb, !dragging, let chosen else { return }
-        // Refresh/disclosure changes can arrive while the surface still presents an
-        // intermediate frame. Do not rebase that frame from its model endpoint.
-        // Explicit open/close commands remain interruptible.
-        if orbMotion != nil && requestedExpanded == nil {
-            orbLayoutPending = true
-            return
-        }
         let willExpand = requestedExpanded ?? orbState.expanded
         if orbAnchor.width == 0 { orbAnchor = WindowGeometry.orbAnchor(inCollapsed: floating.frame, growsLeft: orbState.capsuleGrowsLeft) }
         let display = displays.first { $0.screen.frame.contains(CGPoint(x: orbAnchor.midX, y: orbAnchor.midY)) } ?? chosen
-        orbAnchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame, inset: 0))
+        let anchor = alignedOrb(WindowGeometry.clamp(orbAnchor, to: display.screen.visibleFrame, inset: 0))
         let size = CGSize(width: PanelMetrics.expandedWidth * store.uiScale, height: panelHeight(compact: false, displayScale: display.screen.backingScaleFactor) * store.uiScale)
         let desired: CGRect
         let direction: OrbExpansionDirection
@@ -374,9 +363,36 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             direction = openingDirection
             desired = WindowGeometry.resizedOrbPanel(from: openFrame, size: size, visible: display.screen.visibleFrame, direction: direction)
         } else {
-            let layout = WindowGeometry.orbPanelLayout(from: orbAnchor, size: size, visible: display.screen.visibleFrame)
+            let layout = WindowGeometry.orbPanelLayout(from: anchor, size: size, visible: display.screen.visibleFrame)
             desired = layout.frame; direction = layout.direction
         }
+        // 用量卡片换个开关状态时面板的位置：窗口画布一直把它也包进去，开关卡片只在窗口里面长缩、不改窗口大小。
+        // 面板看得见时改窗口大小，系统会按错位画一帧（标题、底栏跳一下，2026-11-11 用户录屏）；
+        // 包进去的这块在展开时窗口本来就要变大的那一下加上。
+        var slack: CGRect?
+        if willExpand {
+            let other: TaskOrigin?? = store.openUsageCard != nil ? .some(nil)
+                : store.codexUsage != nil ? .some(.codex) : store.showsClaudeUsage ? .some(.claudeCode) : nil
+            if let other {
+                let otherSize = CGSize(width: size.width, height: panelHeight(compact: false, displayScale: display.screen.backingScaleFactor, card: other) * store.uiScale)
+                slack = WindowGeometry.resizedOrbPanel(from: desired, size: otherSize, visible: display.screen.visibleFrame, direction: direction)
+            }
+        }
+        // Refresh/disclosure changes can arrive while the surface still presents an
+        // intermediate frame. Do not rebase that frame from its model endpoint.
+        // Explicit open/close commands remain interruptible.
+        // 面板开着、新目标不用平移画布坐标（往下长或缩）时不等：等上一段弹簧完全停下要 0.8 秒以上，
+        // 这期间卡片已经换了、面板还是旧高度，列表会被挤没或多露出几行（2026-11-11 用户录屏）。
+        if orbMotion != nil && requestedExpanded == nil {
+            let canvas = orbCanvas ?? floating.frame
+            let grown = canvas.union(desired).union(slack ?? desired)
+            guard orbState.expanded, grown.minX == canvas.minX, grown.maxY == canvas.maxY else {
+                orbLayoutPending = true
+                return
+            }
+        }
+        orbAnchor = anchor
+        orbSlack = slack
         let expanded = desired
         if willExpand { orbExpandedFrame = expanded; orbExpansionDirection = direction }
         if willExpand || (!orbState.expanded && orbMotion == nil) {
@@ -386,6 +402,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             withTransaction(transaction) {
                 if orbState.expandedSize != expanded.size { orbState.expandedSize = expanded.size }
                 if orbState.expansionDirection != direction { orbState.expansionDirection = direction }
+                if orbState.usageCard != store.openUsageCard { orbState.usageCard = store.openUsageCard }
             }
         }
         let collapsed = WindowGeometry.collapsedOrbFrame(anchor: orbAnchor, extension: orbCapsuleExtension, visible: display.screen.visibleFrame)
@@ -405,7 +422,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         orbHoverSuppressedUntilExit = false
         let anchor = alignedOrb(anchor)
         cancelOrbMotion()
-        orbCanvas = nil; orbAnchor = anchor; orbTarget = anchor; orbExpandedFrame = nil; orbExpansionDirection = nil
+        orbCanvas = nil; orbSlack = nil; orbAnchor = anchor; orbTarget = anchor; orbExpandedFrame = nil; orbExpansionDirection = nil
         orbLayoutPending = false
         let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
         // A cancelled morph can still have coordinates relative to its larger canvas.
@@ -428,11 +445,16 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         orbMotionGeneration &+= 1
         orbMotion = nil
     }
+    /// 停下来时窗口的大小：展开时连用量卡片换个开关状态的面板一起包进去。
+    private func orbRestCanvas(for target: CGRect, expanded: Bool) -> CGRect {
+        expanded ? target.union(orbSlack ?? target) : target
+    }
     private func animateOrb(to target: CGRect, expanded: Bool, animated: Bool) {
         let frame = floating.frame
+        let rest = orbRestCanvas(for: target, expanded: expanded)
         let tolerance = 1 / (floating.screen?.backingScaleFactor ?? 1)
-        let reached = abs(frame.minX - target.minX) <= tolerance && abs(frame.minY - target.minY) <= tolerance &&
-            abs(frame.width - target.width) <= tolerance && abs(frame.height - target.height) <= tolerance
+        let reached = abs(frame.minX - rest.minX) <= tolerance && abs(frame.minY - rest.minY) <= tolerance &&
+            abs(frame.width - rest.width) <= tolerance && abs(frame.height - rest.height) <= tolerance
         // AppKit can quantize a window frame. A periodic data refresh must not replay
         // the morph just because the unchanged target differs by a fraction of a pixel.
         guard expanded != orbState.expanded || target != orbTarget || !reached && orbMotion == nil else { return }
@@ -445,13 +467,13 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             // WindowServer's shadow left a duplicate bottom contour after the
             // transparent orb canvas shrank. Keep this surface shadow-free.
             floating.hasShadow = false
-            commitOrbCanvas(target, surface: CGRect(origin: .zero, size: target.size))
-            orbCanvas = nil
+            commitOrbCanvas(rest, surface: CGRect(x: target.minX - rest.minX, y: rest.maxY - target.maxY, width: target.width, height: target.height))
+            orbCanvas = rest == target ? nil : rest
             finishOrbLayout()
             return
         }
         let oldCanvas = orbCanvas ?? floating.frame
-        let canvas = oldCanvas.union(target)
+        let canvas = oldCanvas.union(rest)
         // Rebase without animation: the visible surface stays at the same screen point
         // while its backing window grows to contain both endpoints.
         if orbCanvas == nil || canvas != oldCanvas {
@@ -480,12 +502,15 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             self.finishOrbLayout()
         }
     }
-    private func finishOrbCanvas() {
+    /// 动画结束把窗口收到停下来的大小；拖动后要按面板本身贴屏幕边，`trimSlack` 时只留面板。
+    private func finishOrbCanvas(trimSlack: Bool = false) {
         guard orbCanvas != nil else { return }
         let wasPositioning = positioning; positioning = true; defer { positioning = wasPositioning }
         cancelOrbMotion()
-        commitOrbCanvas(orbTarget, surface: CGRect(origin: .zero, size: orbTarget.size))
-        orbCanvas = nil
+        let rest = trimSlack ? orbTarget : orbRestCanvas(for: orbTarget, expanded: orbState.expanded)
+        commitOrbCanvas(rest, surface: CGRect(x: orbTarget.minX - rest.minX, y: rest.maxY - orbTarget.maxY,
+                                              width: orbTarget.width, height: orbTarget.height))
+        orbCanvas = rest == orbTarget ? nil : rest
         if !orbState.expanded { orbExpandedFrame = nil; orbExpansionDirection = nil }
     }
     private func finishOrbLayout() {
@@ -750,7 +775,8 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
         synchronizeNativeDrag()
         let moved = dragExceededClickThreshold || hypot(pointer.x - dragPointerStart.x, pointer.y - dragPointerStart.y) >= 4 ||
             hypot(floating.frame.minX - dragStart.x, floating.frame.minY - dragStart.y) >= 4
-        if store.placement == .orb { finishOrbCanvas() }
+        // 真拖动了才把窗口收成面板本身（贴边按面板算）；只是点一下标题就保留卡片那块，免得窗口一缩一放。
+        if store.placement == .orb { finishOrbCanvas(trimSlack: moved) }
         if let display = displays.first(where: { $0.screen.frame.contains(pointer) }) ??
             displays.first(where: { $0.screen.frame.contains(CGPoint(x: floating.frame.midX, y: floating.frame.midY)) }) ?? chosen {
             // 悬浮球松手停在原处，只保证不出屏幕、不压菜单栏和程序坞；常驻浮窗仍离边 8 点。
@@ -787,6 +813,7 @@ final class HoverHostingView<Content: View>: NSHostingView<Content> {
             orbAnchor = orbAnchor.offsetBy(dx: dx, dy: dy)
             orbTarget = orbTarget.offsetBy(dx: dx, dy: dy)
             orbExpandedFrame = orbExpandedFrame?.offsetBy(dx: dx, dy: dy)
+            orbSlack = orbSlack?.offsetBy(dx: dx, dy: dy)
             orbCanvas = actual
             return
         }

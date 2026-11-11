@@ -165,6 +165,17 @@ import CodexTopCore
         selected.filter { freshFinished[$0.id] != nil }.sorted { (freshFinished[$0.id] ?? .distantPast) > (freshFinished[$1.id] ?? .distantPast) }
     }
     var finished: [CodexTask] { selected.filter { graph.activity(for: $0).phase.isFinished && freshFinished[$0.id] == nil } }
+    /// 列表这一段的高度（不含标题、底栏）：最多显示设定的行数，多出来的滚动。面板高度和悬浮球面板里的列表都按它算。
+    func listHeight(includesFinished: Bool) -> CGFloat {
+        guard !selected.isEmpty else { return 195 }
+        let fresh = Set(freshFinished.keys)
+        let visibleTasks = (active + freshTasks + (includesFinished ? finished : [])).prefix(preferences.resolvedVisibleTaskCount)
+        // D-91：“刚完成”的行和进行中一样高，另加一个段头。
+        let freshHeader = visibleTasks.contains { fresh.contains($0.id) } ? PanelMetrics.freshHeader : 0
+        return freshHeader + visibleTasks.reduce(CGFloat.zero) { height, task in
+            height + (fresh.contains(task.id) ? PanelMetrics.expandedRow : PanelMetrics.rowHeight(for: graph.activity(for: task).phase))
+        }
+    }
     func markFinishedSeen(_ id: String) {
         guard freshFinished[id] != nil else { return }
         freshFinished[id] = nil; onChange?()

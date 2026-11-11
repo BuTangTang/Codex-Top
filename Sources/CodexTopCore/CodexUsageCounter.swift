@@ -19,6 +19,8 @@ public struct CodexTokens: Equatable, Sendable {
 public struct CodexUsageSummary: Equatable, Sendable {
     /// 近 7 天，最早的在前，最后一个是今天。
     public var days: [CodexTokens]
+    /// 每一天从什么时候开始，和 days 一一对应；界面按它标星期。
+    public var starts: [Date] = []
     public var today: CodexTokens { days.last ?? CodexTokens() }
     public var yesterday: CodexTokens { days.count > 1 ? days[days.count - 2] : CodexTokens() }
     public var week: Int { days.reduce(0) { $0 + $1.total } }
@@ -41,9 +43,9 @@ public actor CodexUsageCounter {
 
     public init() {}
 
-    public func summary(files urls: [URL], now: Date = .now, calendar: Calendar = .current) -> CodexUsageSummary {
-        let today = calendar.startOfDay(for: now)
-        let starts = (0..<7).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
+    /// 按本地时间中午 12 点切天，和 Claude 用量一致（见 UsageDayBoundary）。
+    public func summary(files urls: [URL], now: Date = .now, boundary: UsageDayBoundary = .localNoon) -> CodexUsageSummary {
+        let starts = boundary.starts(endingAt: now)
         guard let first = starts.first else { return .empty }
         var days = Array(repeating: CodexTokens(), count: 7)
         var live: Set<String> = []
@@ -51,7 +53,7 @@ public actor CodexUsageCounter {
             let path = url.path
             guard live.insert(path).inserted else { continue }
             var state = files[path] ?? FileState()
-            read(url, into: &state, calendar: calendar)
+            read(url, into: &state, boundary: boundary)
             state.buckets = state.buckets.filter { $0.key >= first }
             files[path] = state
             for (index, start) in starts.enumerated() {
@@ -59,10 +61,10 @@ public actor CodexUsageCounter {
             }
         }
         files = files.filter { live.contains($0.key) }
-        return CodexUsageSummary(days: days)
+        return CodexUsageSummary(days: days, starts: starts)
     }
 
-    private func read(_ url: URL, into state: inout FileState, calendar: Calendar) {
+    private func read(_ url: URL, into state: inout FileState, boundary: UsageDayBoundary) {
         // 不用 URL 的资源缓存：同一个地址对象会一直给出旧的大小。
         let size = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.uint64Value ?? 0
         if size < state.offset { state = FileState() }
@@ -72,12 +74,12 @@ public actor CodexUsageCounter {
         guard let data = try? handle.readToEnd(), let end = data.lastIndex(of: 10) else { return }
         let marker = Data("\"token_count\"".utf8)
         for line in data[data.startIndex..<end].split(separator: 10) where line.range(of: marker) != nil {
-            consume(Data(line), into: &state, calendar: calendar)
+            consume(Data(line), into: &state, boundary: boundary)
         }
         state.offset += UInt64(end - data.startIndex + 1)
     }
 
-    private func consume(_ line: Data, into state: inout FileState, calendar: Calendar) {
+    private func consume(_ line: Data, into state: inout FileState, boundary: UsageDayBoundary) {
         guard let value = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               value["type"] as? String == "event_msg",
               let payload = value["payload"] as? [String: Any], payload["type"] as? String == "token_count",
@@ -91,7 +93,7 @@ public actor CodexUsageCounter {
         let delta = total - state.last
         state.last = total
         guard delta.total > 0 else { return }
-        let day = calendar.startOfDay(for: at)
+        let day = boundary.start(of: at)
         state.buckets[day] = (state.buckets[day] ?? CodexTokens()) + delta
     }
 }
