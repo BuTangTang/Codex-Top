@@ -47,6 +47,12 @@ public struct MonitorPreferences: Codable, Equatable, Sendable {
     public var claudeEnabled: Bool?
     public var claudeHome: String?
     public var claudeBaselineApplied: Bool?
+    /// REQ-005 设备读取：允许局域网设备读（默认关）、口令（6 位数字）、给任务标题（默认给）。
+    public var deviceLANAccess: Bool?
+    public var deviceToken: String?
+    public var deviceShareTitles: Bool?
+    public var resolvedDeviceLANAccess: Bool { deviceLANAccess ?? false }
+    public var resolvedDeviceShareTitles: Bool { deviceShareTitles ?? true }
     public var resolvedClaudeEnabled: Bool { claudeEnabled ?? true }
     public static let finishedRetentionOptions = [0, 3, 7, 14, 30]
     public var resolvedFinishedRetentionDays: Int {

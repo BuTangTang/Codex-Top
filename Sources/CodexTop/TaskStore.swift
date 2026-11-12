@@ -46,6 +46,10 @@ import CodexTopCore
     @Published private(set) var systemTheme: PanelTheme = .light
     let demo: Bool
     var onChange: (() -> Void)?
+    /// REQ-005 设备读取：开关、口令变了，App 按新设置重开接口服务。
+    var onDeviceSettingsChange: (() -> Void)?
+    /// 接口服务的问题（端口被占用等），给设置窗口显示；nil 表示正常。
+    @Published var deviceServiceProblem: String?
     var onDisplayChange: (() -> Void)?
     var onModeChange: (() -> Void)?
     var onAppearanceChange: (() -> Void)?
@@ -143,17 +147,21 @@ import CodexTopCore
         return sourceWarning
     }
     var uiScale: CGFloat { CGFloat(preferences.resolvedScale) }
-    /// 当前图和关注集合不变时复用排序；首次读取保持状态、时间及并列输入顺序。
+    /// 当前图和关注集合不变时复用排序；分段后按开始时间排，同时间按编号，顺序不随动静变化。
     var selected: [CodexTask] {
         if let selectedCache { return selectedCache }
         let graph = self.graph, selectedIDs = preferences.selectedIDs
-        var ranked = graph.roots.compactMap { task -> (task: CodexTask, priority: Int)? in
+        // 2026-11-11 用户选 A：分段（需要你处理 → 进行中 → 已结束），段内按开始时间、新的在上；
+        // 不再按最近动静排，任务有输出时不换位置，只有状态变了才换段。
+        var ranked = graph.roots.compactMap { task -> (task: CodexTask, section: Int)? in
             guard selectedIDs.contains(task.id) else { return nil }
-            return (task, graph.activitySource(for: task).activity.phase.priority)
+            let phase = graph.activitySource(for: task).activity.phase
+            return (task, phase == .waiting || phase == .failed ? 0 : phase.isFinished ? 2 : 1)
         }
         ranked.sort {
-            if $0.priority != $1.priority { return $0.priority < $1.priority }
-            return $0.task.updatedAt > $1.task.updatedAt
+            if $0.section != $1.section { return $0.section < $1.section }
+            if $0.task.createdAt != $1.task.createdAt { return $0.task.createdAt > $1.task.createdAt }
+            return $0.task.id < $1.task.id
         }
         let selected = ranked.map { $0.task }
         selectedCache = selected
@@ -560,6 +568,22 @@ import CodexTopCore
         preferences.orbAppearance = value
         save()
     }
+    /// 第一次打开局域网读取时自动生成 6 位数字口令。
+    func setDeviceLANAccess(_ value: Bool) {
+        preferences.deviceLANAccess = value
+        if value && (preferences.deviceToken ?? "").isEmpty { preferences.deviceToken = DeviceAPI.newToken() }
+        save(); onDeviceSettingsChange?()
+    }
+    /// 换一个口令，旧的立刻失效。
+    func regenerateDeviceToken() {
+        preferences.deviceToken = DeviceAPI.newToken()
+        save(); onDeviceSettingsChange?()
+    }
+    /// 给不给任务标题：每次请求时读，不用重开服务。
+    func setDeviceShareTitles(_ value: Bool) {
+        preferences.deviceShareTitles = value
+        save()
+    }
     func setVisibleTaskCount(_ value: Int) {
         preferences.visibleTaskCount = value
         preferences.visibleTaskCount = preferences.resolvedVisibleTaskCount
@@ -617,14 +641,15 @@ import CodexTopCore
             Task { await refresh() }
         }
     }
-    func openTask(_ task: CodexTask) {
+    /// 面板点一行就是这里。设备读取接口（REQ-005 打开任务）也走这里，`completion` 告诉它打开了没有、没打开时的提示；面板调用不传。
+    func openTask(_ task: CodexTask, completion: (@MainActor @Sendable (Bool, String?) -> Void)? = nil) {
         markFinishedSeen(task.id)
-        if demo { notice = "这是演示任务。实际任务会在 \(task.origin.displayName) 中打开。"; return }
+        if demo { notice = "这是演示任务。实际任务会在 \(task.origin.displayName) 中打开。"; completion?(false, notice); return }
         let target = graph.navigationTarget(for: task)
-        if target.origin == .claudeCode { openClaudeTask(target); return }
+        if target.origin == .claudeCode { openClaudeTask(target, completion: completion); return }
         guard let link = target.deepLink,
               let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
-            taskNavigationFailed(id: target.id); return
+            taskNavigationFailed(id: target.id); completion?(false, notice); return
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
@@ -633,25 +658,27 @@ import CodexTopCore
         NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { @Sendable [weak self] _, error in
             Task { @MainActor in
                 guard let self else { return }
-                if error != nil { self.taskNavigationFailed(id: target.id) }
-                else { self.onExternalNavigation?() }
+                if error != nil { self.taskNavigationFailed(id: target.id); completion?(false, self.notice) }
+                else { self.onExternalNavigation?(); completion?(true, nil) }
             }
         }
     }
     /// 桌面 App 的会话直达；其他入口复制会话编号，桌面 App 打不开时说明，不假装成功（R-17、D-07、D-85）。
-    private func openClaudeTask(_ task: CodexTask) {
+    private func openClaudeTask(_ task: CodexTask, completion: (@MainActor @Sendable (Bool, String?) -> Void)? = nil) {
         let sessionID = task.claudeSessionID ?? task.id
         guard let link = task.deepLink,
               let app = NSWorkspace.shared.urlForApplication(toOpen: link) else {
-            copyClaudeSession(sessionID, desktop: task.claudeLaunch?.fromDesktopApp == true); return
+            let desktop = task.claudeLaunch?.fromDesktopApp == true
+            copyClaudeSession(sessionID, desktop: desktop)
+            completion?(false, desktop ? notice : "这个会话不在 Claude 桌面 App 里，会话编号已复制"); return
         }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         NSWorkspace.shared.open([link], withApplicationAt: app, configuration: configuration) { @Sendable [weak self] _, error in
             Task { @MainActor in
                 guard let self else { return }
-                if error != nil { self.copyClaudeSession(sessionID, desktop: true) }
-                else { self.onExternalNavigation?() }
+                if error != nil { self.copyClaudeSession(sessionID, desktop: true); completion?(false, self.notice) }
+                else { self.onExternalNavigation?(); completion?(true, nil) }
             }
         }
     }

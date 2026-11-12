@@ -4,13 +4,13 @@ import CodexTopCore
 @testable import CodexTop
 
 final class TaskStoreDerivedStateTests: XCTestCase {
-    /// 排序保持状态优先、时间倒序及并列输入顺序；汇总失败优先且只计已选根任务。
+    /// 排序分段（需要你处理 → 进行中 → 已结束），段内按开始时间新的在上、同时间按编号（2026-11-11 用户选 A）；汇总失败优先且只计已选根任务。
     @MainActor func testSelectionOrderingAndSummaryPreserveTheirDifferentPriorities() async throws {
         let directory = try fixture()
         let store = TaskStore(stateDirectory: directory)
         await store.refresh()
         let ties = store.graph.roots.filter { $0.id.hasPrefix("running-tie-") }.map(\.id)
-        XCTAssertEqual(store.selected.map(\.id), ["waiting-root", "failed", "running-new"] + ties + ["unknown", "stopped", "completed"])
+        XCTAssertEqual(store.selected.map(\.id), ["failed", "waiting-root", "unknown", "running-new"] + ties.sorted() + ["stopped", "completed"])
         XCTAssertEqual(Set(store.active.map(\.id)), ["waiting-root", "failed", "running-new", "running-tie-a", "running-tie-b", "unknown"])
         XCTAssertEqual(store.finished.map(\.id), ["stopped", "completed"])
         XCTAssertEqual(store.statusSummary, MonitorStatusSummary(phases: [.waiting, .failed, .running, .running, .running, .unknown, .stopped, .completed]))
@@ -60,7 +60,7 @@ final class TaskStoreDerivedStateTests: XCTestCase {
         let store = TaskStore(stateDirectory: directory)
         await store.refresh()
         let originalRoot = try XCTUnwrap(store.graph.roots.first { $0.id == "waiting-root" })
-        XCTAssertEqual(store.selected.first?.id, "waiting-root")
+        XCTAssertEqual(store.selected.prefix(2).map(\.id), ["failed", "waiting-root"], "需要你处理一段里按开始时间，新的在上")
         XCTAssertEqual(store.statusSummary.waiting, 1)
 
         func appendChildEvent(_ type: String) throws {

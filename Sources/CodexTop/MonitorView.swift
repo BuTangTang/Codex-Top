@@ -362,23 +362,24 @@ private struct MonitorTaskRow: View {
                         .frame(width: LEDPipView.width, height: LEDPipView.height(rows: pipRows))
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? (crisp ? .medium : .regular) : .semibold, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
+                            // 2026-11-11 用户：CX／CC 放到最前面，所有行的标记竖着对齐。
                             if store.panelShowsSourceMarks { SourceMark(origin: task.origin, scale: store.uiScale) }
+                            Text(task.title).font(PanelFonts.readable(16, minimum: 14, scale: store.uiScale, weight: activity.phase.isFinished ? (crisp ? .medium : .regular) : .semibold, compact: compactTypography)).foregroundStyle(Palette.primary(store.theme.colorScheme)).lineLimit(1).truncationMode(.tail)
                         }
                         if fresh, let finishedAt = store.freshFinished[taskID] {
                             TimelineView(.periodic(from: .now, by: 30)) { context in
-                                let minutes = Int(context.date.timeIntervalSince(finishedAt)) / 60
-                                Text("本轮执行已结束 · \(minutes < 1 ? "刚刚" : "\(minutes) 分钟前")").lineLimit(1)
+                                // 文字和设备读取接口共用一处（REQ-005），两边一字不差。
+                                Text(TaskStatusText.finished(at: finishedAt, now: context.date)).lineLimit(1)
                             }
                             .font(PanelFonts.readable(14, scale: store.uiScale, weight: crisp ? .medium : .regular, compact: compactTypography))
                             .foregroundStyle(Palette.secondary(store.theme.colorScheme))
                         } else if !activity.phase.isFinished {
                             HStack(spacing: 5) {
                                 Text(activity.detail).lineLimit(1)
-                                if childCount > 0 { Text("· \(childCount) 个子任务").lineLimit(1) }
+                                if let children = TaskStatusText.children(childCount) { Text(children).lineLimit(1) }
                                 if activity.phase == .waiting, let since = activity.waitingStartedAt {
                                     TimelineView(.periodic(from: .now, by: 30)) { context in
-                                        Text("· 已等 \(max(1, Int(context.date.timeIntervalSince(since)) / 60)) 分钟").lineLimit(1)
+                                        Text(TaskStatusText.waited(since: since, now: context.date)).lineLimit(1)
                                     }
                                 }
                             }.font(PanelFonts.readable(14, scale: store.uiScale, weight: crisp ? .medium : .regular, compact: compactTypography)).foregroundStyle(Palette.secondary(store.theme.colorScheme))

@@ -87,6 +87,8 @@ cat > "$app_path/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSLocalNetworkUsageDescription</key><string>让同一网络里的设备（比如 M5Stack Tab5）读取任务状态和用量，只读。</string>
+<key>NSBonjourServices</key><array><string>_codextop._tcp</string></array>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHumanReadableCopyright</key><string>Copyright © 2026 BuTangTang. GNU GPL v3.</string>
 <key>CodexTopDemo</key><$demo/>

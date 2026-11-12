@@ -47,6 +47,8 @@ struct StatusItemPresentation: Equatable {
     private var statusObservation: AnyCancellable?
     private var statusRenderer = StatusItemRenderer()
     private var shutdownTask: Task<Void, Never>?
+    /// REQ-005 设备读取接口；演示模式不开。
+    private var deviceServer: DeviceAPIServer?
     /// 启动唯一状态栏入口并应用固定样式，再接入任务展示更新与窗口操作。
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = TaskStore(); windows = WindowController(store: store)
@@ -103,6 +105,7 @@ struct StatusItemPresentation: Equatable {
             DispatchQueue.main.async { self?.updateStatusItem() }
         }
         updateStatusItem()
+        startDeviceServer()
         store.start()
         if CommandLine.arguments.contains("--show") { windows.toggleExpanded() }
     }
@@ -126,7 +129,27 @@ struct StatusItemPresentation: Equatable {
         }
         return .terminateLater
     }
-    func applicationWillTerminate(_ notification: Notification) { store?.stop() }
+    func applicationWillTerminate(_ notification: Notification) { deviceServer?.stop(); store?.stop() }
+    /// 接口内容从面板结果现拼；设置里开关、口令一变就按新设置重开（换口令不用重开，只换判断）。
+    private func startDeviceServer() {
+        guard !store.demo else { return }
+        let computer = DeviceAPIServer.computerName
+        let server = DeviceAPIServer(
+            content: { [weak store] route in store?.deviceAPIData(route, computer: computer) ?? Data("{}".utf8) },
+            open: { [weak store] code, reply in
+                guard let store else { reply(503, Data("{\"error\":\"unavailable\"}".utf8)); return }
+                store.deviceOpenTask(code: code, reply: reply)
+            })
+        server.onStateChange = { [weak self, weak server] in self?.store.deviceServiceProblem = server?.problem }
+        deviceServer = server
+        store.onDeviceSettingsChange = { [weak self] in self?.applyDeviceServer() }
+        applyDeviceServer()
+    }
+    private func applyDeviceServer() {
+        let preferences = store.preferences
+        deviceServer?.apply(.init(lan: preferences.resolvedDeviceLANAccess, token: preferences.deviceToken,
+                                  serviceName: DeviceAPIServer.computerName))
+    }
     private func add(_ title: String, _ action: Selector, to menu: NSMenu, key: String = "") {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
     }

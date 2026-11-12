@@ -313,6 +313,7 @@ struct SettingsView: View {
                 appearanceSettings
             case .tasks:
                 taskSettings
+                deviceSettings
             case .mobile:
                 if !store.demo { MobileAccountSection(account: mobileAccount) }
             case .usage:
@@ -410,6 +411,33 @@ struct SettingsView: View {
                 Toggle("暂停任务刷新", isOn: $store.paused)
                 TaskRefreshButton(store: store, state: store.refreshState)
             }
+    }
+
+    /// REQ-005 设备读取：局域网开关、口令、给不给标题，以及设备该访问的地址或出错原因。演示模式不开接口。
+    @ViewBuilder private var deviceSettings: some View {
+        if !store.demo {
+            Section("设备读取") {
+                Toggle("允许局域网设备读取", isOn: Binding(get: { store.preferences.resolvedDeviceLANAccess }, set: { store.setDeviceLANAccess($0) }))
+                Text("同一 Wi-Fi 下的 Tab5 等设备能自动找到这台电脑，带上口令读取任务状态和用量；只能读，不能改动任何东西。关闭时只有本机能读。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if store.preferences.resolvedDeviceLANAccess {
+                    HStack {
+                        Text("口令"); Spacer()
+                        Text(store.preferences.deviceToken ?? "").font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        Button("换一个") { store.regenerateDeviceToken() }
+                    }
+                }
+                Toggle("给任务标题", isOn: Binding(get: { store.preferences.resolvedDeviceShareTitles }, set: { store.setDeviceShareTitles($0) }))
+                Text("关掉后设备只看到来源、状态和计时，看不到任务标题。").font(.caption).foregroundStyle(.secondary)
+                Text(deviceAddressLine).font(.caption)
+                    .foregroundStyle(store.deviceServiceProblem == nil ? Color.secondary : Color.orange).textSelection(.enabled)
+            }
+        }
+    }
+    private var deviceAddressLine: String {
+        if let problem = store.deviceServiceProblem { return problem }
+        guard store.preferences.resolvedDeviceLANAccess else { return "本机可以访问 127.0.0.1:\(DeviceAPI.port)" }
+        return DeviceAPIServer.lanAddress().map { "设备可以访问 \($0):\(DeviceAPI.port)" } ?? "没有找到局域网地址，请确认已连上 Wi-Fi 或网线"
     }
 
     /// 数据目录、登录启动及恢复默认仍调用原有入口，提示完整保留。

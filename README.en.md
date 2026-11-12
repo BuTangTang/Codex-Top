@@ -4,7 +4,7 @@
 
 Keep an eye on your Codex and Claude Code tasks from the desktop: what is running, what is waiting for you, and what just finished — without switching windows.
 
-A native macOS app (SwiftUI + AppKit). The current source and local install are **v1.0.0 build 158**. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are versioned separately. A cross-platform Qt version is in development; see [below](#cross-platform-qt-version-in-development).
+A native macOS app (SwiftUI + AppKit). The current source and local install are **v1.0.0 build 161**. [Published downloads](https://github.com/BuTangTang/Codex-Top/releases) are versioned separately. A cross-platform Qt version is in development; see [below](#cross-platform-qt-version-in-development).
 
 ## Install
 
@@ -37,9 +37,14 @@ All modes share one watch list. The top-right “＋” picks tasks and “⋯�
 
 - Sections: needs you → just finished → in progress → finished (collapsible).
 - Each row has a vertical status light on the left and a monospaced timer on the right; waiting and failed rows carry a tag. When no reliable start time exists it shows `--:--` instead of guessing.
-- With both Codex and Claude Code tasks present, each row is marked CX or CC.
+- With both Codex and Claude Code tasks present, each row starts with a CX or CC mark.
+- Within each section, rows are ordered by start time, newest first; new output never reorders rows, only a state change (waiting, finished) moves a task to another section.
 - Clicking a task opens it in the Codex or Claude desktop app.
 - Footer: toggle finished tasks on the left; the CX weekly limit and CC tokens used today on the right (a usage day starts at 12:00 noon local time, so late nights count toward the same day). Clicking CX or CC pulls a usage card out below the footer: limits (5-hour only when your plan has one), today's tokens vs. yesterday, input/cache/output breakdown, and a 7-day chart.
+
+### Device API
+
+- A local API on port 8770 offers status, tasks, usage, theme, and open-task endpoints, so LAN devices such as an M5Stack Tab5 can discover the Mac and read what the panel already computed with a 6-digit passcode. Only this Mac can read it until LAN access is turned on in Settings. See the [API reference](docs/REQ-005-设备读取接口/接口文档.md) (Chinese).
 
 ### Watch rules
 
