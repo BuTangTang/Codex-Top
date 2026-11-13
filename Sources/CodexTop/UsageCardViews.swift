@@ -62,6 +62,8 @@ struct UsagePill: View {
 struct UsageCard: View {
     @ObservedObject var store: TaskStore
     let origin: TaskOrigin
+    /// 设置“用量”页里不需要右上角的收起按钮。
+    var closable = true
     static let baseHeight: CGFloat = 260
     static let quotaRow: CGFloat = 26
 
@@ -75,7 +77,7 @@ struct UsageCard: View {
     var body: some View {
         let dark = store.theme.colorScheme == .dark
         ZStack(alignment: .top) {
-            UsageCardContent(store: store, origin: origin)
+            UsageCardContent(store: store, origin: origin, closable: closable)
                 .id(origin)
                 // CX 在左、CC 在右：切到 CC 新内容从右边滑进来、旧的往左出去，切回来反过来（2026-11-11 用户要切换动画）。
                 .transition(.offset(x: origin == .codex ? -36 : 36).combined(with: .opacity))
@@ -94,6 +96,7 @@ struct UsageCard: View {
 private struct UsageCardContent: View {
     @ObservedObject var store: TaskStore
     let origin: TaskOrigin
+    let closable: Bool
     private struct Segment { let label: String; let value: Int; let level: Double }
     @State private var revealed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -121,9 +124,11 @@ private struct UsageCardContent: View {
                     Button("用量网页") { store.openUsagePage() }.buttonStyle(QuietButtonStyle())
                         .font(.system(size: 12)).foregroundStyle(secondary).help("打开 Codex 官方用量网页")
                 }
-                Button { store.toggleUsageCard(origin) } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).frame(width: 20, height: 20)
-                }.buttonStyle(QuietButtonStyle()).foregroundStyle(secondary).help("收起")
+                if closable {
+                    Button { store.toggleUsageCard(origin) } label: {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).frame(width: 20, height: 20)
+                    }.buttonStyle(QuietButtonStyle()).foregroundStyle(secondary).help("收起")
+                }
             }.frame(height: 22)
             Group {
                 if origin == .codex, let quota = store.quota, !UsageText.windows(quota).isEmpty {

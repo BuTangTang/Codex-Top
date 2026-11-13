@@ -155,7 +155,8 @@ private struct OrbRevealOpacity: AnimatableModifier {
 }
 
 /// D-89 经典圆环收起后的样子：LED 点阵。白色是在跑的个数、琥珀等你回答、红失败；四周一圈暗灯，有任务在跑时 5 颗蓝灯顺时针绕圈。
-private struct LEDOrbContent: View {
+/// 悬浮球的点阵内容；设置“显示”页的实时预览也用它。
+struct LEDOrbContent: View {
     @ObservedObject var store: TaskStore
     var hovered: Bool
     var visible: Bool

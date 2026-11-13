@@ -179,6 +179,8 @@ import CodexTopCore
                 return
             }
             failures[host] = nil
+            // 设置“设备”页显示最近一次局域网读取（地址去掉网卡后缀）。
+            DeviceAccessMonitor.shared.lastRead = .init(host: String(host.split(separator: "%").first ?? Substring(host)), at: now)
         }
         // 局域网来的先过口令，再看地址和方法：没口令时连地址存不存在都不告诉。
         if let code = Self.openCode(path) {
